@@ -583,6 +583,7 @@
   }
 
   async function handleLlmSummarize() {
+    error = null
     try {
       if (selectedAsset) {
         await llmSummarizeAsset(selectedAsset.id)
@@ -591,10 +592,12 @@
       }
     } catch (e) {
       console.error('[LLM] summarize failed:', e)
+      error = translate('item.error.summarize')
     }
   }
 
   async function handleLlmCorrectOcr() {
+    error = null
     try {
       if (selectedAsset) {
         await llmCorrectOcrAsset(selectedAsset.id)
@@ -603,6 +606,7 @@
       }
     } catch (e) {
       console.error('[LLM] correct OCR failed:', e)
+      error = translate('item.error.correctOcr')
     }
   }
 

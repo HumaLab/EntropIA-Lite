@@ -6,6 +6,8 @@ const {
   nlpEventHandlers,
   embedAssetMock,
   extractTriplesMock,
+  llmSummarizeAssetMock,
+  llmCorrectOcrAssetMock,
   llmExtractTriplesMock,
   llmExtractTriplesAssetMock,
   similarAssetsMock,
@@ -17,6 +19,8 @@ const {
   nlpEventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   embedAssetMock: vi.fn<(_: string, __: string) => Promise<void>>(),
   extractTriplesMock: vi.fn<(_: string) => Promise<void>>(),
+  llmSummarizeAssetMock: vi.fn<(_: string) => Promise<void>>(),
+  llmCorrectOcrAssetMock: vi.fn<(_: string) => Promise<void>>(),
   llmExtractTriplesMock: vi.fn<(_: string) => Promise<void>>(),
   llmExtractTriplesAssetMock: vi.fn<(_: string) => Promise<void>>(),
   similarAssetsMock: vi.fn<
@@ -284,8 +288,8 @@ vi.mock('$lib/llm', async () => {
     llmSummarize: vi.fn().mockResolvedValue(undefined),
     llmCorrectOcr: vi.fn().mockResolvedValue(undefined),
     llmExtractTriples: llmExtractTriplesMock,
-    llmSummarizeAsset: vi.fn().mockResolvedValue(undefined),
-    llmCorrectOcrAsset: vi.fn().mockResolvedValue(undefined),
+    llmSummarizeAsset: llmSummarizeAssetMock,
+    llmCorrectOcrAsset: llmCorrectOcrAssetMock,
     llmExtractTriplesAsset: llmExtractTriplesAssetMock,
   }
 })
@@ -486,6 +490,8 @@ describe('ItemView header hierarchy', () => {
     nlpEventHandlers.clear()
     embedAssetMock.mockReset().mockResolvedValue(undefined)
     extractTriplesMock.mockReset().mockResolvedValue(undefined)
+    llmSummarizeAssetMock.mockReset().mockResolvedValue(undefined)
+    llmCorrectOcrAssetMock.mockReset().mockResolvedValue(undefined)
     llmExtractTriplesMock.mockReset().mockResolvedValue(undefined)
     llmExtractTriplesAssetMock.mockReset().mockResolvedValue(undefined)
     similarAssetsMock.mockReset().mockResolvedValue([])
@@ -2006,6 +2012,36 @@ describe('ItemView processing labels by asset type', () => {
     expect(screen.queryByRole('button', { name: 'PTT' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'PDFC' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'PDFR' })).not.toBeInTheDocument()
+  })
+
+  it('shows a visible error when summary generation fails', async () => {
+    llmSummarizeAssetMock.mockRejectedValueOnce(new Error('provider unavailable'))
+    await renderTextTabForAsset('image')
+    nlpEventHandlers.get('ocr:complete')?.({
+      payload: { asset_id: 'asset-image-1', method: 'paddle_vl', text_content: 'Texto OCR' },
+    })
+
+    const summarizeButton = await screen.findByRole('button', { name: 'OCRR' })
+    await waitFor(() => expect(summarizeButton).toBeEnabled())
+    await fireEvent.click(summarizeButton)
+
+    expect(llmSummarizeAssetMock).toHaveBeenCalledWith('asset-image-1')
+    expect(await screen.findByText('No se pudo generar el resumen.')).toBeInTheDocument()
+  })
+
+  it('shows a visible error when OCR correction fails', async () => {
+    llmCorrectOcrAssetMock.mockRejectedValueOnce(new Error('provider unavailable'))
+    await renderTextTabForAsset('image')
+    nlpEventHandlers.get('ocr:complete')?.({
+      payload: { asset_id: 'asset-image-1', method: 'paddle_vl', text_content: 'Texto OCR' },
+    })
+
+    const correctButton = await screen.findByRole('button', { name: 'OCRC' })
+    await waitFor(() => expect(correctButton).toBeEnabled())
+    await fireEvent.click(correctButton)
+
+    expect(llmCorrectOcrAssetMock).toHaveBeenCalledWith('asset-image-1')
+    expect(await screen.findByText('No se pudo corregir el texto con OCR.')).toBeInTheDocument()
   })
 
   it('uses PDF-specific labels and hides OCR wording for pdf assets', async () => {
