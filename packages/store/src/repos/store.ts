@@ -29,14 +29,9 @@ export interface StoreApi {
 }
 
 export async function initStore(): Promise<StoreApi> {
-  console.log('[store] initStore start')
   const client = createDbClient()
-  console.log('[store] client created')
   await runMigrations(client)
-  console.log('[store] migrations done')
   const db = createDrizzleClient(client)
-  console.log('[store] drizzle client created')
-  console.log('[store] store initialized, returning repos')
   return {
     collections: new CollectionRepo(db, client),
     items: new ItemRepo(db, client),

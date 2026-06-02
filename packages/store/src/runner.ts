@@ -425,7 +425,6 @@ function splitStatements(sql: string): string[] {
  * - On error: rolls back the transaction and rethrows with the migration name
  */
 export async function runMigrations(client: DbClient): Promise<void> {
-  console.log('[runner] runMigrations start')
   // Ensure tracking table exists (idempotent)
   await client.execute(`
     CREATE TABLE IF NOT EXISTS _migrations (
@@ -460,7 +459,6 @@ export async function runMigrations(client: DbClient): Promise<void> {
           } catch (stmtErr) {
             const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr)
             if (/duplicate column name/i.test(msg)) {
-              console.warn(`[runner] Skipping statement in "${name}" (column already exists)`)
               continue
             }
             throw stmtErr
