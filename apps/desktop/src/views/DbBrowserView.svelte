@@ -739,11 +739,9 @@
     gap: var(--space-4);
     padding: var(--space-4);
     border: 1px solid var(--color-border-subtle);
-    border-radius: var(--radius-lg);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 55%),
-      var(--color-surface-glass);
-    box-shadow: var(--shadow-sm);
+    border-radius: var(--radius-surface);
+    background: var(--color-surface-glass);
+    box-shadow: var(--shadow-surface);
   }
 
   .db-browser-card__meta {
@@ -775,7 +773,7 @@
     min-height: var(--control-height-sm);
     padding: 0 var(--space-3);
     border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-control);
     background: var(--color-surface-raised);
     color: var(--color-text-primary);
     font-size: var(--font-size-xs);

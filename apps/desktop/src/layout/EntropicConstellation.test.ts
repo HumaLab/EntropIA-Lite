@@ -24,12 +24,12 @@ describe('EntropicConstellation visual contract', () => {
     expect(canvas).toHaveAttribute('aria-hidden', 'true')
   })
 
-  it('keeps the main background dense, subtle and canvas-rendered', () => {
+  it('keeps the main background subdued and canvas-rendered', () => {
     const source = readSource()
 
-    expect(source).toContain('const MIN_NODES = 420')
-    expect(source).toContain('const MAX_NODES = 1200')
-    expect(source).toContain('const NODE_DENSITY = 2200')
+    expect(source).toContain('const MIN_NODES = 180')
+    expect(source).toContain('const MAX_NODES = 520')
+    expect(source).toContain('const NODE_DENSITY = 4200')
     expect(source).toContain("canvas.getContext('2d', { alpha: false })")
     expect(source).toContain('function buildSpatialGrid()')
     expect(source).toContain('function renderConstellation()')

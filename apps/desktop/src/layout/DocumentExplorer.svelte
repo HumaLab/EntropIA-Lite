@@ -832,7 +832,7 @@
     right: 3px;
     bottom: 8px;
     width: 1px;
-    border-radius: 999px;
+    border-radius: var(--radius-xs);
     background: transparent;
     transition: background-color var(--transition-base);
   }
@@ -868,7 +868,7 @@
 
   .explorer__scroll::-webkit-scrollbar-thumb {
     border: 2px solid transparent;
-    border-radius: 999px;
+    border-radius: var(--radius-xs);
     background: color-mix(in srgb, var(--color-text-muted) 52%, transparent);
     background-clip: padding-box;
   }
@@ -918,13 +918,7 @@
     top: -3px;
     bottom: -3px;
     width: 1px;
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      color-mix(in srgb, var(--color-border-subtle) 48%, transparent) 16%,
-      color-mix(in srgb, var(--color-border-subtle) 72%, transparent) 52%,
-      transparent 100%
-    );
+    background: color-mix(in srgb, var(--color-border-subtle) 58%, transparent);
   }
 
   .explorer__row::after {
@@ -932,11 +926,7 @@
     top: 50%;
     width: 8px;
     height: 1px;
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--color-border-subtle) 82%, transparent),
-      transparent
-    );
+    background: color-mix(in srgb, var(--color-border-subtle) 72%, transparent);
     transform: translateY(-0.5px);
   }
 
@@ -1039,7 +1029,7 @@
     top: 4px;
     bottom: 4px;
     width: 1px;
-    border-radius: 999px;
+    border-radius: var(--radius-xs);
     background: color-mix(in srgb, var(--color-accent) 70%, white 12%);
     opacity: 0;
     transform: scaleY(0.7);
@@ -1073,21 +1063,11 @@
   }
 
   .explorer__treeitem.is-active > .explorer__row::before {
-    background: linear-gradient(
-      180deg,
-      transparent 0%,
-      color-mix(in srgb, var(--color-accent) 24%, transparent) 18%,
-      color-mix(in srgb, var(--color-accent) 46%, transparent) 52%,
-      transparent 100%
-    );
+    background: color-mix(in srgb, var(--color-accent) 32%, transparent);
   }
 
   .explorer__treeitem.is-active > .explorer__row::after {
-    background: linear-gradient(
-      90deg,
-      color-mix(in srgb, var(--color-accent) 52%, transparent),
-      transparent
-    );
+    background: color-mix(in srgb, var(--color-accent) 38%, transparent);
   }
 
   .explorer__treeitem.is-active > .explorer__row > .explorer__chevron {

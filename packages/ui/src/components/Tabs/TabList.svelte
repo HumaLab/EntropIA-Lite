@@ -18,7 +18,7 @@
     min-height: 32px;
     padding: var(--space-1);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-input);
     background: var(--surface-input);
   }
 </style>

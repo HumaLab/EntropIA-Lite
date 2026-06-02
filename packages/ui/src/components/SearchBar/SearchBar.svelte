@@ -115,7 +115,7 @@
     padding: 0 var(--space-3);
     background-color: color-mix(in srgb, var(--color-surface-sunken) 88%, transparent);
     border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-input);
     transition:
       border-color var(--transition-smooth),
       box-shadow var(--transition-smooth),
@@ -165,7 +165,7 @@
     height: 24px;
     padding: 0;
     border: none;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-control);
     background-color: var(--color-accent-faint);
     color: var(--color-text-secondary);
     cursor: pointer;

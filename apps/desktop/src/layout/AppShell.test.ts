@@ -108,8 +108,8 @@ describe('AppShell', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'AppShell.svelte'), 'utf-8')
 
     expect(source).toContain('<EntropicConstellation />')
-    expect(source).toContain('color-mix(in srgb, var(--surface-app) 38%, transparent)')
-    expect(source).toContain('color-mix(in srgb, var(--surface-app) 28%, transparent)')
+    expect(source).toContain('color-mix(in srgb, var(--surface-app) 72%, transparent)')
+    expect(source).toContain('color-mix(in srgb, var(--surface-app) 42%, transparent)')
   })
 
   it('opens external links through the desktop bridge', async () => {

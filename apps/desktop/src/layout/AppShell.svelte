@@ -221,9 +221,7 @@
     flex: 1;
     min-height: 0;
     overflow: hidden;
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--surface-toolbar) 16%, transparent), transparent 22%),
-      color-mix(in srgb, var(--surface-app) 38%, transparent);
+    background: color-mix(in srgb, var(--surface-app) 72%, transparent);
   }
 
   /* ── Sidebar (Zotero-style, always visible) ── */
@@ -233,9 +231,7 @@
     width: 240px;
     flex-shrink: 0;
     border-right: 1px solid var(--border-subtle);
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--surface-glass) 64%, transparent), transparent 52%),
-      var(--surface-panel);
+    background: var(--surface-panel);
     overflow: hidden;
     transition: width var(--transition-base);
   }
@@ -317,10 +313,7 @@
     min-width: 0;
     overflow-y: auto;
     padding: 0 var(--space-5) var(--space-5);
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--surface-toolbar) 18%, transparent), transparent 20%),
-      linear-gradient(90deg, rgba(255, 255, 255, 0.012), transparent 18%),
-      color-mix(in srgb, var(--surface-app) 28%, transparent);
+    background: color-mix(in srgb, var(--surface-app) 42%, transparent);
   }
 
   /* ── Status bar (compact, replaces footer) ── */
@@ -331,8 +324,7 @@
     height: 26px;
     padding: 0 var(--space-3);
     border-top: 1px solid var(--border-subtle);
-    background:
-      linear-gradient(180deg, color-mix(in srgb, var(--surface-toolbar) 88%, transparent), var(--surface-input));
+    background: var(--surface-input);
     font-family: var(--font-mono);
     font-size: 0.6rem;
     color: var(--color-text-muted);

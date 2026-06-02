@@ -799,12 +799,10 @@
   .drop-hint {
     padding: var(--space-4);
     border: 1px dashed color-mix(in srgb, var(--color-accent) 44%, transparent);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-surface);
     color: var(--color-text-secondary);
     text-align: center;
-    background:
-      linear-gradient(180deg, var(--color-accent-faint), transparent),
-      var(--color-surface-sunken);
+    background: var(--color-surface-sunken);
   }
 
   .collection-view.drag-active {
@@ -826,11 +824,9 @@
   }
 
   .modal {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 58%),
-      var(--color-surface-glass);
+    background: var(--color-surface-glass);
     border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-dialog);
     padding: var(--space-6);
     max-width: 420px;
     width: 100%;
@@ -874,22 +870,21 @@
     height: var(--control-height-sm);
     padding: 0;
     border: 1px solid var(--color-danger);
-    border-radius: var(--radius-md);
-    background-color: var(--color-danger);
-    color: var(--color-bg);
+    border-radius: var(--radius-control);
+    background-color: var(--color-danger-soft);
+    color: var(--color-danger);
     cursor: pointer;
     transition:
       background-color var(--transition-smooth),
       border-color var(--transition-smooth),
-      box-shadow var(--transition-smooth),
-      transform var(--transition-smooth);
-    box-shadow: 0 8px 18px color-mix(in srgb, var(--color-danger) 18%, transparent);
+      box-shadow var(--transition-smooth);
+    box-shadow: none;
   }
 
   .modal-delete-button:hover:not(:disabled) {
     background-color: var(--color-danger-hover);
     border-color: var(--color-danger-hover);
-    transform: translateY(-1px);
+    color: var(--color-danger-hover);
   }
 
   .modal-delete-button:focus-visible {
@@ -900,7 +895,6 @@
   .modal-delete-button:disabled {
     opacity: 0.48;
     cursor: not-allowed;
-    transform: none;
   }
 
   @media (max-width: 720px) {

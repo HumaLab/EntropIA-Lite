@@ -344,7 +344,7 @@
     align-items: center;
     gap: 6px;
     padding: 2px var(--space-2);
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-control);
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-medium);
     font-family: var(--font-sans);
@@ -352,13 +352,11 @@
     border: none;
     transition:
       opacity 0.15s ease,
-      transform 0.1s ease,
       box-shadow 0.15s ease;
   }
 
   .entity-viewer__pill:hover {
     opacity: 0.85;
-    transform: scale(1.02);
   }
 
   .entity-viewer__pill:focus-visible {
@@ -393,11 +391,11 @@
     height: 18px;
     padding: 0 6px;
     border: none;
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    background: color-mix(in srgb, black 12%, white 72%);
+    background: color-mix(in srgb, var(--color-surface-elevated) 86%, transparent);
     color: inherit;
     cursor: pointer;
     opacity: 0;
@@ -414,12 +412,12 @@
   }
 
   .entity-viewer__delete:hover {
-    background: color-mix(in srgb, black 20%, white 68%);
+    background: var(--color-surface-elevated);
   }
 
   .entity-viewer__delete--pending {
-    background: var(--color-danger);
-    color: white;
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
     opacity: 1;
     transform: translateY(-50%) scale(1);
   }
@@ -439,33 +437,33 @@
 
   /* Color-coded pills per entity type */
   .entity-viewer__pill--person {
-    background-color: #dbeafe;
-    color: #1e40af;
+    background-color: color-mix(in srgb, var(--color-info) 12%, var(--surface-card));
+    color: var(--color-info);
   }
 
   .entity-viewer__pill--place {
-    background-color: #dcfce7;
-    color: #166534;
+    background-color: color-mix(in srgb, var(--color-success) 12%, var(--surface-card));
+    color: var(--color-success);
   }
 
   .entity-viewer__pill--date {
-    background-color: #fef9c3;
-    color: #854d0e;
+    background-color: color-mix(in srgb, var(--color-warning) 12%, var(--surface-card));
+    color: var(--color-warning);
   }
 
   .entity-viewer__pill--institution {
-    background-color: #fce7f3;
-    color: #9d174d;
+    background-color: color-mix(in srgb, var(--color-danger) 11%, var(--surface-card));
+    color: var(--color-danger);
   }
 
   .entity-viewer__pill--organization {
-    background-color: #ede9fe;
-    color: #5b21b6;
+    background-color: var(--color-accent-faint);
+    color: var(--color-accent-hover);
   }
 
   .entity-viewer__pill--misc {
-    background-color: #f3f4f6;
-    color: #374151;
+    background-color: var(--surface-card);
+    color: var(--color-text-secondary);
   }
 
   .entity-viewer__pill--custom {

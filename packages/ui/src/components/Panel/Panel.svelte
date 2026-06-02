@@ -29,7 +29,7 @@
     flex-direction: column;
     min-width: 0;
     border: 1px solid var(--border-panel);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-surface);
     color: var(--color-text-primary);
     transition:
       background-color var(--transition-base),
@@ -40,22 +40,22 @@
 
   .panel--default {
     background: var(--surface-panel);
-    box-shadow: var(--shadow-glow);
+    box-shadow: var(--shadow-surface);
   }
 
   .panel--raised {
     background: var(--surface-card);
     border-color: var(--border-subtle);
-    box-shadow: var(--shadow-glow);
+    box-shadow: var(--shadow-surface);
   }
 
   .panel--glass {
     background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.05), transparent 58%),
+      linear-gradient(180deg, rgba(255, 255, 255, 0.022), transparent 58%),
       color-mix(in srgb, var(--surface-glass) 88%, transparent);
     border-color: var(--border-subtle);
-    box-shadow: var(--shadow-glow);
-    backdrop-filter: blur(14px);
+    box-shadow: var(--shadow-surface);
+    backdrop-filter: blur(10px);
   }
 
   .panel--sunken {
@@ -66,13 +66,12 @@
 
   .panel--hoverable:hover {
     border-color: var(--color-border-strong);
-    box-shadow: var(--shadow-md);
-    transform: translateY(-1px);
+    box-shadow: var(--shadow-surface);
   }
 
   .panel--active {
     border-color: var(--border-focus);
-    box-shadow: var(--shadow-glow), var(--focus-ring);
+    box-shadow: var(--shadow-surface), var(--focus-ring);
   }
 
   .panel--padding-none {

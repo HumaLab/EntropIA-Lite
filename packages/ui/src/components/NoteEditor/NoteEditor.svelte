@@ -1112,14 +1112,9 @@
     gap: var(--space-4);
     padding: var(--space-4);
     border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
-    border-radius: var(--radius-xl);
-    background:
-      radial-gradient(circle at top, rgba(255, 255, 255, 0.035), transparent 32%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 100%),
-      color-mix(in srgb, var(--color-surface) 92%, black 8%);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.04),
-      0 24px 60px rgba(0, 0, 0, 0.38);
+    border-radius: var(--radius-dialog);
+    background: color-mix(in srgb, var(--color-surface) 92%, black 8%);
+    box-shadow: var(--shadow-lg);
   }
 
   .note-editor__modal-header {
@@ -1135,7 +1130,7 @@
     justify-content: center;
     width: 2.5rem;
     height: 2.5rem;
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-surface);
     border: 1px solid color-mix(in srgb, var(--color-border) 82%, transparent);
     background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface));
     color: var(--color-accent-hover);

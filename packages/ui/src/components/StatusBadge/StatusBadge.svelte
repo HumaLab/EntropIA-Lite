@@ -25,7 +25,7 @@
     width: fit-content;
     max-width: 100%;
     border: 1px solid transparent;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-control);
     font-family: var(--font-sans);
     font-weight: var(--font-weight-medium);
     line-height: var(--line-height-tight);

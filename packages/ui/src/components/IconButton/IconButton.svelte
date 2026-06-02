@@ -36,7 +36,7 @@
     flex-shrink: 0;
     padding: 0;
     border: 1px solid transparent;
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-control);
     color: var(--color-text-secondary);
     font-family: var(--font-sans);
     cursor: pointer;
@@ -44,13 +44,11 @@
       background-color var(--transition-base),
       border-color var(--transition-base),
       color var(--transition-base),
-      box-shadow var(--transition-base),
-      transform var(--transition-base);
+      box-shadow var(--transition-base);
   }
 
   .icon-button:hover:not(:disabled) {
     color: var(--color-text-primary);
-    transform: translateY(-1px);
   }
 
   .icon-button:focus-visible {
@@ -61,7 +59,6 @@
   .icon-button:disabled {
     cursor: not-allowed;
     opacity: 0.48;
-    transform: none;
   }
 
   .icon-button--sm {
@@ -97,7 +94,7 @@
   .icon-button--secondary:hover:not(:disabled),
   .icon-button--secondary.icon-button--active {
     border-color: var(--border-panel);
-    box-shadow: var(--shadow-sm);
+    background: var(--surface-card);
   }
 
   .icon-button--primary {

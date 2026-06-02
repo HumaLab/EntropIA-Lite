@@ -278,7 +278,7 @@
     gap: var(--space-1);
     padding: var(--space-2) var(--space-3);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-control);
     background-color: var(--color-surface);
     color: var(--color-text-primary);
     cursor: pointer;
@@ -296,7 +296,7 @@
   .audio-player__btn--play {
     width: 56px;
     height: 56px;
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-surface);
     font-size: var(--font-size-xl);
     border-color: var(--color-accent);
     background-color: var(--color-surface-raised);
@@ -312,7 +312,7 @@
     max-width: 480px;
     height: 6px;
     background-color: var(--color-border);
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-xs);
     cursor: pointer;
     position: relative;
     overflow: hidden;
@@ -325,7 +325,7 @@
   .audio-player__progress-fill {
     height: 100%;
     background-color: var(--color-accent);
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-xs);
     transition: width 0.1s linear;
   }
 

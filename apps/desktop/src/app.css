@@ -1,8 +1,8 @@
 /* Import design tokens */
 @import '@entropia/ui/tokens';
 
-/* Google Fonts (Poppins + Source Sans 3 + JetBrains Mono) */
-@import url('https://fonts.googleapis.com/css2?family=Poppins:wght@300;400;500;600;700&family=Source+Sans+3:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500&display=swap');
+/* Technical UI fonts (Geist Sans + Geist Mono, with Inter/JetBrains fallbacks) */
+@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;450;500;600;700&family=Geist+Mono:wght@400;450;500;600&display=swap');
 
 :root {
   --scrollbar-size: 7px;
@@ -44,8 +44,8 @@ body {
 
 body {
   background:
-    radial-gradient(circle at 16% -10%, rgba(174, 182, 216, 0.045), transparent 28%),
-    linear-gradient(180deg, var(--color-bg-ambient), var(--color-bg) 38%), var(--color-bg);
+    radial-gradient(circle at 18% -12%, rgba(154, 164, 199, 0.028), transparent 26%),
+    linear-gradient(180deg, var(--color-bg-ambient), var(--color-bg) 34%), var(--color-bg);
 }
 
 * {
@@ -108,7 +108,7 @@ h2,
 h3 {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: -0.02em;
+  letter-spacing: -0.025em;
 }
 
 h1 {
@@ -144,11 +144,7 @@ p {
   gap: var(--space-4);
   padding: var(--space-4) 0 var(--space-3);
   border-bottom: 1px solid var(--border-subtle);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--surface-toolbar) 20%, transparent),
-    transparent 76%
-  );
+  background: transparent;
 }
 
 .page-header__content {
@@ -162,9 +158,9 @@ p {
 .page-header__eyebrow {
   font-size: var(--font-size-xs);
   font-weight: var(--font-weight-medium);
-  letter-spacing: 0.08em;
+  letter-spacing: 0.075em;
   text-transform: uppercase;
-  color: var(--color-accent);
+  color: var(--color-text-muted);
 }
 
 .page-header__meta {
@@ -190,7 +186,7 @@ p {
 .surface-message {
   padding: var(--space-4);
   border: 1px solid var(--color-hairline);
-  border-radius: var(--radius-md);
+  border-radius: var(--radius-surface);
   background: var(--color-surface-glass);
   color: var(--color-text-secondary);
   box-shadow: var(--shadow-sm);

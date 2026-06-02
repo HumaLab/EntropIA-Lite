@@ -13,6 +13,8 @@ export type ActionIconName =
   | 'edit'
   | 'eraser'
   | 'expand'
+  | 'eye'
+  | 'eye-off'
   | 'file'
   | 'file-audio'
   | 'file-image'

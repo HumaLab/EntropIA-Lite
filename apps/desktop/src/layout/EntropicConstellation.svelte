@@ -10,10 +10,10 @@
     depth: number
   }
 
-  const MIN_NODES = 420
-  const MAX_NODES = 1200
-  const NODE_DENSITY = 2200
-  const LINK_DISTANCE = 118
+  const MIN_NODES = 180
+  const MAX_NODES = 520
+  const NODE_DENSITY = 4200
+  const LINK_DISTANCE = 104
   const GRID_SIZE = LINK_DISTANCE
   const MAX_DEVICE_PIXEL_RATIO = 1.35
   const CANVAS_OVERSCAN = 140
@@ -62,8 +62,8 @@
         id: index,
         x,
         y,
-        size: randomBetween(0.35, 1.1) + depth * 0.42,
-        alpha: randomBetween(0.045, 0.18) + depth * 0.07,
+        size: randomBetween(0.25, 0.78) + depth * 0.22,
+        alpha: randomBetween(0.018, 0.075) + depth * 0.028,
         depth,
       }
     })
@@ -103,8 +103,8 @@
     context.fillRect(0, 0, width, height)
 
     const haze = context.createRadialGradient(width * 0.5, height * 0.52, 0, width * 0.5, height * 0.52, width * 0.72)
-    haze.addColorStop(0, 'rgba(75, 83, 106, 0.08)')
-    haze.addColorStop(0.48, 'rgba(38, 44, 62, 0.045)')
+    haze.addColorStop(0, 'rgba(75, 83, 106, 0.035)')
+    haze.addColorStop(0.48, 'rgba(38, 44, 62, 0.022)')
     haze.addColorStop(1, 'rgba(8, 10, 16, 0)')
     context.fillStyle = haze
     context.fillRect(0, 0, width, height)
@@ -144,7 +144,7 @@
               const distance = Math.hypot(diffX, diffY)
               if (distance > LINK_DISTANCE) continue
 
-              const alpha = (1 - distance / LINK_DISTANCE) * 0.043 * (0.75 + (a.depth + b.depth) * 0.34)
+              const alpha = (1 - distance / LINK_DISTANCE) * 0.018 * (0.75 + (a.depth + b.depth) * 0.24)
               context.beginPath()
               context.moveTo(a.x, a.y)
               context.lineTo(b.x, b.y)
@@ -203,13 +203,13 @@
     pointer-events: none;
     transform-origin: center;
     background:
-      radial-gradient(circle at 50% 50%, rgba(46, 52, 70, 0.28), transparent 58%),
+      radial-gradient(circle at 50% 50%, rgba(46, 52, 70, 0.12), transparent 58%),
       linear-gradient(135deg, #080a10 0%, #0c0f17 48%, #10131b 100%);
     will-change: transform, opacity;
   }
 
   .constellation--motion {
-    animation: entropic-drift 96s linear infinite alternate;
+    animation: none;
   }
 
   @keyframes entropic-drift {

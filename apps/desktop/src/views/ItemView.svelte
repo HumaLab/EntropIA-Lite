@@ -3923,10 +3923,8 @@
     min-height: 0;
     padding: var(--space-2);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-xl);
-    background:
-      radial-gradient(circle at 48% -18%, color-mix(in srgb, var(--color-accent) 7%, transparent), transparent 42%),
-      var(--surface-app);
+    border-radius: var(--radius-dialog);
+    background: var(--surface-app);
   }
   :global(.left-panel) {
     display: flex;
@@ -3979,7 +3977,7 @@
     gap: var(--space-3);
     padding: var(--space-3);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-surface);
     background: var(--surface-panel);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
   }
@@ -4032,7 +4030,7 @@
     margin: 0 var(--space-3) var(--space-3);
     background: var(--surface-input);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-surface);
   }
   .right-panel-pane {
     display: flex;
@@ -4072,7 +4070,7 @@
     width: 20px;
     height: auto;
     flex-shrink: 0;
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-dialog);
     background: var(--surface-input);
     border: 1px solid var(--border-subtle);
     color: var(--color-text-muted);
@@ -4133,14 +4131,9 @@
     gap: var(--space-1);
     padding: var(--space-2);
     border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-lg);
-    background:
-      radial-gradient(circle at top left, rgba(255, 255, 255, 0.028), transparent 26%),
-      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 75%),
-      var(--color-surface);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.03),
-      0 6px 16px rgba(0, 0, 0, 0.08);
+    border-radius: var(--radius-surface);
+    background: var(--color-surface);
+    box-shadow: var(--shadow-surface);
   }
   .metadata-sections {
     display: flex;
@@ -4225,7 +4218,7 @@
     gap: var(--space-2);
     padding: 6px 10px;
     border: 1px solid var(--border-subtle);
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     background: var(--surface-input);
     color: var(--color-text-primary);
     font-size: var(--font-size-xs);
@@ -4252,7 +4245,7 @@
     justify-content: center;
     min-width: 22px;
     padding: 2px 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     background: var(--surface-card);
     font-variant-numeric: tabular-nums;
   }
@@ -4273,7 +4266,7 @@
     gap: var(--space-2);
     padding: 6px 10px;
     border: 1px solid var(--border-subtle);
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     background: var(--surface-input);
     color: var(--color-text-primary);
     font-size: var(--font-size-xs);
@@ -4300,7 +4293,7 @@
     justify-content: center;
     min-width: 22px;
     padding: 2px 6px;
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     background: var(--surface-card);
     font-variant-numeric: tabular-nums;
   }
@@ -4354,7 +4347,6 @@
     transition:
       border-color 0.15s ease,
       background-color 0.15s ease,
-      transform 0.15s ease,
       box-shadow 0.15s ease;
   }
   .layout-block-item:hover,
@@ -4367,13 +4359,8 @@
     border-color: var(--color-warning);
     background: color-mix(in srgb, var(--color-warning) 10%, var(--surface-card));
   }
-  .layout-block-item:hover,
-  .layout-block-item.hovered {
-    transform: translateY(-1px);
-  }
   .layout-block-item.selected {
-    transform: translateX(2px);
-    box-shadow: 0 12px 28px color-mix(in srgb, var(--color-accent) 12%, transparent);
+    box-shadow: var(--focus-ring);
   }
   .layout-block-item.fallback {
     border-style: dashed;
@@ -4417,7 +4404,7 @@
     display: inline-flex;
     align-items: center;
     padding: 2px 8px;
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     font-size: 10px;
     line-height: 1.2;
     border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--border-subtle));
@@ -4438,12 +4425,8 @@
     margin-top: var(--space-3);
     padding: var(--space-3);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--color-accent) 4%, var(--surface-card)) 0%,
-      var(--surface-card) 100%
-    );
+    border-radius: var(--radius-surface);
+    background: var(--surface-card);
   }
   .layout-inspector__header {
     display: flex;
@@ -4529,7 +4512,7 @@
     align-items: center;
     width: fit-content;
     padding: 4px 10px;
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     background: color-mix(in srgb, var(--color-accent) 12%, var(--surface-card));
     border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--border-subtle));
   }
@@ -4660,9 +4643,7 @@
     padding: var(--space-2) var(--space-3);
     border: 1px solid var(--color-hairline);
     border-radius: var(--radius-md);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 58%),
-      var(--color-surface);
+    background: var(--color-surface);
   }
   .note-row {
     display: grid;
@@ -4799,9 +4780,7 @@
     padding: var(--space-4);
   }
   .modal {
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 58%),
-      var(--color-surface-glass);
+    background: var(--color-surface-glass);
     border: 1px solid var(--color-hairline);
     border-radius: var(--radius-lg);
     padding: var(--space-6);
@@ -4860,22 +4839,21 @@
     width: var(--control-height-sm);
     height: var(--control-height-sm);
     padding: 0;
-    border: 1px solid var(--color-danger);
-    border-radius: var(--radius-md);
-    background-color: var(--color-danger);
-    color: var(--color-bg);
+    border: 1px solid color-mix(in srgb, var(--color-danger) 34%, transparent);
+    border-radius: var(--radius-control);
+    background-color: var(--color-danger-soft);
+    color: var(--color-danger);
     cursor: pointer;
     transition:
       background-color var(--transition-smooth),
       border-color var(--transition-smooth),
-      box-shadow var(--transition-smooth),
-      transform var(--transition-smooth);
-    box-shadow: 0 8px 18px color-mix(in srgb, var(--color-danger) 18%, transparent);
+      box-shadow var(--transition-smooth);
+    box-shadow: none;
   }
   .modal-delete-button:hover:not(:disabled) {
     background-color: var(--color-danger-hover);
     border-color: var(--color-danger-hover);
-    transform: translateY(-1px);
+    color: var(--color-danger-hover);
   }
   .modal-delete-button:focus-visible {
     outline: none;
@@ -4884,7 +4862,6 @@
   .modal-delete-button:disabled {
     opacity: 0.48;
     cursor: not-allowed;
-    transform: none;
   }
   .empty-text {
     color: var(--color-text-secondary);
@@ -4917,14 +4894,12 @@
   /* ── OCR UI ── */
   .ocr-item {
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-surface);
     padding: var(--space-3);
     display: flex;
     flex-direction: column;
     gap: var(--space-2);
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.035), transparent 70%),
-      var(--surface-card);
+    background: var(--surface-card);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
   }
   .ocr-item-header {
@@ -4961,7 +4936,7 @@
     padding: var(--space-1) var(--space-3);
     font-size: var(--font-size-xs);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-full);
+    border-radius: var(--radius-control);
     background: var(--surface-card);
     color: var(--color-text-primary);
     cursor: pointer;
@@ -5114,9 +5089,7 @@
     border-top: none;
     border-radius: 0 0 var(--radius-md) var(--radius-md);
     overflow: hidden;
-    background:
-      linear-gradient(180deg, rgba(255, 255, 255, 0.018), transparent 75%),
-      var(--surface-card);
+    background: var(--surface-card);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
   }
 
@@ -5334,10 +5307,8 @@
   .similar-item {
     padding: 0;
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    background:
-      linear-gradient(135deg, rgba(255, 255, 255, 0.035), rgba(255, 255, 255, 0.008)),
-      var(--surface-card);
+    border-radius: var(--radius-surface);
+    background: var(--surface-card);
     overflow: hidden;
     transition:
       background var(--transition-smooth),
@@ -5466,7 +5437,7 @@
     color: var(--color-text-primary);
     background: var(--surface-input);
     border: 1px solid var(--border-subtle);
-    border-radius: 999px;
+    border-radius: var(--radius-control);
     padding: 2px 7px;
     white-space: nowrap;
     font-weight: var(--font-weight-semibold);

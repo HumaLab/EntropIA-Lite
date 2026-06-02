@@ -32,7 +32,7 @@
     min-height: 28px;
     padding: 0 var(--space-3);
     border: 1px solid transparent;
-    border-radius: calc(var(--radius-md) - 3px);
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-text-secondary);
     font-family: var(--font-sans);
@@ -66,6 +66,6 @@
     color: var(--color-text-primary);
     background: var(--surface-card);
     border-color: var(--border-panel);
-    box-shadow: var(--shadow-sm);
+    box-shadow: none;
   }
 </style>
