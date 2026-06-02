@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CollectionView from './CollectionView.svelte'
 import { locale } from '$lib/i18n'
 
-const { storeRef, navigationRef } = vi.hoisted(() => ({
+const { storeRef, navigationRef, fileImportRef, dragDropRef } = vi.hoisted(() => ({
   storeRef: {
     current: {
       items: {
@@ -25,6 +25,19 @@ const { storeRef, navigationRef } = vi.hoisted(() => ({
   navigationRef: {
     current: { name: 'collection', collectionName: 'Colección' } as const,
     navigate: vi.fn(),
+  },
+  fileImportRef: {
+    pickFiles: vi.fn(),
+    classifyFiles: vi.fn(),
+    importSingleFile: vi.fn(),
+    isScannedPdf: vi.fn(),
+    renderPdfPages: vi.fn(),
+  },
+  dragDropRef: {
+    onDragDropEvent: vi.fn(),
+    handler: undefined as
+      | ((event: { payload: { type: string; paths?: string[] } }) => void)
+      | undefined,
   },
 }))
 
@@ -84,6 +97,11 @@ vi.mock('$lib/navigation', () => ({
 }))
 
 vi.mock('$lib/file-import', () => ({
+  pickFiles: fileImportRef.pickFiles,
+  classifyFiles: fileImportRef.classifyFiles,
+  importSingleFile: fileImportRef.importSingleFile,
+  isScannedPdf: fileImportRef.isScannedPdf,
+  renderPdfPages: fileImportRef.renderPdfPages,
   pickAndImportFiles: vi.fn().mockResolvedValue([]),
   importFilesFromPaths: vi
     .fn()
@@ -100,9 +118,26 @@ vi.mock('$lib/export', () => ({
 
 vi.mock('@tauri-apps/api/webview', () => ({
   getCurrentWebview: vi.fn(() => ({
-    onDragDropEvent: vi.fn().mockResolvedValue(vi.fn()),
+    onDragDropEvent: dragDropRef.onDragDropEvent,
   })),
 }))
+
+beforeEach(() => {
+  fileImportRef.pickFiles.mockReset()
+  fileImportRef.classifyFiles.mockReset()
+  fileImportRef.importSingleFile.mockReset()
+  fileImportRef.isScannedPdf.mockReset()
+  fileImportRef.renderPdfPages.mockReset()
+  fileImportRef.pickFiles.mockResolvedValue([])
+  fileImportRef.classifyFiles.mockReturnValue({ classified: [], rejected: [] })
+  fileImportRef.isScannedPdf.mockResolvedValue(false)
+  dragDropRef.handler = undefined
+  dragDropRef.onDragDropEvent.mockReset()
+  dragDropRef.onDragDropEvent.mockImplementation((handler) => {
+    dragDropRef.handler = handler
+    return Promise.resolve(vi.fn())
+  })
+})
 
 describe('CollectionView consumer compatibility', () => {
   beforeEach(() => {
@@ -245,6 +280,115 @@ describe('CollectionView consumer compatibility', () => {
     await waitFor(() => {
       expect(screen.getByText('Acta nueva')).toBeInTheDocument()
       expect(screen.queryByText('Acta vieja')).not.toBeInTheDocument()
+    })
+  })
+})
+
+describe('CollectionView import flow', () => {
+  beforeEach(() => {
+    locale.set('es')
+    vi.useFakeTimers()
+    navigationRef.navigate.mockReset()
+    navigationRef.current = { name: 'collection', collectionName: 'Colección' }
+    storeRef.current = createStore([])
+    storeRef.current.items.create = vi.fn().mockResolvedValue({ id: 'item-new' })
+    storeRef.current.items.update = vi.fn().mockResolvedValue(undefined)
+    storeRef.current.items.delete = vi.fn().mockResolvedValue(undefined)
+    storeRef.current.assets.create = vi.fn().mockResolvedValue({ id: 'asset-new' })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function mockImageImport(sourcePath = 'C:\\tmp\\photo.png') {
+    fileImportRef.classifyFiles.mockReturnValue({
+      classified: [{ sourcePath, name: 'photo.png', type: 'image' }],
+      rejected: [],
+    })
+    fileImportRef.importSingleFile.mockResolvedValue({
+      originalName: 'photo.png',
+      originalPath: sourcePath,
+      destPath: 'C:\\app-data\\assets\\col-1\\item-new\\photo.png',
+      type: 'image',
+      size: 123,
+      originalMetadata: {
+        originalName: 'photo.png',
+        originalPath: sourcePath,
+        importedAt: '2026-06-02T00:00:00.000Z',
+        sizeBytes: 123,
+      },
+    })
+  }
+
+  it('imports picker-selected paths through the shared item/asset workflow', async () => {
+    const sourcePath = 'C:\\tmp\\photo.png'
+    fileImportRef.pickFiles.mockResolvedValue([sourcePath])
+    mockImageImport(sourcePath)
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Importar documento/ }))
+
+    await waitFor(() => {
+      expect(fileImportRef.classifyFiles).toHaveBeenCalledWith([sourcePath])
+      expect(storeRef.current.items.create).toHaveBeenCalledWith({
+        title: 'photo',
+        collectionId: 'col-1',
+        metadata: null,
+      })
+      expect(fileImportRef.importSingleFile).toHaveBeenCalledWith(sourcePath, 'col-1', 'item-new')
+      expect(storeRef.current.assets.create).toHaveBeenCalledWith({
+        itemId: 'item-new',
+        path: 'C:\\app-data\\assets\\col-1\\item-new\\photo.png',
+        type: 'image',
+        size: 123,
+        sortIndex: 0,
+      })
+      expect(navigationRef.navigate).toHaveBeenCalledWith({
+        name: 'item',
+        collectionId: 'col-1',
+        collectionName: 'Colección',
+        itemId: 'item-new',
+        itemTitle: 'photo',
+      })
+    })
+  })
+
+  it('imports dropped paths through the same item/asset workflow', async () => {
+    const sourcePath = 'C:\\tmp\\photo.png'
+    mockImageImport(sourcePath)
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await waitFor(() => {
+      expect(dragDropRef.handler).toBeDefined()
+    })
+
+    dragDropRef.handler?.({ payload: { type: 'drop', paths: [sourcePath] } })
+
+    await waitFor(() => {
+      expect(fileImportRef.classifyFiles).toHaveBeenCalledWith([sourcePath])
+      expect(storeRef.current.items.create).toHaveBeenCalledWith({
+        title: 'photo',
+        collectionId: 'col-1',
+        metadata: null,
+      })
+      expect(fileImportRef.importSingleFile).toHaveBeenCalledWith(sourcePath, 'col-1', 'item-new')
+      expect(storeRef.current.assets.create).toHaveBeenCalledWith({
+        itemId: 'item-new',
+        path: 'C:\\app-data\\assets\\col-1\\item-new\\photo.png',
+        type: 'image',
+        size: 123,
+        sortIndex: 0,
+      })
+      expect(navigationRef.navigate).toHaveBeenCalledWith({
+        name: 'item',
+        collectionId: 'col-1',
+        collectionName: 'Colección',
+        itemId: 'item-new',
+        itemTitle: 'photo',
+      })
     })
   })
 })

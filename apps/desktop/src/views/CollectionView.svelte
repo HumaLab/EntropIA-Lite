@@ -278,39 +278,20 @@
     return `${baseMessage} (${stage}): ${getErrorDetails(e)}`
   }
 
-  async function handleImport() {
-    importing = true
-    error = null
-    importNotice = null
+  async function importClassifiedPaths(paths: string[], baseErrorMessage: string) {
     const store = getStore()
 
-    // Step 1: Open file picker — get raw paths BEFORE creating any items
-    let selectedPaths: string[]
-    try {
-      selectedPaths = await pickFiles()
-    } catch (e) {
-      error = formatImportStageError('Failed to import files', 'selecting files', e)
-      importing = false
-      return
-    }
-
-    if (selectedPaths.length === 0) {
-      importing = false
-      return
-    }
-
-    // Step 2: Classify files (no DB or FS side effects yet)
-    const { classified, rejected } = classifyFiles(selectedPaths)
+    // Classify files before creating items or copying assets.
+    const { classified, rejected } = classifyFiles(paths)
 
     if (classified.length === 0) {
       if (rejected.length > 0) {
         error = `Unsupported format: ${rejected.join(', ')}`
       }
-      importing = false
       return
     }
 
-    // Step 3: Create one item per file, copy file, create asset
+    // Create one item per file, copy file, create asset.
     const createdItemIds: string[] = []
     let importError: string | null = null
 
@@ -324,7 +305,7 @@
         })
         itemId = item.id
       } catch (e) {
-        importError = formatImportStageError('Failed to import files', 'creating item', e)
+        importError = formatImportStageError(baseErrorMessage, 'creating item', e)
         break
       }
 
@@ -340,7 +321,7 @@
         } catch {
           // ignore cleanup errors
         }
-        importError = formatImportStageError('Failed to import files', `importing ${file.name}`, e)
+        importError = formatImportStageError(baseErrorMessage, `importing ${file.name}`, e)
         break
       }
     }
@@ -379,7 +360,29 @@
     if (importError && createdItemIds.length === 0) {
       error = importError
     }
+  }
 
+  async function handleImport() {
+    importing = true
+    error = null
+    importNotice = null
+
+    // Open file picker — get raw paths BEFORE creating any items.
+    let selectedPaths: string[]
+    try {
+      selectedPaths = await pickFiles()
+    } catch (e) {
+      error = formatImportStageError('Failed to import files', 'selecting files', e)
+      importing = false
+      return
+    }
+
+    if (selectedPaths.length === 0) {
+      importing = false
+      return
+    }
+
+    await importClassifiedPaths(selectedPaths, 'Failed to import files')
     importing = false
   }
 
@@ -387,93 +390,8 @@
     importing = true
     error = null
     importNotice = null
-    const store = getStore()
 
-    // Step 1: Classify dropped files (no DB or FS side effects yet)
-    const { classified, rejected } = classifyFiles(paths)
-
-    if (classified.length === 0) {
-      if (rejected.length > 0) {
-        error = `Unsupported format: ${rejected.join(', ')}`
-      }
-      importing = false
-      dragActive = false
-      return
-    }
-
-    // Step 2: Create one item per file, copy file, create asset
-    const createdItemIds: string[] = []
-    let importError: string | null = null
-
-    for (const file of classified) {
-      let itemId: string
-      try {
-        const item = await store.items.create({
-          title: file.name.replace(/\.[^.]+$/, ''),
-          collectionId,
-          metadata: null,
-        })
-        itemId = item.id
-      } catch (e) {
-        importError = formatImportStageError('Failed to import dropped files', 'creating item', e)
-        break
-      }
-
-      try {
-        const imported = await importSingleFile(file.sourcePath, collectionId, itemId)
-        await store.items.update(itemId, { metadata: buildImportedItemMetadata(imported) })
-        await finalizeImportedItem(itemId, imported)
-        createdItemIds.push(itemId)
-      } catch (e) {
-        try {
-          await store.items.delete(itemId)
-        } catch {
-          // ignore cleanup errors
-        }
-        importError = formatImportStageError(
-          'Failed to import dropped files',
-          `importing ${file.name}`,
-          e
-        )
-        break
-      }
-    }
-
-    await loadItems()
-
-    // Navigate to the last created item
-    if (createdItemIds.length > 0) {
-      const lastItemId = createdItemIds[createdItemIds.length - 1]!
-      const lastFile = classified[classified.length - 1]!
-      navigation.navigate({
-        name: 'item',
-        collectionId,
-        collectionName:
-          navigation.current.name === 'collection'
-            ? (navigation.current as { collectionName: string }).collectionName
-            : '',
-        itemId: lastItemId,
-        itemTitle: lastFile.name.replace(/\.[^.]+$/, ''),
-      })
-    }
-
-    // Build notice
-    const noticeParts: string[] = []
-    if (rejected.length > 0) {
-      noticeParts.push(`${rejected.length} unsupported skipped: ${rejected.join(', ')}`)
-    }
-    if (importError) {
-      noticeParts.push(`error: ${importError}`)
-    }
-    importNotice =
-      noticeParts.length > 0
-        ? `${createdItemIds.length} imported (${noticeParts.join(' · ')})`
-        : null
-
-    if (importError && createdItemIds.length === 0) {
-      error = importError
-    }
-
+    await importClassifiedPaths(paths, 'Failed to import dropped files')
     importing = false
     dragActive = false
   }
