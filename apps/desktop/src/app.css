@@ -1,8 +1,7 @@
 /* Import design tokens */
 @import '@entropia/ui/tokens';
 
-/* Technical UI fonts (Geist Sans + Geist Mono, with Inter/JetBrains fallbacks) */
-@import url('https://fonts.googleapis.com/css2?family=Geist:wght@400;450;500;600;700&family=Geist+Mono:wght@400;450;500;600&display=swap');
+/* Typography uses the local/system stacks declared in design tokens. */
 
 :root {
   --scrollbar-size: 7px;

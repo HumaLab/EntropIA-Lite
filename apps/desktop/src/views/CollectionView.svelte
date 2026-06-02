@@ -548,7 +548,8 @@
       }
     }
 
-    // Step 2: Try DB cleanup — non-blocking
+    // Step 2: Try DB cleanup — non-blocking, but keep the warning visible if it fails.
+    let dbCleanupFailed = false
     try {
       if (isLastAsset) {
         await store.items.deleteWithCascade(pendingDeleteItemId)
@@ -558,9 +559,9 @@
     } catch (e) {
       // Log DB error but do NOT block UI update
       const message = e instanceof Error ? e.message : String(e)
-      console.error('[CollectionView] DB cleanup failed (UI will still update):', message)
-      // Show a subtle warning in the error field but still close the dialog
+      console.error('[CollectionView] DB cleanup failed:', message)
       deleteError = t('collection.error.fileRemovedDbFailed', { message })
+      dbCleanupFailed = true
     }
 
     // Step 2b: Clean up cached PDF thumbnail if the asset was a PDF
@@ -573,7 +574,13 @@
       }
     }
 
-    // Step 3: Always update UI — remove card or refresh meta
+    if (dbCleanupFailed) {
+      await loadItems()
+      deleting = false
+      return
+    }
+
+    // Step 3: Update UI after confirmed DB cleanup
     if (isLastAsset) {
       items = items.filter((i) => i.id !== pendingDeleteItemId)
       const newMeta = new Map(itemAssetMeta)
@@ -583,7 +590,7 @@
       await loadItemAssets([pendingDeleteItemId])
     }
 
-    // Step 4: Close dialog (even if DB failed — file is gone, UI is updated)
+    // Step 4: Close only on full success.
     handleDeleteCancel()
     deleting = false
   }
@@ -882,7 +889,7 @@
   }
 
   .modal-delete-button:hover:not(:disabled) {
-    background-color: var(--color-danger-hover);
+    background-color: var(--color-danger-soft);
     border-color: var(--color-danger-hover);
     color: var(--color-danger-hover);
   }

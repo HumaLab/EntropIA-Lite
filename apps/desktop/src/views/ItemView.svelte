@@ -4851,7 +4851,7 @@
     box-shadow: none;
   }
   .modal-delete-button:hover:not(:disabled) {
-    background-color: var(--color-danger-hover);
+    background-color: var(--color-danger-soft);
     border-color: var(--color-danger-hover);
     color: var(--color-danger-hover);
   }

@@ -4,6 +4,15 @@ import TopBar from './TopBar.svelte'
 import { locale } from '$lib/i18n'
 import type { View } from '$lib/navigation'
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  const promise = new Promise<T>((res) => {
+    resolve = res
+  })
+
+  return { promise, resolve }
+}
+
 type NavigationSnapshot = {
   history: View[]
   current: View
@@ -229,6 +238,48 @@ describe('TopBar', () => {
       itemId: 'item-1',
       itemTitle: 'Acta fundacional',
     })
+  })
+
+  it('ignores stale global search results when a newer query finishes first', async () => {
+    const firstSearch = deferred<Array<{ id: string; title: string; collectionId: string }>>()
+    const secondSearch = deferred<Array<{ id: string; title: string; collectionId: string }>>()
+
+    storeRef.current.items.searchGlobal
+      .mockReturnValueOnce(firstSearch.promise)
+      .mockReturnValueOnce(secondSearch.promise)
+    storeRef.current.collections.findById.mockResolvedValue({
+      id: 'col-1',
+      name: 'Archivo',
+    })
+
+    render(TopBar)
+
+    const input = screen.getByRole('searchbox', { name: 'Buscar archivos' })
+    await fireEvent.input(input, { target: { value: 'acta' } })
+    vi.advanceTimersByTime(300)
+
+    await waitFor(() => {
+      expect(storeRef.current.items.searchGlobal).toHaveBeenCalledWith('acta', 20)
+    })
+
+    await fireEvent.input(input, { target: { value: 'vigente' } })
+    vi.advanceTimersByTime(300)
+
+    secondSearch.resolve([
+      { id: 'item-new', title: 'Acta vigente', collectionId: 'col-1' },
+    ])
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
+    })
+
+    firstSearch.resolve([
+      { id: 'item-old', title: 'Acta vieja', collectionId: 'col-1' },
+    ])
+    await Promise.resolve()
+
+    expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /Acta vieja/i })).not.toBeInTheDocument()
   })
 
   it('renders sibling document controls and replaces navigation within the same collection', async () => {

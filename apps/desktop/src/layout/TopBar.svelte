@@ -28,6 +28,7 @@
   let nextItem = $state<Item | null>(null)
   let theme = $state<AppTheme>('dark')
   let siblingRequestId = 0
+  let searchRequestId = 0
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let searchInputEl: HTMLInputElement | undefined = $state()
   const currentLocale = locale
@@ -154,7 +155,11 @@
     void loadSiblingItems()
   })
 
-  async function performSearch(query: string) {
+  async function performSearch(query: string, requestId: number) {
+    const isCurrentRequest = () => requestId === searchRequestId
+
+    if (!isCurrentRequest()) return
+
     if (!query.trim()) {
       searchResults = []
       showResults = false
@@ -165,6 +170,8 @@
     try {
       const store = getStore()
       const matchedItems = await store.items.searchGlobal(query, 20)
+      if (!isCurrentRequest()) return
+
       const results: SearchResult[] = []
 
       // Cache collections to avoid repeated lookups
@@ -173,6 +180,7 @@
         let collection = collectionCache.get(item.collectionId)
         if (!collection) {
           const found = await store.collections.findById(item.collectionId)
+          if (!isCurrentRequest()) return
           if (!found) continue
           collection = found
           collectionCache.set(item.collectionId, collection)
@@ -183,10 +191,11 @@
       searchResults = results
       showResults = true
     } catch (e) {
+      if (!isCurrentRequest()) return
       console.error('[Search] error:', e)
       searchResults = []
     } finally {
-      searching = false
+      if (isCurrentRequest()) searching = false
     }
   }
 
@@ -197,6 +206,7 @@
   function handleSearchValueChange(query: string, e: Event) {
     searchQuery = query
     handleInput()
+    const requestId = ++searchRequestId
 
     if (!searchQuery.trim()) {
       searchResults = []
@@ -205,11 +215,12 @@
     }
 
     debounceTimer = setTimeout(() => {
-      performSearch(searchQuery)
+      performSearch(searchQuery, requestId)
     }, 300)
   }
 
   function handleClear() {
+    searchRequestId += 1
     searchQuery = ''
     searchResults = []
     showResults = false
@@ -694,10 +705,10 @@
     left: 0;
     right: 0;
     margin-top: var(--space-1);
-    background: var(--surface-overlay);
+    background: color-mix(in srgb, var(--color-surface-elevated) 96%, var(--color-bg));
     border: 1px solid var(--border-panel);
     border-radius: var(--radius-dialog);
-    box-shadow: var(--shadow-lg, 0 8px 24px rgba(0, 0, 0, 0.15));
+    box-shadow: var(--shadow-lg);
     max-height: 320px;
     overflow-y: auto;
     z-index: 200;

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SettingsView from './SettingsView.svelte'
 import { locale } from '$lib/i18n'
@@ -64,8 +64,8 @@ describe('SettingsView', () => {
     expect(
       screen.getByText('EntropIA Lite usa APIs remotas: OpenRouter, GLM-OCR y AssemblyAI.')
     ).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'APIs remotas' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Logs' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'APIs remotas' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Dependencias de IA' })).not.toBeInTheDocument()
   })
 
@@ -111,5 +111,21 @@ describe('SettingsView', () => {
     expect(settingsSetMock).toHaveBeenCalledWith('llm_mode', 'openrouter')
     expect(settingsSetMock).toHaveBeenCalledWith('stt_mode', 'assemblyai')
     expect(settingsSetMock).toHaveBeenCalledWith('ocrh_mode', 'glm_ocr')
+  })
+
+  it('shows a retryable error when initial settings fail to load', async () => {
+    settingsGetMock.mockRejectedValueOnce(new Error('credential store unavailable'))
+
+    render(SettingsView)
+
+    expect(
+      await screen.findByText(
+        'No se pudo cargar la configuración guardada: credential store unavailable'
+      )
+    ).toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Reintentar carga' }))
+
+    expect(await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)).toBeInTheDocument()
   })
 })

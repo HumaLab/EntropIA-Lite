@@ -12,7 +12,7 @@
     DEFAULT_OPENROUTER_EMBEDDING_MODEL,
     type ModelInfo,
   } from '$lib/settings'
-  import { ActionIcon, Button, Card, Input } from '@entropia/ui'
+  import { ActionIcon, Button, Card, Input, TabButton, TabList } from '@entropia/ui'
   import LogsTab from './LogsTab.svelte'
 
   let activeTab = $state<'api' | 'logs'>('api')
@@ -38,6 +38,7 @@
   let testingGlmOcr = $state(false)
   let glmOcrTestResult = $state<{ success: boolean; message: string } | null>(null)
   let availableModels = $state<ModelInfo[]>([])
+  let loadSettingsError = $state<string | null>(null)
 
   const SECRET_REF_PREFIX = 'secret_ref:'
   const PROVIDER_LINKS = {
@@ -52,45 +53,55 @@
 
   const activeLocale = $derived($locale)
 
-  onMount(async () => {
-    const [
-      storedKey,
-      storedModel,
-      storedEmbeddingModel,
-      storedAssemblyAiKey,
-      storedGlmOcrKey,
-    ] = await Promise.all([
-      settingsGet(SETTINGS_KEYS.OPENROUTER_API_KEY),
-      settingsGet(SETTINGS_KEYS.OPENROUTER_MODEL),
-      settingsGet(SETTINGS_KEYS.OPENROUTER_EMBEDDING_MODEL),
-      settingsGet(SETTINGS_KEYS.ASSEMBLYAI_API_KEY),
-      settingsGet(SETTINGS_KEYS.GLM_OCR_API_KEY),
-    ])
-
-    if (storedKey?.startsWith(SECRET_REF_PREFIX)) {
-      apiKey = ''
-      maskedApiKey = 'Clave guardada en Windows Credential Manager'
-    } else if (storedKey) {
-      apiKey = storedKey
-      maskedApiKey = maskKey(storedKey)
-    }
-    if (storedModel) model = storedModel
-    if (storedEmbeddingModel) embeddingModel = storedEmbeddingModel
-    if (storedAssemblyAiKey?.startsWith(SECRET_REF_PREFIX)) {
-      assemblyAiApiKey = ''
-      maskedAssemblyAiApiKey = 'Clave guardada en Windows Credential Manager'
-    } else if (storedAssemblyAiKey) {
-      assemblyAiApiKey = storedAssemblyAiKey
-      maskedAssemblyAiApiKey = maskKey(storedAssemblyAiKey, 5)
-    }
-    if (storedGlmOcrKey?.startsWith(SECRET_REF_PREFIX)) {
-      glmOcrApiKey = ''
-      maskedGlmOcrApiKey = 'Clave guardada en Windows Credential Manager'
-    } else if (storedGlmOcrKey) {
-      glmOcrApiKey = storedGlmOcrKey
-      maskedGlmOcrApiKey = maskKey(storedGlmOcrKey, 0)
-    }
+  onMount(() => {
+    void loadInitialSettings()
   })
+
+  async function loadInitialSettings() {
+    loadSettingsError = null
+
+    try {
+      const [
+        storedKey,
+        storedModel,
+        storedEmbeddingModel,
+        storedAssemblyAiKey,
+        storedGlmOcrKey,
+      ] = await Promise.all([
+        settingsGet(SETTINGS_KEYS.OPENROUTER_API_KEY),
+        settingsGet(SETTINGS_KEYS.OPENROUTER_MODEL),
+        settingsGet(SETTINGS_KEYS.OPENROUTER_EMBEDDING_MODEL),
+        settingsGet(SETTINGS_KEYS.ASSEMBLYAI_API_KEY),
+        settingsGet(SETTINGS_KEYS.GLM_OCR_API_KEY),
+      ])
+
+      if (storedKey?.startsWith(SECRET_REF_PREFIX)) {
+        apiKey = ''
+        maskedApiKey = 'Clave guardada en Windows Credential Manager'
+      } else if (storedKey) {
+        apiKey = storedKey
+        maskedApiKey = maskKey(storedKey)
+      }
+      if (storedModel) model = storedModel
+      if (storedEmbeddingModel) embeddingModel = storedEmbeddingModel
+      if (storedAssemblyAiKey?.startsWith(SECRET_REF_PREFIX)) {
+        assemblyAiApiKey = ''
+        maskedAssemblyAiApiKey = 'Clave guardada en Windows Credential Manager'
+      } else if (storedAssemblyAiKey) {
+        assemblyAiApiKey = storedAssemblyAiKey
+        maskedAssemblyAiApiKey = maskKey(storedAssemblyAiKey, 5)
+      }
+      if (storedGlmOcrKey?.startsWith(SECRET_REF_PREFIX)) {
+        glmOcrApiKey = ''
+        maskedGlmOcrApiKey = 'Clave guardada en Windows Credential Manager'
+      } else if (storedGlmOcrKey) {
+        glmOcrApiKey = storedGlmOcrKey
+        maskedGlmOcrApiKey = maskKey(storedGlmOcrKey, 0)
+      }
+    } catch (e) {
+      loadSettingsError = e instanceof Error ? e.message : String(e)
+    }
+  }
 
   function maskKey(key: string, prefixLength = 4): string {
     const trimmed = key.trim()
@@ -229,25 +240,14 @@
       </div>
     </section>
 
-    <!-- Tab navigation -->
-    <nav class="settings-tabs" aria-label="Secciones de configuración">
-      <button
-        class="settings-tab"
-        class:settings-tab--active={activeTab === 'api'}
-        type="button"
-        onclick={() => (activeTab = 'api')}
-      >
-        APIs remotas
-      </button>
-      <button
-        class="settings-tab"
-        class:settings-tab--active={activeTab === 'logs'}
-        type="button"
-        onclick={() => (activeTab = 'logs')}
-      >
-        Logs
-      </button>
-    </nav>
+    <TabList aria-label={t('settings.tabsAria')}>
+      <TabButton active={activeTab === 'api'} onclick={() => (activeTab = 'api')}>
+        {t('settings.remoteApisTab')}
+      </TabButton>
+      <TabButton active={activeTab === 'logs'} onclick={() => (activeTab = 'logs')}>
+        {t('settings.logsTab')}
+      </TabButton>
+    </TabList>
 
     {#if activeTab === 'api'}
     <p class="settings__hint settings__hint--privacy">
@@ -262,6 +262,15 @@
       >
         {saveFeedback.text}
       </p>
+    {/if}
+
+    {#if loadSettingsError}
+      <div class="surface-message surface-message--error settings__load-error" role="alert">
+        <span>{t('settings.loadError', { error: loadSettingsError })}</span>
+        <Button variant="secondary" size="sm" onclick={loadInitialSettings}>
+          {t('settings.retryLoad')}
+        </Button>
+      </div>
     {/if}
 
     <Card>
@@ -501,38 +510,6 @@
     min-height: 100%;
   }
 
-  /* Tab navigation */
-  .settings-tabs {
-    display: flex;
-    gap: 0;
-    border-bottom: 1px solid var(--color-border-subtle);
-    margin-bottom: var(--space-1);
-  }
-
-  .settings-tab {
-    padding: var(--space-2) var(--space-5);
-    background: none;
-    border: none;
-    border-bottom: 2px solid transparent;
-    cursor: pointer;
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-medium);
-    color: var(--color-text-secondary);
-    transition:
-      color 0.15s ease,
-      border-color 0.15s ease;
-    margin-bottom: -1px;
-  }
-
-  .settings-tab:hover {
-    color: var(--color-text-primary);
-  }
-
-  .settings-tab--active {
-    color: var(--color-accent);
-    border-bottom-color: var(--color-accent);
-  }
-
   .settings-view__toolbar {
     justify-content: flex-end;
     flex: 1;
@@ -695,6 +672,14 @@
   .settings__feedback {
     margin: 0;
     line-height: 1.55;
+  }
+
+  .settings__load-error {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
   }
 
   .settings__hint--privacy {

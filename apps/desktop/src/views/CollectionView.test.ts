@@ -292,7 +292,7 @@ describe('CollectionView asset deletion', () => {
     })
   })
 
-  it('still removes card even when DB cleanup fails — resilient deletion', async () => {
+  it('keeps the dialog and warning visible when DB cleanup fails', async () => {
     const { deleteAssetFile } = await import('$lib/file-import')
     // Simulate DB failure
     storeRef.current.items.deleteWithCascade = vi.fn().mockRejectedValueOnce(new Error('DB locked'))
@@ -314,14 +314,15 @@ describe('CollectionView asset deletion', () => {
       // DB failed but...
     })
 
-    // Card is STILL removed — UI update is not blocked by DB error
+    // Card stays visible because DB cleanup is the authoritative state.
     await waitFor(() => {
-      expect(screen.queryByText('Acta')).not.toBeInTheDocument()
+      expect(screen.getByText('Acta')).toBeInTheDocument()
     })
 
-    // Modal closes even on DB failure
+    // Modal stays open and explains the partial failure instead of pretending success.
     await waitFor(() => {
-      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      expect(screen.getByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByText(/DB locked/)).toBeInTheDocument()
     })
   })
 
