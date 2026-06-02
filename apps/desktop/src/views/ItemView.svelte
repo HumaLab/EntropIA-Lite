@@ -45,6 +45,7 @@
     DocumentViewer,
     MetadataEditor,
     NoteEditor,
+    ConfirmDialog,
     ActionIcon,
     EntityViewer,
     IconButton,
@@ -2926,47 +2927,20 @@
           </section>
 
           {#if pendingDeleteNoteId}
-            <!-- svelte-ignore a11y_click_events_have_key_events -->
-            <div class="modal-overlay" onclick={handleDeleteNoteCancel} role="presentation">
-              <div
-                class="modal"
-                tabindex="-1"
-                role="dialog"
-                aria-modal="true"
-                aria-labelledby="delete-note-modal-title"
-                onclick={(event) => event.stopPropagation()}
-                onkeydown={(event) => {
-                  if (event.key === 'Escape') handleDeleteNoteCancel()
-                }}
-              >
-                <h3 id="delete-note-modal-title" class="modal-title">
-                  {translate('item.deleteNoteTitle')}
-                </h3>
-                <p class="modal-message">{translate('item.deleteNoteMessage')}</p>
-
-                <div class="modal-actions">
-                  <button
-                    type="button"
-                    class="modal-secondary-button"
-                    onclick={handleDeleteNoteCancel}
-                    disabled={deletingNote}
-                  >
-                    {translate('collections.cancel')}
-                  </button>
-                  <button
-                    type="button"
-                    class="modal-delete-button"
-                    aria-label={translate('item.confirmDeleteNote')}
-                    title={translate('item.confirmDeleteNote')}
-                    onclick={handleDeleteNoteConfirm}
-                    disabled={deletingNote}
-                    aria-busy={deletingNote}
-                  >
-                    <ActionIcon name="delete" />
-                  </button>
-                </div>
-              </div>
-            </div>
+            <ConfirmDialog
+              title={translate('item.deleteNoteTitle')}
+              titleId="delete-note-modal-title"
+              message={translate('item.deleteNoteMessage')}
+              cancelLabel={translate('collections.cancel')}
+              confirmIcon="delete"
+              confirmAriaLabel={translate('item.confirmDeleteNote')}
+              confirmTitle={translate('item.confirmDeleteNote')}
+              variant="destructive"
+              confirming={deletingNote}
+              cancelDisabled={deletingNote}
+              oncancel={handleDeleteNoteCancel}
+              onconfirm={handleDeleteNoteConfirm}
+            />
           {/if}
         </div>
 
@@ -4769,100 +4743,6 @@
     flex-direction: column;
     gap: var(--space-2);
   }
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background-color: var(--color-overlay);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: var(--space-4);
-  }
-  .modal {
-    background: var(--color-surface-glass);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-lg);
-    padding: var(--space-6);
-    max-width: 420px;
-    width: 100%;
-    box-shadow: var(--shadow-lg);
-  }
-  .modal-title {
-    font-size: var(--font-size-lg);
-    font-weight: var(--font-weight-bold);
-    color: var(--color-text-primary);
-    margin: 0 0 var(--space-3) 0;
-  }
-  .modal-message {
-    font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
-    margin: 0 0 var(--space-4) 0;
-    line-height: 1.5;
-  }
-  .modal-actions {
-    display: flex;
-    gap: var(--space-3);
-    justify-content: flex-end;
-  }
-  .modal-secondary-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-height: var(--control-height-sm);
-    padding: 0 var(--space-3);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-md);
-    background: var(--color-surface-elevated);
-    color: var(--color-text-primary);
-    cursor: pointer;
-    transition:
-      background-color var(--transition-smooth),
-      border-color var(--transition-smooth),
-      box-shadow var(--transition-smooth);
-  }
-  .modal-secondary-button:hover:not(:disabled) {
-    background: var(--color-surface);
-  }
-  .modal-secondary-button:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-  .modal-secondary-button:disabled {
-    opacity: 0.48;
-    cursor: not-allowed;
-  }
-  .modal-delete-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--control-height-sm);
-    height: var(--control-height-sm);
-    padding: 0;
-    border: 1px solid color-mix(in srgb, var(--color-danger) 34%, transparent);
-    border-radius: var(--radius-control);
-    background-color: var(--color-danger-soft);
-    color: var(--color-danger);
-    cursor: pointer;
-    transition:
-      background-color var(--transition-smooth),
-      border-color var(--transition-smooth),
-      box-shadow var(--transition-smooth);
-    box-shadow: none;
-  }
-  .modal-delete-button:hover:not(:disabled) {
-    background-color: var(--color-danger-soft);
-    border-color: var(--color-danger-hover);
-    color: var(--color-danger-hover);
-  }
-  .modal-delete-button:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-  .modal-delete-button:disabled {
-    opacity: 0.48;
-    cursor: not-allowed;
-  }
   .empty-text {
     color: var(--color-text-secondary);
     font-size: var(--font-size-sm);
@@ -4878,17 +4758,6 @@
   }
   .error {
     color: var(--color-danger);
-  }
-
-  @media (max-width: 720px) {
-    .modal-secondary-button,
-    .modal-delete-button {
-      width: 100%;
-    }
-
-    .modal-actions {
-      flex-direction: column-reverse;
-    }
   }
 
   /* ── OCR UI ── */
