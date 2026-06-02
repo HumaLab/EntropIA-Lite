@@ -36,6 +36,19 @@ describe('EntropicConstellation visual contract', () => {
     expect(source).toContain("aria-hidden=\"true\"")
   })
 
+  it('uses theme tokens for the canvas background instead of fixed dark colors', () => {
+    const source = readSource()
+
+    expect(source).toContain('--constellation-bg-start: var(--surface-app, var(--color-bg))')
+    expect(source).toContain("readThemeColor('--constellation-bg-start', '--surface-app', '--color-bg')")
+    expect(source).toContain("readThemeColor('--constellation-bg-mid', '--color-bg-ambient', '--color-surface')")
+    expect(source).toContain("readThemeColor('--constellation-bg-end', '--surface-panel', '--color-surface')")
+    expect(source).not.toMatch(/#080a10|#0c0f17|#10131b/i)
+    expect(source).not.toContain('rgba(75, 83, 106, 0.035)')
+    expect(source).not.toContain('rgba(38, 44, 62, 0.022)')
+    expect(source).not.toContain('rgba(8, 10, 16, 0)')
+  })
+
   it('uses lightweight transform drift instead of continuous canvas redraws', () => {
     const source = readSource()
 
