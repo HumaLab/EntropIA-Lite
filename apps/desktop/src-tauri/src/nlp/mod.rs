@@ -1245,7 +1245,7 @@ mod tests {
     }
 
     #[test]
-    fn try_init_embed_engine_error_remembers_local_missing_asset_details() {
+    fn try_init_embed_engine_error_rejects_local_provider_in_lite() {
         let temp = tempfile::tempdir().expect("temp dir should be created");
         let db_path = temp.path().join("entropia.sqlite");
         let conn = Connection::open(&db_path).expect("sqlite file should open");
@@ -1260,14 +1260,8 @@ mod tests {
             Err(error) => error,
         };
 
-        let expected_dir = temp.path().join("models").join("embeddings").join("bge-m3");
-        assert!(error.contains("Local BGE-M3 model incomplete"));
-        assert!(error.contains(&expected_dir.to_string_lossy().to_string()));
-        assert!(error.contains("model.onnx"));
-        assert!(error.contains("model.onnx_data"));
-        assert!(error.contains("tokenizer.json"));
-        assert!(error.contains("Install BGE-M3 from Settings"));
-        assert!(error.contains("configured BGE-M3 provider"));
+        assert!(error.contains("Proveedor de embeddings no disponible en EntropIA Lite"));
+        assert!(error.contains("OpenRouter"));
     }
 
     #[test]
@@ -1333,6 +1327,6 @@ mod tests {
         );
         assert!(cached.is_none());
         let error = last_error.expect("local init error should be recorded");
-        assert!(error.contains("Local BGE-M3 model incomplete"));
+        assert!(error.contains("Proveedor de embeddings no disponible en EntropIA Lite"));
     }
 }
