@@ -221,6 +221,13 @@
   let layoutInspectorCopyMessage = $state<{ tone: 'success' | 'error'; text: string } | null>(null)
   let layoutInspectorCopyTimer = $state<ReturnType<typeof setTimeout> | null>(null)
   let layoutLoadToken = 0
+  let notesLoadToken = 0
+  let selectedAssetStateLoadToken = 0
+  let entitiesLoadToken = 0
+  let geoMarkersLoadToken = 0
+  let triplesLoadToken = 0
+  let similarAssetsLoadToken = 0
+  let llmSummaryLoadToken = 0
   let viewerPage = $state(1)
   let viewerTotalPages = $state(1)
   let leftPanelTab = $state<'document' | 'text'>('document')
@@ -637,7 +644,8 @@
   })
   let geoMarkers = $state<MapMarker[]>([])
 
-  async function loadGeoMarkers(currentEntities = entities) {
+  async function loadGeoMarkers(currentEntities = entities, asset: Asset | null = selectedAsset) {
+    const requestToken = ++geoMarkersLoadToken
     try {
       const placeEntitiesById = new Map(
         currentEntities
@@ -646,6 +654,9 @@
       )
 
       if (placeEntitiesById.size === 0) {
+        if (geoMarkersLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+          return
+        }
         geoMarkers = []
         return
       }
@@ -659,6 +670,9 @@
               AND (source IS NULL OR source != 'manual_deleted')`,
         params: [itemId],
       })
+      if (geoMarkersLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+        return
+      }
       geoMarkers = rows.flatMap((r) => {
         const entity = placeEntitiesById.get(r.id)
         if (!entity) return []
@@ -1610,6 +1624,10 @@
       : 'Sin asset seleccionado'
   )
 
+  function isCurrentSelectedAsset(asset: Asset | null) {
+    return (selectedAsset?.id ?? null) === (asset?.id ?? null)
+  }
+
   async function handleEmbedAsset() {
     if (!selectedAsset) {
       nlpStore._setJobStatus(
@@ -1647,12 +1665,13 @@
     }
   }
 
-  async function loadEntities() {
+  async function loadEntities(asset: Asset | null = selectedAsset) {
+    const requestToken = ++entitiesLoadToken
     try {
       const store = getStore()
       let nextEntities: Entity[]
-      if (selectedAsset) {
-        nextEntities = ((await store.entities.findByAssetId(itemId, selectedAsset.id)) as Entity[]).filter(
+      if (asset) {
+        nextEntities = ((await store.entities.findByAssetId(itemId, asset.id)) as Entity[]).filter(
           (entity) => entity.confidence == null || entity.confidence > 0.89
         )
       } else {
@@ -1660,18 +1679,25 @@
           (entity) => entity.confidence == null || entity.confidence > 0.89
         )
       }
+      if (entitiesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+        return null
+      }
       entities = nextEntities
       return nextEntities
     } catch {
+      if (entitiesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+        return null
+      }
       // Non-fatal: entities panel shows empty state
       entities = []
       return []
     }
   }
 
-  async function reloadEntitiesAndGeoMarkers() {
-    const nextEntities = await loadEntities()
-    await loadGeoMarkers(nextEntities)
+  async function reloadEntitiesAndGeoMarkers(asset: Asset | null = selectedAsset) {
+    const nextEntities = await loadEntities(asset)
+    if (!nextEntities) return
+    await loadGeoMarkers(nextEntities, asset)
   }
 
   function normalizeManualEntityValue(value: string) {
@@ -1767,15 +1793,23 @@
     }
   }
 
-  async function loadSimilarAssets() {
-    if (!selectedAsset) {
+  async function loadSimilarAssets(asset: Asset | null = selectedAsset) {
+    const requestToken = ++similarAssetsLoadToken
+    if (!asset) {
       similarAssets = []
       return
     }
 
     try {
-      similarAssets = await fetchSimilarAssets(selectedAsset.id, 5)
+      const nextSimilarAssets = await fetchSimilarAssets(asset.id, 5)
+      if (similarAssetsLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+        return
+      }
+      similarAssets = nextSimilarAssets
     } catch {
+      if (similarAssetsLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+        return
+      }
       similarAssets = []
     }
   }
@@ -1955,17 +1989,33 @@
     }
   }
 
-  async function loadTriples() {
+  async function loadTriples(asset: Asset | null = selectedAsset) {
+    const requestToken = ++triplesLoadToken
     try {
       const store = getStore()
-      if (selectedAsset) {
-        triples = await store.triples.findByAssetId(itemId, selectedAsset.id)
-      } else {
-        triples = await store.triples.findByItemId(itemId)
+      const nextTriples = asset
+        ? await store.triples.findByAssetId(itemId, asset.id)
+        : await store.triples.findByItemId(itemId)
+      if (triplesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+        return
       }
+      triples = nextTriples
     } catch {
+      if (triplesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+        return
+      }
       triples = []
     }
+  }
+
+  async function refreshNotesForAsset(asset: Asset | null = selectedAsset) {
+    const requestToken = ++notesLoadToken
+    const loadedNotes = await loadNotesForAsset(asset)
+    if (notesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+      return false
+    }
+    notes = loadedNotes
+    return true
   }
 
   async function reloadSelectedAssetPersistedState(options: {
@@ -1983,13 +2033,13 @@
       reloads.push(reloadLayoutForAsset(asset))
     }
     if (options.entities) {
-      reloads.push(reloadEntitiesAndGeoMarkers())
+      reloads.push(reloadEntitiesAndGeoMarkers(asset))
     }
     if (options.triples) {
-      reloads.push(loadTriples())
+      reloads.push(loadTriples(asset))
     }
     if (options.similarAssets) {
-      reloads.push(loadSimilarAssets())
+      reloads.push(loadSimilarAssets(asset))
     }
 
     await Promise.allSettled(reloads)
@@ -2012,11 +2062,12 @@
   }
 
   async function handleSaveNote(content: string) {
+    const asset = selectedAsset
     try {
       error = null
       const store = getStore()
-      await store.notes.create({ itemId, assetId: selectedAsset?.id ?? null, content })
-      notes = await loadNotesForAsset()
+      await store.notes.create({ itemId, assetId: asset?.id ?? null, content })
+      await refreshNotesForAsset(asset)
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to save note'
     }
@@ -2026,12 +2077,13 @@
   let deletingNote = $state(false)
 
   async function handleDeleteNote(noteId: string) {
+    const asset = selectedAsset
     try {
       error = null
       deletingNote = true
       const store = getStore()
       await store.notes.delete(noteId)
-      notes = await loadNotesForAsset()
+      await refreshNotesForAsset(asset)
       if (expandedNoteId === noteId) {
         expandedNoteId = null
       }
@@ -2088,11 +2140,12 @@
 
   async function handleSaveEdit(noteId: string, content: string) {
     if (isNoteHtmlEffectivelyEmpty(content)) return
+    const asset = selectedAsset
     try {
       error = null
       const store = getStore()
       await store.notes.update(noteId, content)
-      notes = await loadNotesForAsset()
+      await refreshNotesForAsset(asset)
       editingNoteId = null
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to update note'
@@ -2171,13 +2224,13 @@
   }
 
   /** Load notes scoped to the current asset (plus item-level notes). */
-  async function loadNotesForAsset(): Promise<Note[]> {
-    if (!selectedAsset) {
+  async function loadNotesForAsset(asset: Asset | null = selectedAsset): Promise<Note[]> {
+    if (!asset) {
       const store = getStore()
       return store.notes.findByItem(itemId)
     }
     const store = getStore()
-    return store.notes.findByAsset(itemId, selectedAsset.id)
+    return store.notes.findByAsset(itemId, asset.id)
   }
 
   async function loadData() {
@@ -2357,19 +2410,18 @@
   $effect(() => {
     const asset = selectedAsset
     if (!asset) return
+    const requestToken = ++selectedAssetStateLoadToken
 
     leftPanelTab = 'document'
     rightPanelTab = 'notes'
 
     // Reload notes for this asset (plus item-level notes)
-    void loadNotesForAsset().then((loadedNotes) => {
-      notes = loadedNotes
-    })
+    void refreshNotesForAsset(asset)
 
     // Load existing extraction text for this asset
     const store = getStore()
     void store.extractions.findByAsset(asset.id).then((extraction) => {
-      if (extraction) {
+      if (selectedAssetStateLoadToken === requestToken && isCurrentSelectedAsset(asset) && extraction) {
         ocrStore._updateState(asset.id, {
           status: 'done',
           progress: 100,
@@ -2384,7 +2436,11 @@
     // Load existing transcription for audio assets
     if (asset.type === 'audio') {
       void store.transcriptions.findByAsset(asset.id).then((transcription) => {
-        if (transcription) {
+        if (
+          selectedAssetStateLoadToken === requestToken &&
+          isCurrentSelectedAsset(asset) &&
+          transcription
+        ) {
           transcriptionStore._updateState(asset.id, {
             status: 'done',
             progress: 100,
@@ -2405,15 +2461,16 @@
   $effect(() => {
     const asset = selectedAsset
     if (!asset) return
-    void reloadEntitiesAndGeoMarkers()
-    void loadTriples()
-    void loadSimilarAssets()
+    void reloadEntitiesAndGeoMarkers(asset)
+    void loadTriples(asset)
+    void loadSimilarAssets(asset)
     // Load persisted LLM results for this asset so previous
     // asset-level results (summarize, correct_ocr, etc.) are visible.
     llmStore.loadPersistedResults(asset.id, 'asset')
+    const requestToken = ++llmSummaryLoadToken
     llmGetResult(asset.id, 'summarize', 'asset')
       .then((result) => {
-        if (result) {
+        if (llmSummaryLoadToken === requestToken && isCurrentSelectedAsset(asset) && result) {
           summaryTexts.set(asset.id, result.result)
           summaryTick++
         }
@@ -2513,6 +2570,13 @@
 
   onDestroy(() => {
     layoutLoadToken++
+    notesLoadToken++
+    selectedAssetStateLoadToken++
+    entitiesLoadToken++
+    geoMarkersLoadToken++
+    triplesLoadToken++
+    similarAssetsLoadToken++
+    llmSummaryLoadToken++
     window.removeEventListener(
       DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT,
       handleExplorerAssetSelectRequest

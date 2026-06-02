@@ -67,6 +67,16 @@ type AnnotationRow = {
   updatedAt: number
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 type StoreOptions = {
   notesRows?: Array<{
     id: string
@@ -1082,6 +1092,60 @@ describe('ItemView note editing', () => {
     storeRef.current.notes.findByAsset.mockResolvedValue([])
     render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
     expect(await screen.findByText('Todavía no hay notas.')).toBeInTheDocument()
+  })
+
+  it('ignores stale notes loaded for a previously selected asset', async () => {
+    const firstAssetNotes = deferred<(typeof sampleNote)[]>()
+    const secondAssetNotes = deferred<(typeof sampleNote)[]>()
+    const notesByAsset = new Map([
+      ['asset-1', firstAssetNotes],
+      ['asset-2', secondAssetNotes],
+    ])
+
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-1',
+          itemId: 'item-1',
+          path: 'docs/primera.pdf',
+          type: 'pdf',
+          createdAt: 1,
+        },
+        {
+          id: 'asset-2',
+          itemId: 'item-1',
+          path: 'docs/segunda.pdf',
+          type: 'pdf',
+          createdAt: 2,
+        },
+      ],
+    })
+    storeRef.current.notes.findByAsset.mockImplementation(async (_itemId: string, assetId: string) => {
+      const pending = notesByAsset.get(assetId)
+      return pending ? pending.promise : []
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await waitFor(() => {
+      expect(storeRef.current.notes.findByAsset).toHaveBeenCalledWith('item-1', 'asset-1')
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Página siguiente|Next page/i }))
+
+    await waitFor(() => {
+      expect(storeRef.current.notes.findByAsset).toHaveBeenCalledWith('item-1', 'asset-2')
+    })
+
+    secondAssetNotes.resolve([{ ...sampleNote, id: 'note-2', content: '<p>Nota vigente</p>' }])
+    expect(await screen.findByRole('button', { name: /Nota vigente/i })).toBeInTheDocument()
+
+    firstAssetNotes.resolve([{ ...sampleNote, id: 'note-1', content: '<p>Nota vieja</p>' }])
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Nota vigente/i })).toBeInTheDocument()
+      expect(screen.queryByRole('button', { name: /Nota vieja/i })).not.toBeInTheDocument()
+    })
   })
 
   it('notes store has update method for editing notes', async () => {
