@@ -15,6 +15,18 @@
   let { children }: { children: Snippet } = $props()
   const currentLocale = locale
   const activeLocale = $derived($currentLocale)
+  const sidebarLabels = $derived.by(() => {
+    $currentLocale
+    return {
+      aria: t('appshell.sidebarAria'),
+      collapse: t('appshell.sidebarCollapse'),
+      expand: t('appshell.sidebarExpand'),
+      newCollection: t('appshell.sidebarNewCollection'),
+      filter: t('appshell.sidebarFilterCollections'),
+      filterPlaceholder: t('appshell.sidebarFilterCollectionsPlaceholder'),
+      emptyExplorer: t('appshell.sidebarEmptyExplorer'),
+    }
+  })
   const showExplorer = $derived(
     $navigation.current.name === 'collection' || $navigation.current.name === 'item',
   )
@@ -101,7 +113,7 @@
 
   <div class="workspace">
     <!-- Sidebar: always visible, collapses to icon strip -->
-    <aside class="sidebar" class:sidebar--collapsed={!sidebarOpen} aria-label="Panel lateral">
+    <aside class="sidebar" class:sidebar--collapsed={!sidebarOpen} aria-label={sidebarLabels.aria}>
       <!-- Sidebar toolbar -->
       <div class="sidebar__toolbar">
         <!-- Toggle sidebar -->
@@ -109,9 +121,9 @@
           class="sidebar__tool"
           size="sm"
           variant="ghost"
-          label={sidebarOpen ? 'Colapsar panel (Ctrl+B)' : 'Expandir panel (Ctrl+B)'}
+          label={sidebarOpen ? sidebarLabels.collapse : sidebarLabels.expand}
           onclick={toggleSidebar}
-          title={sidebarOpen ? 'Colapsar panel (Ctrl+B)' : 'Expandir panel (Ctrl+B)'}
+          title={sidebarOpen ? sidebarLabels.collapse : sidebarLabels.expand}
         >
           <ActionIcon name={sidebarOpen ? 'panel-left-close' : 'panel-left'} size={16} />
         </IconButton>
@@ -122,9 +134,9 @@
             class="sidebar__tool"
             size="sm"
             variant="ghost"
-            label="Nueva colección"
+            label={sidebarLabels.newCollection}
             onclick={handleCreateCollection}
-            title="Nueva colección"
+            title={sidebarLabels.newCollection}
           >
             <ActionIcon name="folder-plus" size={16} />
           </IconButton>
@@ -135,7 +147,7 @@
               bind:this={searchInputEl}
               class="sidebar__search-input"
               type="text"
-              placeholder="Filtrar colecciones..."
+              placeholder={sidebarLabels.filterPlaceholder}
               bind:value={searchFilter}
               onblur={collapseSearch}
               onkeydown={(e) => { if (e.key === 'Escape') { searchFilter = ''; searchExpanded = false } }}
@@ -146,9 +158,9 @@
               class="sidebar__tool"
               size="sm"
               variant="ghost"
-              label="Filtrar colecciones"
+              label={sidebarLabels.filter}
               onclick={expandSearch}
-              title="Filtrar colecciones"
+              title={sidebarLabels.filter}
             >
               <ActionIcon name="search" size={16} />
             </IconButton>
@@ -163,7 +175,7 @@
             <DocumentExplorer filterText={searchFilter} />
           {:else}
             <div class="sidebar__placeholder">
-              <p>Abrí una colección para ver el explorador</p>
+              <p>{sidebarLabels.emptyExplorer}</p>
             </div>
           {/if}
         </div>

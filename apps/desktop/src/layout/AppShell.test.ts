@@ -126,13 +126,22 @@ describe('AppShell', () => {
     })
   })
 
-  it('reacts to locale changes in footer copy', async () => {
+  it('reacts to locale changes in footer and sidebar copy', async () => {
     render(AppShellHost)
 
     locale.set('en')
 
     expect(await screen.findByText('Archive, OCR, and assisted analysis.')).toBeInTheDocument()
     expect(screen.getByText('Developed by')).toBeInTheDocument()
+    expect(screen.getByRole('complementary', { name: 'Sidebar' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Collapse sidebar (Ctrl+B)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'New collection' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Filter collections' })).toBeInTheDocument()
+    expect(screen.getByText('Open a collection to view the explorer')).toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Filter collections' }))
+
+    expect(screen.getByPlaceholderText('Filter collections...')).toBeInTheDocument()
   })
 
 })
