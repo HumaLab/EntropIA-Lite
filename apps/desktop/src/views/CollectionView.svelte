@@ -18,7 +18,7 @@
   import { appDataDir, join } from '@tauri-apps/api/path'
   import { stat } from '@tauri-apps/plugin-fs'
   import { exportCollectionById } from '$lib/export'
-  import { ActionIcon, ItemCard, SearchBar, Button } from '@entropia/ui'
+  import { ConfirmDialog, ItemCard, SearchBar, Button } from '@entropia/ui'
   import { onMount, onDestroy } from 'svelte'
   import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
   import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -740,46 +740,21 @@
 
   <!-- Delete confirmation modal -->
   {#if showDeleteConfirm}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
-    <div class="modal-overlay" onclick={handleDeleteCancel} role="presentation">
-      <div
-        class="modal"
-        tabindex="-1"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="delete-modal-title"
-        onclick={(e) => e.stopPropagation()}
-        onkeydown={(e) => {
-          if (e.key === 'Escape') handleDeleteCancel()
-        }}
-      >
-        <h3 id="delete-modal-title" class="modal-title">{t('collection.deleteAssetTitle')}</h3>
-        <p class="modal-message">
-          {t('collection.deleteAssetMessage', { name: pendingDeleteFilename ?? '' })}
-        </p>
-
-        {#if deleteError}
-          <p class="modal-error">{deleteError}</p>
-        {/if}
-
-        <div class="modal-actions">
-          <Button variant="secondary" onclick={handleDeleteCancel} disabled={deleting}>
-            {t('collections.cancel')}
-          </Button>
-          <button
-            type="button"
-            class="modal-delete-button"
-            aria-label={t('collection.deleteAssetAria')}
-            title={deleting ? t('collection.deletingAssetTitle') : t('collection.deleteAssetAria')}
-            aria-busy={deleting}
-            onclick={handleDeleteConfirm}
-            disabled={deleting}
-          >
-            <ActionIcon name="delete" size={16} />
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      title={t('collection.deleteAssetTitle')}
+      titleId="delete-modal-title"
+      message={t('collection.deleteAssetMessage', { name: pendingDeleteFilename ?? '' })}
+      error={deleteError}
+      cancelLabel={t('collections.cancel')}
+      confirmIcon="delete"
+      confirmAriaLabel={t('collection.deleteAssetAria')}
+      confirmTitle={deleting ? t('collection.deletingAssetTitle') : t('collection.deleteAssetAria')}
+      variant="destructive"
+      confirming={deleting}
+      cancelDisabled={deleting}
+      oncancel={handleDeleteCancel}
+      onconfirm={handleDeleteConfirm}
+    />
   {/if}
 </div>
 
@@ -829,92 +804,6 @@
     border-radius: var(--radius-md);
   }
 
-  /* Delete confirmation modal */
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background-color: var(--color-overlay);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    padding: var(--space-4);
-  }
-
-  .modal {
-    background: var(--color-surface-glass);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-dialog);
-    padding: var(--space-6);
-    max-width: 420px;
-    width: 100%;
-    box-shadow: var(--shadow-lg);
-  }
-
-  .modal-title {
-    font-size: var(--font-size-lg);
-    font-weight: var(--font-weight-bold);
-    color: var(--color-text-primary);
-    margin: 0 0 var(--space-3) 0;
-  }
-
-  .modal-message {
-    font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
-    margin: 0 0 var(--space-4) 0;
-    line-height: 1.5;
-  }
-
-  .modal-error {
-    font-size: var(--font-size-sm);
-    color: var(--color-danger);
-    margin: 0 0 var(--space-4) 0;
-    padding: var(--space-2) var(--space-3);
-    background-color: var(--color-danger-soft);
-    border-radius: var(--radius-sm);
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: var(--space-3);
-    justify-content: flex-end;
-  }
-
-  .modal-delete-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--control-height-sm);
-    height: var(--control-height-sm);
-    padding: 0;
-    border: 1px solid var(--color-danger);
-    border-radius: var(--radius-control);
-    background-color: var(--color-danger-soft);
-    color: var(--color-danger);
-    cursor: pointer;
-    transition:
-      background-color var(--transition-smooth),
-      border-color var(--transition-smooth),
-      box-shadow var(--transition-smooth);
-    box-shadow: none;
-  }
-
-  .modal-delete-button:hover:not(:disabled) {
-    background-color: var(--color-danger-soft);
-    border-color: var(--color-danger-hover);
-    color: var(--color-danger-hover);
-  }
-
-  .modal-delete-button:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-
-  .modal-delete-button:disabled {
-    opacity: 0.48;
-    cursor: not-allowed;
-  }
-
   @media (max-width: 720px) {
     .collection-toolbar {
       width: 100%;
@@ -922,13 +811,8 @@
     }
 
     .collection-toolbar :global(.search-bar),
-    .collection-toolbar :global(.btn),
-    .modal-actions :global(.btn) {
+    .collection-toolbar :global(.btn) {
       width: 100%;
-    }
-
-    .modal-actions {
-      flex-direction: column-reverse;
     }
   }
 </style>

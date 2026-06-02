@@ -2,7 +2,7 @@
   import { getStore } from '$lib/db'
   import { navigation } from '$lib/navigation'
   import { locale, t } from '$lib/i18n'
-  import { ActionIcon, CollectionCard, SearchBar, Button, Input, Card } from '@entropia/ui'
+  import { CollectionCard, SearchBar, Button, Input, Card, ConfirmDialog } from '@entropia/ui'
   import { onMount, onDestroy } from 'svelte'
   import type { Collection } from '@entropia/store'
 
@@ -294,32 +294,20 @@
   {/if}
 
   {#if deletingId}
-    <div class="confirm-overlay">
-      <Card>
-        <div class="confirm-dialog">
-          <h3 class="confirm-dialog__title">{t('collections.deleteTitle')}</h3>
-          <p class="confirm-dialog__message">
-            {t('collections.deleteMessage', { name: deletingName })}
-          </p>
-          <div class="confirm-dialog__actions">
-            <button
-              type="button"
-              class="confirm-dialog__delete-button"
-              aria-label={t('collections.deleteAria')}
-              title={deleting ? t('collections.deletingTitle') : t('collections.deleteAria')}
-              aria-busy={deleting}
-              onclick={handleConfirmDelete}
-              disabled={deleting}
-            >
-              <ActionIcon name="delete" size={16} />
-            </button>
-            <Button variant="ghost" onclick={handleCancelDelete} disabled={deleting}
-              >{t('collections.cancel')}</Button
-            >
-          </div>
-        </div>
-      </Card>
-    </div>
+    <ConfirmDialog
+      title={t('collections.deleteTitle')}
+      message={t('collections.deleteMessage', { name: deletingName })}
+      cancelLabel={t('collections.cancel')}
+      confirmIcon="delete"
+      confirmAriaLabel={t('collections.deleteAria')}
+      confirmTitle={deleting ? t('collections.deletingTitle') : t('collections.deleteAria')}
+      variant="destructive"
+      confirming={deleting}
+      cancelDisabled={deleting}
+      confirmFirst
+      oncancel={handleCancelDelete}
+      onconfirm={handleConfirmDelete}
+    />
   {/if}
 </div>
 
@@ -436,78 +424,6 @@
     gap: var(--space-2);
   }
 
-  .confirm-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background-color: var(--color-overlay);
-    z-index: 100;
-  }
-  .confirm-dialog {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-4);
-    padding: var(--space-5);
-    min-width: min(100vw - 32px, 440px);
-  }
-
-  .confirm-dialog__title {
-    margin: 0;
-  }
-
-  .confirm-dialog__message {
-    margin: 0;
-    font-size: var(--font-size-base, 1rem);
-    color: var(--color-text-primary);
-  }
-
-  .confirm-dialog__actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    justify-content: flex-end;
-  }
-
-  .confirm-dialog__delete-button {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: var(--control-height-sm);
-    height: var(--control-height-sm);
-    padding: 0;
-    border: 1px solid var(--color-danger);
-    border-radius: var(--radius-control);
-    background-color: var(--color-danger-soft);
-    color: var(--color-danger);
-    cursor: pointer;
-    transition:
-      background-color var(--transition-smooth),
-      border-color var(--transition-smooth),
-      box-shadow var(--transition-smooth);
-    box-shadow: none;
-  }
-
-  .confirm-dialog__delete-button:hover:not(:disabled) {
-    background-color: var(--color-danger-soft);
-    border-color: var(--color-danger-hover);
-    color: var(--color-danger-hover);
-  }
-
-  .confirm-dialog__delete-button:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-
-  .confirm-dialog__delete-button:disabled {
-    opacity: 0.48;
-    cursor: not-allowed;
-  }
-
   @media (max-width: 720px) {
     .collections-controls {
       width: 100%;
@@ -527,8 +443,7 @@
     }
 
     .create-form__actions :global(.btn),
-    .edit-form__actions :global(.btn),
-    .confirm-dialog__actions :global(.btn) {
+    .edit-form__actions :global(.btn) {
       width: 100%;
     }
   }

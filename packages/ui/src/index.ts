@@ -29,6 +29,9 @@ export type { IconButtonProps, IconButtonSize, IconButtonVariant } from './compo
 export { StatusBadge } from './components/StatusBadge/index'
 export type { StatusBadgeProps, StatusBadgeSize, StatusBadgeVariant } from './components/StatusBadge/index'
 
+export { ConfirmDialog } from './components/ConfirmDialog/index'
+export type { ConfirmDialogProps, ConfirmDialogVariant } from './components/ConfirmDialog/index'
+
 // Components — Fase 1
 export { CollectionCard } from './components/CollectionCard/index'
 export type { CollectionCardProps } from './components/CollectionCard/index'
