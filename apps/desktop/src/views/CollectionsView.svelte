@@ -72,13 +72,12 @@
         name: newName.trim(),
         description: newDescription.trim() || null,
       })
-      console.log('[Collections] created collection:', collection.id, collection.name)
       newName = ''
       newDescription = ''
       showCreate = false
       await loadCollections()
     } catch (e) {
-      console.log('[Collections] ERROR creating collection:', e)
+      console.error('[Collections] ERROR creating collection:', e)
       error = e instanceof Error ? e.message : t('collections.error.create')
     }
   }
@@ -127,12 +126,10 @@
 
   async function handleConfirmDelete() {
     if (!deletingId) return
-    console.log('[Collections] deleting collection:', deletingId, deletingName)
     try {
       deleting = true
       const store = getStore()
       await store.collections.delete(deletingId)
-      console.log('[Collections] deleted successfully')
       deletingId = null
       deletingName = ''
       deleting = false

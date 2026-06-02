@@ -18,16 +18,14 @@
   const currentViewName = $derived(($navigation.current as { name: string }).name)
 
   onMount(() => {
-    console.log('[App] onMount starting')
     const cleanupKeyboard = setupKeyboardShortcuts()
 
     Promise.all([initLocale(), initDb()])
       .then(() => {
-        console.log('[App] initDb complete')
         ready = true
       })
       .catch((e) => {
-        console.log('[App] initDb ERROR:', e)
+        console.error('[App] initDb ERROR:', e)
         error = e instanceof Error ? e.message : t('app.initError')
       })
 
