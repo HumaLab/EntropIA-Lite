@@ -4,6 +4,7 @@
   import {
     describeDbBrowserTable,
     listDbBrowserTables,
+    queryAllDbBrowserRowsInChunks,
     queryDbBrowserRows,
     type DbBrowserColumn,
     type DbBrowserSortDirection,
@@ -328,10 +329,8 @@
     exportingTable = true
     error = null
     try {
-      const exportResponse = await queryDbBrowserRows({
+      const exportResponse = await queryAllDbBrowserRowsInChunks({
         table: selectedTable,
-        page: 1,
-        pageSize: Math.max(total, rows.length, 1),
         sortColumn,
         sortDirection,
         search: searchTerm || undefined,
