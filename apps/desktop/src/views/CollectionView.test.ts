@@ -65,6 +65,16 @@ function createStore(items: ItemRow[], assets: AssetRow[] = []) {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 vi.mock('$lib/db', () => ({
   getStore: () => storeRef.current,
 }))
@@ -181,6 +191,60 @@ describe('CollectionView consumer compatibility', () => {
       expect(
         screen.getByText('Import, browse, and keep this collection assets organized.')
       ).toBeInTheDocument()
+    })
+  })
+
+  it('ignores stale item loads that resolve after a newer search', async () => {
+    const firstLoad = deferred<ItemRow[]>()
+    const searchLoad = deferred<ItemRow[]>()
+    const oldItem: ItemRow = {
+      id: 'item-old',
+      title: 'Acta vieja',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      collectionId: 'col-1',
+      metadata: null,
+    }
+    const newItem: ItemRow = {
+      id: 'item-new',
+      title: 'Acta nueva',
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+      collectionId: 'col-1',
+      metadata: null,
+    }
+
+    storeRef.current = {
+      items: {
+        findByCollection: vi.fn().mockReturnValueOnce(firstLoad.promise),
+        searchByText: vi.fn().mockReturnValueOnce(searchLoad.promise),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+        deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+      assets: {
+        create: vi.fn(),
+        findByItem: vi.fn().mockResolvedValue([]),
+        findById: vi.fn().mockResolvedValue(null),
+        deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+    }
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'acta' } })
+    await vi.advanceTimersByTimeAsync(300)
+
+    searchLoad.resolve([newItem])
+
+    expect(await screen.findByText('Acta nueva')).toBeInTheDocument()
+
+    firstLoad.resolve([oldItem])
+
+    await waitFor(() => {
+      expect(screen.getByText('Acta nueva')).toBeInTheDocument()
+      expect(screen.queryByText('Acta vieja')).not.toBeInTheDocument()
     })
   })
 })

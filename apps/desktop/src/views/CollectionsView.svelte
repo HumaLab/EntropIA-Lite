@@ -21,6 +21,7 @@
   let deletingName = $state('')
   let deleting = $state(false)
   const currentLocale = locale
+  let collectionsLoadRequestId = 0
 
   let filtered = $derived(
     searchQuery
@@ -36,23 +37,30 @@
   })
 
   async function loadCollections() {
+    const requestId = ++collectionsLoadRequestId
     try {
       loading = true
       error = null
       const store = getStore()
       // Load ALL collections (including newly created ones with 0 items)
-      collections = await store.collections.findAll()
+      const loadedCollections = await store.collections.findAll()
+      if (requestId !== collectionsLoadRequestId) return
 
       // Load item counts
       const counts: Record<string, number> = {}
-      for (const c of collections) {
+      for (const c of loadedCollections) {
         counts[c.id] = await store.collections.countItems(c.id)
+        if (requestId !== collectionsLoadRequestId) return
       }
+      collections = loadedCollections
       itemCounts = counts
     } catch (e) {
+      if (requestId !== collectionsLoadRequestId) return
       error = e instanceof Error ? e.message : t('collections.error.load')
     } finally {
-      loading = false
+      if (requestId === collectionsLoadRequestId) {
+        loading = false
+      }
     }
   }
 

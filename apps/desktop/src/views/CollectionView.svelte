@@ -37,6 +37,8 @@
   let unlistenDragDrop: (() => void) | null = null
   let unlistenAssetUpdate: (() => void) | null = null
   const currentLocale = locale
+  let itemsLoadRequestId = 0
+  let itemAssetsLoadRequestId = 0
 
   let visibleCountLabel = $derived.by(() => {
     $currentLocale
@@ -93,12 +95,14 @@
   }
 
   async function loadItemAssets(itemIds: string[]) {
+    const requestId = ++itemAssetsLoadRequestId
     if (itemIds.length === 0) return
     const store = getStore()
     const newMeta = new Map(itemAssetMeta)
     for (const itemId of itemIds) {
       try {
         const assets: Asset[] = await store.assets.findByItem(itemId)
+        if (requestId !== itemAssetsLoadRequestId) return
         const imageAsset = assets.find((a) => a.type === 'image')
         // For PDFs, keep exploration lightweight: ItemCard shows the PDF icon.
         const pdfAsset = assets.find((a) => a.type === 'pdf')
@@ -131,6 +135,7 @@
         // Non-fatal: item card shows placeholder
       }
     }
+    if (requestId !== itemAssetsLoadRequestId) return
     itemAssetMeta = newMeta
   }
 
@@ -139,19 +144,25 @@
   )
 
   async function loadItems() {
+    const requestId = ++itemsLoadRequestId
     try {
       loading = true
       error = null
       const store = getStore()
-      items = searchQuery
+      const loadedItems = searchQuery
         ? await store.items.searchByText(collectionId, searchQuery)
         : await store.items.findByCollection(collectionId)
+      if (requestId !== itemsLoadRequestId) return
+      items = loadedItems
       // Load asset metadata (count + thumbnail) for each item
       await loadItemAssets(items.map((i) => i.id))
     } catch (e) {
+      if (requestId !== itemsLoadRequestId) return
       error = e instanceof Error ? e.message : t('collection.error.load')
     } finally {
-      loading = false
+      if (requestId === itemsLoadRequestId) {
+        loading = false
+      }
     }
   }
 

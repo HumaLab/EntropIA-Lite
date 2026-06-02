@@ -40,6 +40,16 @@ function createStore(collections: CollectionRow[], count = 0) {
   }
 }
 
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res
+    reject = rej
+  })
+  return { promise, resolve, reject }
+}
+
 vi.mock('$lib/db', () => ({
   getStore: () => storeRef.current,
 }))
@@ -128,6 +138,58 @@ describe('CollectionsView consumer compatibility', () => {
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Collections' })).toBeInTheDocument()
       expect(screen.getByText('1 visible collection')).toBeInTheDocument()
+    })
+  })
+
+  it('ignores stale collection loads that resolve after a newer refresh', async () => {
+    const firstLoad = deferred<CollectionRow[]>()
+    const secondLoad = deferred<CollectionRow[]>()
+    const oldCollection: CollectionRow = {
+      id: 'col-old',
+      name: 'Historia vieja',
+      description: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    const newCollection: CollectionRow = {
+      id: 'col-new',
+      name: 'Historia nueva',
+      description: null,
+      createdAt: Date.now(),
+      updatedAt: Date.now(),
+    }
+    const findAll = vi
+      .fn()
+      .mockReturnValueOnce(firstLoad.promise)
+      .mockReturnValueOnce(secondLoad.promise)
+
+    storeRef.current = {
+      collections: {
+        findAll,
+        findAllNonEmpty: vi.fn(),
+        countItems: vi.fn().mockResolvedValue(0),
+        create: vi.fn().mockResolvedValue(newCollection),
+        delete: vi.fn(),
+      },
+    }
+
+    render(CollectionsView)
+
+    await fireEvent.click(screen.getByRole('button', { name: '+ Nueva colección' }))
+    await fireEvent.input(screen.getByPlaceholderText('Nombre de la colección'), {
+      target: { value: 'Historia nueva' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Crear colección' }))
+
+    secondLoad.resolve([newCollection])
+
+    expect(await screen.findByText('Historia nueva')).toBeInTheDocument()
+
+    firstLoad.resolve([oldCollection])
+
+    await waitFor(() => {
+      expect(screen.getByText('Historia nueva')).toBeInTheDocument()
+      expect(screen.queryByText('Historia vieja')).not.toBeInTheDocument()
     })
   })
 })
