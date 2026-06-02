@@ -22,6 +22,7 @@
 
   let searchQuery = $state('')
   let searchResults = $state<SearchResult[]>([])
+  let searchError = $state('')
   let showResults = $state(false)
   let searching = $state(false)
   let previousItem = $state<Item | null>(null)
@@ -162,11 +163,13 @@
 
     if (!query.trim()) {
       searchResults = []
+      searchError = ''
       showResults = false
       return
     }
 
     searching = true
+    searchError = ''
     try {
       const store = getStore()
       const matchedItems = await store.items.searchGlobal(query, 20)
@@ -189,11 +192,14 @@
       }
 
       searchResults = results
+      searchError = ''
       showResults = true
     } catch (e) {
       if (!isCurrentRequest()) return
       console.error('[Search] error:', e)
       searchResults = []
+      searchError = translate('topbar.searchError')
+      showResults = true
     } finally {
       if (isCurrentRequest()) searching = false
     }
@@ -210,6 +216,7 @@
 
     if (!searchQuery.trim()) {
       searchResults = []
+      searchError = ''
       showResults = false
       return
     }
@@ -223,6 +230,7 @@
     searchRequestId += 1
     searchQuery = ''
     searchResults = []
+    searchError = ''
     showResults = false
     if (debounceTimer) clearTimeout(debounceTimer)
   }
@@ -257,7 +265,7 @@
   }
 
   function handleFocus() {
-    if (searchResults.length > 0) {
+    if (searchResults.length > 0 || searchError) {
       showResults = true
     }
   }
@@ -353,6 +361,10 @@
         {#if searching}
           <div class="global-search__status">
             {$currentLocale && translate('topbar.searchSearching')}
+          </div>
+        {:else if searchError}
+          <div class="global-search__status" class:error={Boolean(searchError)}>
+            {searchError}
           </div>
         {:else if searchResults.length === 0}
           <div class="global-search__status">
@@ -719,6 +731,10 @@
     text-align: center;
     color: var(--color-text-secondary);
     font-size: var(--font-size-xs);
+  }
+
+  .error {
+    color: var(--color-danger);
   }
 
   .global-search__result {

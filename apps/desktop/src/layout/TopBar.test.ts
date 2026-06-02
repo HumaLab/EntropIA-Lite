@@ -6,11 +6,13 @@ import type { View } from '$lib/navigation'
 
 function deferred<T>() {
   let resolve!: (value: T) => void
-  const promise = new Promise<T>((res) => {
+  let reject!: (reason?: unknown) => void
+  const promise = new Promise<T>((res, rej) => {
     resolve = res
+    reject = rej
   })
 
-  return { promise, resolve }
+  return { promise, resolve, reject }
 }
 
 type NavigationSnapshot = {
@@ -280,6 +282,67 @@ describe('TopBar', () => {
 
     expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: /Acta vieja/i })).not.toBeInTheDocument()
+  })
+
+  it('shows a localized error when the current global search fails', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    storeRef.current.items.searchGlobal.mockRejectedValueOnce(new Error('search failed'))
+
+    render(TopBar)
+
+    const input = screen.getByRole('searchbox', { name: 'Buscar archivos' })
+    await fireEvent.input(input, { target: { value: 'acta' } })
+    await vi.advanceTimersByTimeAsync(300)
+
+    await waitFor(() => {
+      expect(screen.getByText('No se pudo completar la búsqueda. Probá de nuevo.')).toBeInTheDocument()
+    })
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith('[Search] error:', expect.any(Error))
+    consoleErrorSpy.mockRestore()
+  })
+
+  it('ignores stale global search failures after a newer query succeeds', async () => {
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const firstSearch = deferred<Array<{ id: string; title: string; collectionId: string }>>()
+    const secondSearch = deferred<Array<{ id: string; title: string; collectionId: string }>>()
+
+    storeRef.current.items.searchGlobal
+      .mockReturnValueOnce(firstSearch.promise)
+      .mockReturnValueOnce(secondSearch.promise)
+    storeRef.current.collections.findById.mockResolvedValue({
+      id: 'col-1',
+      name: 'Archivo',
+    })
+
+    render(TopBar)
+
+    const input = screen.getByRole('searchbox', { name: 'Buscar archivos' })
+    await fireEvent.input(input, { target: { value: 'acta' } })
+    vi.advanceTimersByTime(300)
+
+    await waitFor(() => {
+      expect(storeRef.current.items.searchGlobal).toHaveBeenCalledWith('acta', 20)
+    })
+
+    await fireEvent.input(input, { target: { value: 'vigente' } })
+    vi.advanceTimersByTime(300)
+
+    secondSearch.resolve([
+      { id: 'item-new', title: 'Acta vigente', collectionId: 'col-1' },
+    ])
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
+    })
+
+    firstSearch.reject(new Error('stale search failed'))
+    await Promise.resolve()
+
+    expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
+    expect(screen.queryByText('No se pudo completar la búsqueda. Probá de nuevo.')).not.toBeInTheDocument()
+    expect(consoleErrorSpy).not.toHaveBeenCalled()
+    consoleErrorSpy.mockRestore()
   })
 
   it('renders sibling document controls and replaces navigation within the same collection', async () => {
