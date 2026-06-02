@@ -206,3 +206,12 @@ pub fn get_setting(conn: &rusqlite::Connection, key: &str) -> Option<String> {
         .ok()?;
     resolve_secret_ref(key, &value).or(Some(value))
 }
+
+pub fn get_secret_setting(conn: &rusqlite::Connection, key: &str) -> Option<String> {
+    let value = get_setting(conn, key)?;
+    if value.trim().starts_with(SECRET_REF_PREFIX) {
+        None
+    } else {
+        Some(value)
+    }
+}

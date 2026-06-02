@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SettingsView from './SettingsView.svelte'
 import { locale } from '$lib/i18n'
@@ -90,6 +90,7 @@ describe('SettingsView', () => {
     await fireEvent.click(openrouterTestButton!)
 
     expect(await screen.findByText('Conexión lista · 2 modelos disponibles.')).toBeInTheDocument()
+    expect(testOpenrouterConnectionMock).toHaveBeenCalledWith('sk-or-v1-test-key')
     expect(screen.getByText('Modelos sugeridos desde OpenRouter')).toBeInTheDocument()
 
     await fireEvent.click(assemblyaiTestButton!)
@@ -97,6 +98,7 @@ describe('SettingsView', () => {
     expect(
       await screen.findByText('Conexión lista · AssemblyAI validó tu cuenta.')
     ).toBeInTheDocument()
+    expect(testAssemblyaiConnectionMock).toHaveBeenCalledWith('aai-orig-test-1234')
     expect(screen.getByText(/aai-o\*\*\*\*\.\.\.\*\*\*\*1234/)).toBeInTheDocument()
 
     await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
@@ -111,6 +113,38 @@ describe('SettingsView', () => {
     expect(settingsSetMock).toHaveBeenCalledWith('llm_mode', 'openrouter')
     expect(settingsSetMock).toHaveBeenCalledWith('stt_mode', 'assemblyai')
     expect(settingsSetMock).toHaveBeenCalledWith('ocrh_mode', 'glm_ocr')
+  })
+
+  it('enables connection tests for saved keyring credentials without retyping secrets', async () => {
+    settingsGetMock.mockImplementation(async (key: string) => {
+      if (key === 'openrouter_api_key') return 'secret_ref:openrouter_api_key'
+      if (key === 'assemblyai_api_key') return 'secret_ref:assemblyai_api_key'
+      if (key === 'glm_ocr_api_key') return 'secret_ref:glm_ocr_api_key'
+      if (key === 'openrouter_model') return 'anthropic/claude-3.7-sonnet'
+      if (key === 'openrouter_embedding_model') return 'baai/bge-m3'
+      return null
+    })
+    testOpenrouterConnectionMock.mockResolvedValue([
+      { id: 'google/gemma-3-4b-it', name: 'Gemma 3 4B', context_length: 8192 },
+    ])
+
+    render(SettingsView)
+
+    const testButtons = await screen.findAllByRole('button', { name: 'Probar conexión' })
+    expect(testButtons).toHaveLength(3)
+    await waitFor(() => {
+      expect(testButtons[0]).toBeEnabled()
+      expect(testButtons[1]).toBeEnabled()
+      expect(testButtons[2]).toBeEnabled()
+    })
+
+    await fireEvent.click(testButtons[0]!)
+    await fireEvent.click(testButtons[1]!)
+    await fireEvent.click(testButtons[2]!)
+
+    expect(testOpenrouterConnectionMock).toHaveBeenCalledWith('')
+    expect(testAssemblyaiConnectionMock).toHaveBeenCalledWith('')
+    expect(testGlmOcrConnectionMock).toHaveBeenCalledWith('')
   })
 
   it('shows a retryable error when initial settings fail to load', async () => {

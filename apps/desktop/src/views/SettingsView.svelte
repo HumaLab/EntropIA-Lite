@@ -40,6 +40,10 @@
   let availableModels = $state<ModelInfo[]>([])
   let loadSettingsError = $state<string | null>(null)
 
+  const hasOpenRouterCredential = $derived(Boolean(apiKey.trim() || maskedApiKey))
+  const hasAssemblyAiCredential = $derived(Boolean(assemblyAiApiKey.trim() || maskedAssemblyAiApiKey))
+  const hasGlmOcrCredential = $derived(Boolean(glmOcrApiKey.trim() || maskedGlmOcrApiKey))
+
   const SECRET_REF_PREFIX = 'secret_ref:'
   const PROVIDER_LINKS = {
     openrouter: 'https://openrouter.ai/',
@@ -111,7 +115,7 @@
   }
 
   async function handleTestConnection() {
-    if (!apiKey.trim()) {
+    if (!hasOpenRouterCredential) {
       testResult = { success: false, message: t('settings.enterApiKey') }
       return
     }
@@ -135,7 +139,7 @@
   }
 
   async function handleTestAssemblyAiConnection() {
-    if (!assemblyAiApiKey.trim()) {
+    if (!hasAssemblyAiCredential) {
       assemblyAiTestResult = { success: false, message: t('settings.enterAssemblyAiApiKey') }
       return
     }
@@ -159,7 +163,7 @@
   }
 
   async function handleTestGlmOcrConnection() {
-    if (!glmOcrApiKey.trim()) {
+    if (!hasGlmOcrCredential) {
       glmOcrTestResult = { success: false, message: t('settings.enterGlmOcrApiKey') }
       return
     }
@@ -335,7 +339,7 @@
               variant="secondary"
               size="sm"
               onclick={handleTestConnection}
-              disabled={testing || !apiKey.trim()}
+              disabled={testing || !hasOpenRouterCredential}
             >
               {testing ? t('settings.testingConnection') : t('settings.testConnection')}
             </Button>
@@ -420,7 +424,7 @@
               variant="secondary"
               size="sm"
               onclick={handleTestAssemblyAiConnection}
-              disabled={testingAssemblyAi || !assemblyAiApiKey.trim()}
+              disabled={testingAssemblyAi || !hasAssemblyAiCredential}
             >
               {testingAssemblyAi ? t('settings.testingConnection') : t('settings.testConnection')}
             </Button>
@@ -476,7 +480,7 @@
               variant="secondary"
               size="sm"
               onclick={handleTestGlmOcrConnection}
-              disabled={testingGlmOcr || !glmOcrApiKey.trim()}
+              disabled={testingGlmOcr || !hasGlmOcrCredential}
             >
               {testingGlmOcr ? t('settings.testingConnection') : t('settings.testConnection')}
             </Button>

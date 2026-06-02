@@ -64,8 +64,22 @@ pub async fn extract_text(
 }
 
 #[tauri::command]
-pub async fn test_glm_ocr_connection(api_key: String) -> Result<(), String> {
-    super::glm_ocr::GlmOcrClient::new(api_key)
+pub async fn test_glm_ocr_connection(
+    api_key: String,
+    db: State<'_, AppDbState>,
+) -> Result<(), String> {
+    let api_key = if api_key.trim().is_empty() {
+        let conn = db
+            .ui_conn
+            .lock()
+            .map_err(|e| format!("DB lock poisoned: {e}"))?;
+        crate::settings::get_secret_setting(&conn, super::OCRH_SETTING_GLM_OCR_API_KEY)
+            .unwrap_or_default()
+    } else {
+        api_key
+    };
+
+    super::glm_ocr::GlmOcrClient::new(api_key.trim().to_string())
         .test_connection()
         .await
 }
