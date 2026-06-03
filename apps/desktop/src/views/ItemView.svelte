@@ -38,10 +38,7 @@
     loadNotesForAssetScope,
   } from '$lib/item-view-notes'
   import { FtsSearchController } from '$lib/item-view-search'
-  import {
-    DebouncedAssetReanalysisScheduler,
-    DebouncedAssetTextPersistor,
-  } from '$lib/item-view-text-persistence'
+  import { DebouncedAssetTextPersistor } from '$lib/item-view-text-persistence'
   import { LatestRequestGuard } from '$lib/item-view-load-guards'
   import {
     getActiveLlmTarget,
@@ -271,10 +268,13 @@
   const ocrStore = new OcrStore({
     onComplete: (assetId) => {
       // After OCR extraction completes on a specific asset, auto-trigger
-      // asset-level refreshes and entity extraction.
+      // OCR-dependent refreshes and one automatic embedding pass.
       if (selectedAsset && selectedAsset.id === assetId) {
         void reloadSelectedAssetPersistedState({ layout: true })
-        void extractEntitiesForAsset(itemId, assetId).catch(() => {})
+      }
+      if (assets.some((asset) => asset.id === assetId)) {
+        void indexFtsAfterTextAvailable(assetId)
+        void embedAfterSuccessfulTextGeneration(assetId)
       }
     },
   })
@@ -286,39 +286,27 @@
   // Transcription state — mirrors OcrStore pattern for audio assets
   const transcriptionStore = new TranscriptionStore({
     onComplete: (assetId) => {
-      // After transcription completes, auto-trigger entity extraction only.
-      if (selectedAsset && selectedAsset.id === assetId) {
-        void extractEntitiesForAsset(itemId, assetId).catch(() => {})
+      // After STT produces text, run the same one-shot embedding pass as OCR/PTT.
+      if (assets.some((asset) => asset.id === assetId)) {
+        void indexFtsAfterTextAvailable(assetId)
+        void embedAfterSuccessfulTextGeneration(assetId)
       }
     },
   })
   let transcriptionTick = $state(0)
 
   let transEditedText = $state(new Map<string, string>())
+  let autoEmbeddedAfterGeneratedTextAssetIds = new Set<string>()
 
   const PERSIST_IDLE_MS = 500
-  const REANALYSIS_IDLE_MS = 1500
-
-  const assetReanalysisScheduler = new DebouncedAssetReanalysisScheduler({
-    delayMs: REANALYSIS_IDLE_MS,
-    getJobs: (assetId) => [
-      ['ner', () => extractEntitiesForAsset(itemId, assetId)],
-      ['fts', () => indexFts(itemId)],
-      ['embed', () => embedAsset(itemId, assetId)],
-    ],
-    onStart: (assetId) => {
-      console.info('[ItemView] Re-running post-edit analysis', { itemId, assetId })
-    },
-    onJobError: (jobName, reason) => {
-      console.error(`[ItemView] Post-edit ${jobName} failed`, reason)
-    },
-  })
 
   const ocrTextPersistor = new DebouncedAssetTextPersistor({
     delayMs: PERSIST_IDLE_MS,
     persist: (assetId, text) =>
       invoke('update_extraction_text_cmd', { assetId, textContent: text }),
-    afterPersist: (assetId) => scheduleAssetReanalysis(assetId),
+    afterPersist: (assetId) => {
+      void indexFtsAfterTextAvailable(assetId)
+    },
     onError: (error) => {
       console.error('[ItemView] Failed to persist OCR correction:', error)
     },
@@ -328,7 +316,9 @@
     delayMs: PERSIST_IDLE_MS,
     persist: (assetId, text) =>
       invoke('update_transcription_text_cmd', { assetId, textContent: text }),
-    afterPersist: (assetId) => scheduleAssetReanalysis(assetId),
+    afterPersist: (assetId) => {
+      void indexFtsAfterTextAvailable(assetId)
+    },
     onError: (error) => {
       console.error('[ItemView] Failed to persist transcription correction:', error)
     },
@@ -339,18 +329,33 @@
     persist: persistAnnotations,
   })
 
-  function scheduleAssetReanalysis(assetId: string) {
-    assetReanalysisScheduler.schedule(assetId)
-  }
-
-  /** Save quickly, but only re-run expensive analysis after longer inactivity. */
+  /** Save manual OCR edits; cheap FTS indexing runs after successful persistence. */
   function schedulePersist(assetId: string, text: string) {
     ocrTextPersistor.schedule(assetId, text)
   }
 
-  /** Schedule a debounced persist of edited transcription text to the DB. */
+  /** Save manual transcription edits; cheap FTS indexing runs after successful persistence. */
   function scheduleTranscriptionPersist(assetId: string, text: string) {
     transcriptionTextPersistor.schedule(assetId, text)
+  }
+
+  async function indexFtsAfterTextAvailable(assetId: string) {
+    try {
+      await indexFts(itemId)
+    } catch (error) {
+      console.error('[ItemView] Automatic FTS indexing failed', { itemId, assetId, error })
+    }
+  }
+
+  async function embedAfterSuccessfulTextGeneration(assetId: string) {
+    if (autoEmbeddedAfterGeneratedTextAssetIds.has(assetId)) return
+    autoEmbeddedAfterGeneratedTextAssetIds.add(assetId)
+
+    try {
+      await embedAsset(itemId, assetId)
+    } catch (error) {
+      console.error('[ItemView] Automatic post-text embedding failed', { itemId, assetId, error })
+    }
   }
 
   // NLP state — mirrors OcrStore pattern
@@ -828,6 +833,31 @@
   let textPanelIsSummarizing = $derived(
     textPanelLlmState.status === 'running' && textPanelLlmState.activeJob === 'summarize'
   )
+  let selectedAssetHasText = $derived.by(() => {
+    if (!selectedAsset) return false
+    const text =
+      selectedAsset.type === 'audio' ? textPanelTranscriptionEditedText : textPanelOcrEditedText
+    return text.trim().length > 0
+  })
+  let ftsReadinessKey = $derived.by((): I18nKey | null => {
+    if (!selectedAsset) return null
+    if (!selectedAssetHasText) return 'item.searchReadiness.textNeeded'
+
+    const nlpState = getNlpState()
+    if (nlpState.fts !== 'done') return 'item.searchReadiness.ftsIndexNeeded'
+
+    return null
+  })
+  let similarAssetsReadinessKey = $derived.by((): I18nKey | null => {
+    if (!selectedAsset) return null
+    if (!selectedAssetHasText) return 'item.searchReadiness.textNeeded'
+    if (!llmAvailable) return 'item.searchReadiness.openRouterNeeded'
+
+    const nlpState = getNlpState()
+    if (nlpState.embed !== 'done') return 'item.searchReadiness.embeddingNeeded'
+
+    return null
+  })
 
   function syncLayoutHoverFromBlock(blockId: string | null) {
     const nextState = getLayoutInteractionStateFromBlockId(visibleLayoutBlocks, blockId)
@@ -1098,6 +1128,7 @@
   })
 
   async function handleExtractText(asset: Asset, mode: OcrMode = 'light') {
+    autoEmbeddedAfterGeneratedTextAssetIds.delete(asset.id)
     await runPendingAssetJob({
       assetId: asset.id,
       updateState: (assetId, state) => ocrStore._updateState(assetId, state),
@@ -1110,6 +1141,7 @@
   }
 
   async function handleTranscribeAudio(asset: Asset) {
+    autoEmbeddedAfterGeneratedTextAssetIds.delete(asset.id)
     await runPendingAssetJob({
       assetId: asset.id,
       updateState: (assetId, state) => transcriptionStore._updateState(assetId, state),
@@ -1912,7 +1944,6 @@
     // Clear any pending debounce timers to avoid stale persist after unmount
     ocrTextPersistor.cancelAll()
     transcriptionTextPersistor.cancelAll()
-    assetReanalysisScheduler.cancelAll()
     annotationPersistor.cancelAll()
     ftsSearchController.cancel()
     metadataPersistor.cancel()
@@ -2256,7 +2287,9 @@
             {ftsSearchError}
             {ftsIndexedRows}
             {ftsDebug}
+            {ftsReadinessKey}
             {similarAssets}
+            {similarAssetsReadinessKey}
             {isDev}
             {translate}
             onFtsInput={handleFtsInput}

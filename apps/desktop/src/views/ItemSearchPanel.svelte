@@ -31,7 +31,9 @@
     ftsSearchError,
     ftsIndexedRows,
     ftsDebug,
+    ftsReadinessKey,
     similarAssets,
+    similarAssetsReadinessKey,
     isDev,
     translate,
     onFtsInput,
@@ -47,7 +49,9 @@
     ftsSearchError: string | null
     ftsIndexedRows: number | null
     ftsDebug: ItemFtsDebug | null
+    ftsReadinessKey: I18nKey | null
     similarAssets: SimilarAsset[]
+    similarAssetsReadinessKey: I18nKey | null
     isDev: boolean
     translate: (key: I18nKey, params?: I18nParams) => string
     onFtsInput: (event: Event) => void
@@ -93,8 +97,14 @@
           <p class="empty-text">{translate('item.ftsSearching')}</p>
         {:else if ftsQuery.trim().length === 0}
           <p class="empty-text">{translate('item.ftsPrompt')}</p>
+          {#if ftsReadinessKey}
+            <p class="readiness-callout">{translate(ftsReadinessKey)}</p>
+          {/if}
         {:else if ftsResults.length === 0}
           <p class="empty-text">{translate('item.ftsNoResults')}</p>
+          {#if ftsReadinessKey}
+            <p class="readiness-callout">{translate(ftsReadinessKey)}</p>
+          {/if}
         {:else}
           <ul class="similar-list">
             {#each ftsResults as result (result.itemId)}
@@ -226,6 +236,9 @@
               {translate('item.similarAssetsNeedSelection')}
             {/if}
           </p>
+          {#if selectedAsset && similarAssetsReadinessKey}
+            <p class="readiness-callout">{translate(similarAssetsReadinessKey)}</p>
+          {/if}
         </div>
       {/if}
     </div>
@@ -291,6 +304,17 @@
   .fts-search-input:focus {
     border-color: var(--border-focus);
     box-shadow: var(--focus-ring);
+  }
+
+  .readiness-callout {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+    line-height: 1.45;
   }
 
   .fts-match {

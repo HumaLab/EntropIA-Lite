@@ -321,6 +321,14 @@ const es = {
   'item.ftsSearching': 'Buscando textos similares...',
   'item.ftsPrompt': 'Ingresá un término para ver resultados.',
   'item.ftsNoResults': 'No hay resultados para esa búsqueda.',
+  'item.searchReadiness.textNeeded':
+    'Primero extraé o transcribí texto para que la búsqueda y la similitud tengan material para comparar.',
+  'item.searchReadiness.ftsIndexNeeded':
+    'Si la búsqueda no trae resultados, indexá el texto desde Análisis.',
+  'item.searchReadiness.embeddingNeeded':
+    'Para ver similitud semántica, generá embeddings desde Análisis.',
+  'item.searchReadiness.openRouterNeeded':
+    'La similitud semántica requiere OpenRouter configurado en Configuración.',
   'item.page': 'Página {page}',
   'item.pageShort': 'P{page}',
   'item.pageOf': 'Página {page} de {total}',
@@ -898,6 +906,14 @@ const en: Record<keyof typeof es | ExtraI18nKey, string> = {
   'item.ftsSearching': 'Searching similar texts...',
   'item.ftsPrompt': 'Enter a term to see results.',
   'item.ftsNoResults': 'No results for that search.',
+  'item.searchReadiness.textNeeded':
+    'Extract or transcribe text first so search and similarity have material to compare.',
+  'item.searchReadiness.ftsIndexNeeded':
+    'If search returns no results, index the text from Analysis.',
+  'item.searchReadiness.embeddingNeeded':
+    'To see semantic similarity, generate embeddings from Analysis.',
+  'item.searchReadiness.openRouterNeeded':
+    'Semantic similarity requires OpenRouter configured in Settings.',
   'item.page': 'Page {page}',
   'item.pageShort': 'P{page}',
   'item.pageOf': 'Page {page} of {total}',

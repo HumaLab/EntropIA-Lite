@@ -5,6 +5,8 @@ import ItemView from './ItemView.svelte'
 const {
   nlpEventHandlers,
   embedAssetMock,
+  extractEntitiesForAssetMock,
+  indexFtsMock,
   extractTriplesMock,
   llmSummarizeAssetMock,
   llmCorrectOcrAssetMock,
@@ -14,10 +16,13 @@ const {
   extractTextMock,
   getLayoutByAssetMock,
   clipboardWriteTextMock,
+  llmIsAvailableMock,
   invokeMock,
 } = vi.hoisted(() => ({
   nlpEventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   embedAssetMock: vi.fn<(_: string, __: string) => Promise<void>>(),
+  extractEntitiesForAssetMock: vi.fn<(_: string, __: string) => Promise<void>>(),
+  indexFtsMock: vi.fn<(_: string) => Promise<void>>(),
   extractTriplesMock: vi.fn<(_: string) => Promise<void>>(),
   llmSummarizeAssetMock: vi.fn<(_: string) => Promise<void>>(),
   llmCorrectOcrAssetMock: vi.fn<(_: string) => Promise<void>>(),
@@ -43,6 +48,7 @@ const {
   extractTextMock: vi.fn(),
   getLayoutByAssetMock: vi.fn(),
   clipboardWriteTextMock: vi.fn<(_: string) => Promise<void>>(),
+  llmIsAvailableMock: vi.fn<() => Promise<boolean>>(),
   invokeMock: vi.fn<(_: string, __?: unknown) => Promise<unknown>>(async (command: string) => {
     if (command === 'llm_get_results') return []
     if (command === 'llm_get_result') return null
@@ -131,6 +137,11 @@ type StoreOptions = {
     }
   >
   annotationsByAsset?: Record<string, AnnotationRow[]>
+  extractionsByAsset?: Record<string, { textContent: string; method?: string }>
+  transcriptionsByAsset?: Record<
+    string,
+    { textContent: string; language?: string | null; durationMs?: number | null; segments?: string | null }
+  >
   replaceAnnotationsImpl?: (
     assetId: string,
     page: number,
@@ -174,6 +185,8 @@ function createStore({
     },
   },
   annotationsByAsset = {},
+  extractionsByAsset = {},
+  transcriptionsByAsset = {},
   replaceAnnotationsImpl = async () => undefined,
 }: StoreOptions = {}) {
   return {
@@ -202,10 +215,17 @@ function createStore({
       replaceForAssetPage: vi.fn().mockImplementation(replaceAnnotationsImpl),
     },
     extractions: {
-      findByAsset: vi.fn().mockResolvedValue(null),
+      findByAsset: vi.fn().mockImplementation(async (assetId: string) => {
+        const extraction = extractionsByAsset[assetId]
+        return extraction
+          ? { textContent: extraction.textContent, method: extraction.method ?? 'light' }
+          : null
+      }),
     },
     transcriptions: {
-      findByAsset: vi.fn().mockResolvedValue(null),
+      findByAsset: vi.fn().mockImplementation(async (assetId: string) => {
+        return transcriptionsByAsset[assetId] ?? null
+      }),
     },
     entities: {
       findByItemId: vi.fn().mockResolvedValue(entitiesRows),
@@ -282,9 +302,10 @@ vi.mock('$lib/nlp', async () => {
     ...actual,
     extractTriples: extractTriplesMock,
     similarAssets: similarAssetsMock,
-    indexFts: vi.fn().mockResolvedValue(undefined),
+    indexFts: indexFtsMock,
     embedAsset: embedAssetMock,
     extractEntities: vi.fn().mockResolvedValue(undefined),
+    extractEntitiesForAsset: extractEntitiesForAssetMock,
   }
 })
 
@@ -292,7 +313,7 @@ vi.mock('$lib/llm', async () => {
   const actual = await vi.importActual<typeof import('$lib/llm')>('$lib/llm')
   return {
     ...actual,
-    llmIsAvailable: vi.fn().mockResolvedValue(true),
+    llmIsAvailable: llmIsAvailableMock,
     llmGetResult: vi.fn().mockResolvedValue(null),
     llmGetResults: vi.fn().mockResolvedValue([]),
     llmSummarize: vi.fn().mockResolvedValue(undefined),
@@ -404,6 +425,9 @@ beforeEach(() => {
     value: { writeText: clipboardWriteTextMock },
   })
   clipboardWriteTextMock.mockReset().mockResolvedValue(undefined)
+  llmIsAvailableMock.mockReset().mockResolvedValue(true)
+  extractEntitiesForAssetMock.mockReset().mockResolvedValue(undefined)
+  indexFtsMock.mockReset().mockResolvedValue(undefined)
   invokeMock.mockReset().mockImplementation(async (command: string) => {
     if (command === 'llm_get_results') return []
     if (command === 'llm_get_result') return null
@@ -417,6 +441,8 @@ describe('ItemView semantic triples panel', () => {
   beforeEach(() => {
     nlpEventHandlers.clear()
     embedAssetMock.mockReset().mockResolvedValue(undefined)
+    extractEntitiesForAssetMock.mockReset().mockResolvedValue(undefined)
+    indexFtsMock.mockReset().mockResolvedValue(undefined)
     extractTriplesMock.mockReset().mockResolvedValue(undefined)
     llmExtractTriplesMock.mockReset().mockResolvedValue(undefined)
     llmExtractTriplesAssetMock.mockReset().mockResolvedValue(undefined)
@@ -883,6 +909,39 @@ describe('ItemView full-text search in Analysis panel', () => {
       expect(screen.getByText('item-2')).toBeInTheDocument()
     })
   })
+
+  it('shows readiness guidance when search and similarity have no extracted text yet', async () => {
+    storeRef.current = createStore()
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    const analysisToggle = await screen.findByRole('tab', { name: /Análisis/i })
+    await fireEvent.click(analysisToggle)
+
+    expect(
+      await screen.findAllByText(
+        'Primero extraé o transcribí texto para que la búsqueda y la similitud tengan material para comparar.'
+      )
+    ).toHaveLength(2)
+  })
+
+  it('shows OpenRouter readiness guidance for semantic similarity after text exists', async () => {
+    llmIsAvailableMock.mockResolvedValue(false)
+    storeRef.current = createStore({
+      extractionsByAsset: {
+        'asset-1': { textContent: 'Texto histórico listo para comparar.' },
+      },
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    const analysisToggle = await screen.findByRole('tab', { name: /Análisis/i })
+    await fireEvent.click(analysisToggle)
+
+    expect(
+      await screen.findByText('La similitud semántica requiere OpenRouter configurado en Configuración.')
+    ).toBeInTheDocument()
+  })
 })
 
 describe('ItemView note editing', () => {
@@ -1267,6 +1326,8 @@ describe('ItemView image annotations', () => {
     vi.useFakeTimers()
     nlpEventHandlers.clear()
     embedAssetMock.mockReset().mockResolvedValue(undefined)
+    extractEntitiesForAssetMock.mockReset().mockResolvedValue(undefined)
+    indexFtsMock.mockReset().mockResolvedValue(undefined)
     extractTriplesMock.mockReset().mockResolvedValue(undefined)
     llmExtractTriplesMock.mockReset().mockResolvedValue(undefined)
     llmExtractTriplesAssetMock.mockReset().mockResolvedValue(undefined)
@@ -1477,7 +1538,142 @@ describe('ItemView image annotations', () => {
       expect(getLayoutByAssetMock).toHaveBeenCalledTimes(2)
       expect(layoutToggle).toBeEnabled()
     })
+    await waitFor(() => {
+      expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
+    })
+    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(embedAssetMock).toHaveBeenCalledTimes(1)
+    expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
     expect(screen.getByText(/paddle_vl · 5 bloques · 5 regiones/i)).toBeInTheDocument()
+  })
+
+  it('runs automatic EMBED only once and indexes FTS for duplicate OCR completion events', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-image-1',
+          itemId: 'item-1',
+          path: 'docs/photo-a.jpg',
+          type: 'image',
+          createdAt: 1,
+        },
+      ],
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+
+    const completePayload = {
+      asset_id: 'asset-image-1',
+      method: 'paddle_vl',
+      text_length: 128,
+      text_content: 'OCR listo',
+    }
+    nlpEventHandlers.get('ocr:complete')?.({ payload: completePayload })
+    nlpEventHandlers.get('ocr:complete')?.({ payload: completePayload })
+
+    await waitFor(() => {
+      expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
+    })
+    expect(embedAssetMock).toHaveBeenCalledTimes(1)
+    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(indexFtsMock).toHaveBeenCalledTimes(2)
+    expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
+  })
+
+  it('persists manual OCR edits and auto-runs only FTS indexing', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-image-1',
+          itemId: 'item-1',
+          path: 'docs/photo-a.jpg',
+          type: 'image',
+          createdAt: 1,
+        },
+      ],
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+    nlpEventHandlers.get('ocr:complete')?.({
+      payload: {
+        asset_id: 'asset-image-1',
+        method: 'paddle_vl',
+        text_length: 128,
+        text_content: 'OCR listo',
+      },
+    })
+    expect(embedAssetMock).toHaveBeenCalledTimes(1)
+
+    embedAssetMock.mockClear()
+    extractEntitiesForAssetMock.mockClear()
+    indexFtsMock.mockClear()
+    await fireEvent.click(screen.getByRole('tab', { name: /^Texto$/i }))
+
+    const textarea = screen.getByDisplayValue('OCR listo') as HTMLTextAreaElement
+    await fireEvent.input(textarea, { target: { value: 'OCR editado manualmente' } })
+
+    await vi.advanceTimersByTimeAsync(2100)
+
+    expect(invokeMock).toHaveBeenCalledWith('update_extraction_text_cmd', {
+      assetId: 'asset-image-1',
+      textContent: 'OCR editado manualmente',
+    })
+    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(indexFtsMock).toHaveBeenCalledTimes(1)
+    expect(embedAssetMock).not.toHaveBeenCalled()
+    expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
+  })
+
+  it('persists manual transcription edits and auto-runs only FTS indexing', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-audio-1',
+          itemId: 'item-1',
+          path: 'docs/audio.mp3',
+          type: 'audio',
+          createdAt: 1,
+        },
+      ],
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+    nlpEventHandlers.get('transcription:complete')?.({
+      payload: {
+        asset_id: 'asset-audio-1',
+        text: 'Transcripción lista',
+        language: 'es',
+        duration_ms: 12000,
+        segments_count: 1,
+      },
+    })
+    expect(embedAssetMock).toHaveBeenCalledTimes(1)
+    expect(indexFtsMock).toHaveBeenCalledTimes(1)
+
+    embedAssetMock.mockClear()
+    extractEntitiesForAssetMock.mockClear()
+    indexFtsMock.mockClear()
+    await fireEvent.click(screen.getByRole('tab', { name: /^Texto$/i }))
+
+    const textarea = screen.getByDisplayValue('Transcripción lista') as HTMLTextAreaElement
+    await fireEvent.input(textarea, { target: { value: 'Transcripción editada manualmente' } })
+
+    await vi.advanceTimersByTimeAsync(2100)
+
+    expect(invokeMock).toHaveBeenCalledWith('update_transcription_text_cmd', {
+      assetId: 'asset-audio-1',
+      textContent: 'Transcripción editada manualmente',
+    })
+    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(indexFtsMock).toHaveBeenCalledTimes(1)
+    expect(embedAssetMock).not.toHaveBeenCalled()
+    expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
   })
 
   it('syncs list hover/select with overlay state and keeps selection persistent', async () => {
@@ -2129,5 +2325,29 @@ describe('ItemView processing labels by asset type', () => {
     expect(screen.queryByRole('button', { name: 'OCRH' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'OCRC' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'OCRR' })).not.toBeInTheDocument()
+  })
+
+  it('auto-runs EMBED once and indexes FTS when transcription completes', async () => {
+    await renderTextTabForAsset('audio')
+
+    const completePayload = {
+      asset_id: 'asset-audio-1',
+      text: 'Transcripción lista',
+      language: 'es',
+      duration_ms: 12000,
+      segments_count: 1,
+    }
+    nlpEventHandlers.get('transcription:complete')?.({
+      payload: {
+        ...completePayload,
+      },
+    })
+    nlpEventHandlers.get('transcription:complete')?.({ payload: completePayload })
+
+    expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-audio-1')
+    expect(embedAssetMock).toHaveBeenCalledTimes(1)
+    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(indexFtsMock).toHaveBeenCalledTimes(2)
+    expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
   })
 })
