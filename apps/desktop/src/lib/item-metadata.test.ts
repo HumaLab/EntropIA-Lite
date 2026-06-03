@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import {
+  DebouncedMetadataPersistor,
   IMPORTED_FILE_METADATA_KEY,
   buildTechnicalMetadata,
   getAssetPathLabel,
@@ -100,5 +101,124 @@ describe('item metadata helpers', () => {
     expect(getAssetPathLabel('C:\\documentos\\imagen.png')).toBe('imagen.png')
     expect(getAssetTypeLabel('image')).toBe('IMAGE')
     expect(getAssetTypeLabel('')).toBe('ASSET')
+  })
+})
+
+describe('DebouncedMetadataPersistor', () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  function createPersistor({
+    item = { id: 'item-1', metadata: '{}' },
+    updateItem = vi.fn().mockResolvedValue(undefined),
+    onSavingChange = vi.fn(),
+    onError = vi.fn(),
+  }: {
+    item?: Pick<Item, 'id' | 'metadata'> | null
+    updateItem?: (id: string, patch: { metadata: string }) => Promise<unknown>
+    onSavingChange?: (saving: boolean) => void
+    onError?: (error: string) => void
+  } = {}) {
+    let currentItem = item
+    const persistor = new DebouncedMetadataPersistor({
+      delayMs: 1000,
+      getItem: () => currentItem,
+      updateItem,
+      onSavingChange,
+      onError,
+    })
+
+    return {
+      persistor,
+      updateItem,
+      onSavingChange,
+      onError,
+      setItem: (nextItem: Pick<Item, 'id' | 'metadata'> | null) => {
+        currentItem = nextItem
+      },
+    }
+  }
+
+  it('coalesces multiple scheduled saves into the latest metadata update', async () => {
+    const { persistor, updateItem } = createPersistor()
+
+    persistor.schedule({ autor: 'Moreno' })
+    await vi.advanceTimersByTimeAsync(999)
+    persistor.schedule({ autor: 'Belgrano' })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(updateItem).toHaveBeenCalledTimes(1)
+    expect(updateItem).toHaveBeenCalledWith('item-1', {
+      metadata: JSON.stringify({ autor: 'Belgrano' }),
+    })
+  })
+
+  it('preserves reserved imported-file metadata when saving', async () => {
+    const { persistor, updateItem } = createPersistor({
+      item: {
+        id: 'item-1',
+        metadata: JSON.stringify({
+          [IMPORTED_FILE_METADATA_KEY]: { originalName: 'fuente.pdf' },
+        }),
+      },
+    })
+
+    persistor.schedule({ autor: 'Belgrano' })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(updateItem).toHaveBeenCalledWith('item-1', {
+      metadata: JSON.stringify({
+        autor: 'Belgrano',
+        [IMPORTED_FILE_METADATA_KEY]: { originalName: 'fuente.pdf' },
+      }),
+    })
+  })
+
+  it('reports saving state around the debounced update', async () => {
+    const { persistor, onSavingChange } = createPersistor()
+
+    persistor.schedule({ autor: 'Moreno' })
+    expect(onSavingChange).not.toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(onSavingChange).toHaveBeenNthCalledWith(1, true)
+    expect(onSavingChange).toHaveBeenNthCalledWith(2, false)
+  })
+
+  it('reports update errors with the existing fallback message', async () => {
+    const { persistor, onError } = createPersistor({
+      updateItem: vi.fn().mockRejectedValue('boom'),
+    })
+
+    persistor.schedule({ autor: 'Moreno' })
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(onError).toHaveBeenCalledWith('Failed to save metadata')
+  })
+
+  it('cancels pending metadata saves', async () => {
+    const { persistor, updateItem } = createPersistor()
+
+    persistor.schedule({ autor: 'Moreno' })
+    persistor.cancel()
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(updateItem).not.toHaveBeenCalled()
+  })
+
+  it('does not save when no item is available at execution time', async () => {
+    const { persistor, updateItem, setItem } = createPersistor()
+
+    persistor.schedule({ autor: 'Moreno' })
+    setItem(null)
+    await vi.advanceTimersByTimeAsync(1000)
+
+    expect(updateItem).not.toHaveBeenCalled()
   })
 })

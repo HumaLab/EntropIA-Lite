@@ -20,6 +20,69 @@ export type TechnicalMetadataEntry = {
   value: string
 }
 
+type MetadataPersistItem = Pick<Item, 'id' | 'metadata'>
+
+type DebouncedMetadataPersistorOptions = {
+  delayMs?: number
+  getItem: () => MetadataPersistItem | null
+  updateItem: (id: string, patch: { metadata: string }) => Promise<unknown>
+  onSavingChange: (saving: boolean) => void
+  onError: (error: string) => void
+}
+
+export class DebouncedMetadataPersistor {
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private readonly delayMs: number
+  private readonly getItem: () => MetadataPersistItem | null
+  private readonly updateItem: (id: string, patch: { metadata: string }) => Promise<unknown>
+  private readonly onSavingChange: (saving: boolean) => void
+  private readonly onError: (error: string) => void
+
+  constructor({
+    delayMs = 1000,
+    getItem,
+    updateItem,
+    onSavingChange,
+    onError,
+  }: DebouncedMetadataPersistorOptions) {
+    this.delayMs = delayMs
+    this.getItem = getItem
+    this.updateItem = updateItem
+    this.onSavingChange = onSavingChange
+    this.onError = onError
+  }
+
+  schedule(metadata: Record<string, string>) {
+    this.cancel()
+    this.timer = setTimeout(() => {
+      void this.persist(metadata)
+    }, this.delayMs)
+  }
+
+  cancel() {
+    if (!this.timer) return
+    clearTimeout(this.timer)
+    this.timer = null
+  }
+
+  private async persist(metadata: Record<string, string>) {
+    this.timer = null
+    const item = this.getItem()
+    if (!item) return
+
+    try {
+      this.onSavingChange(true)
+      await this.updateItem(item.id, {
+        metadata: JSON.stringify(mergeReservedMetadata(metadata, item.metadata)),
+      })
+    } catch (e) {
+      this.onError(e instanceof Error ? e.message : 'Failed to save metadata')
+    } finally {
+      this.onSavingChange(false)
+    }
+  }
+}
+
 export function parseMetadataRecord(json: string): Record<string, string> {
   try {
     const obj = JSON.parse(json)

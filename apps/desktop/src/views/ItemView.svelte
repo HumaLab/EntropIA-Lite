@@ -2,10 +2,10 @@
   import { getStore } from '$lib/db'
   import { getAssetUrl } from '$lib/file-import'
   import {
+    DebouncedMetadataPersistor,
     buildTechnicalMetadata,
     getAssetPathLabel,
     getAssetTypeLabel,
-    mergeReservedMetadata,
     normalizeMetadataKey,
     parseImportedFileMetadata,
     parseMetadataRecord,
@@ -1074,7 +1074,16 @@
   let imageNaturalW = $state(0)
   let imageNaturalH = $state(0)
 
-  let metadataSaveTimer: ReturnType<typeof setTimeout> | null = null
+  const metadataPersistor = new DebouncedMetadataPersistor({
+    getItem: () => item,
+    updateItem: (id, patch) => getStore().items.update(id, patch),
+    onSavingChange: (saving) => {
+      savingMetadata = saving
+    },
+    onError: (message) => {
+      error = message
+    },
+  })
 
   async function handleExtractText(asset: Asset, mode: OcrMode = 'light') {
     ocrStore._updateState(asset.id, { status: 'pending', progress: 0 })
@@ -1490,21 +1499,7 @@
   }
 
   function handleMetadataChange(metadata: Record<string, string>) {
-    if (metadataSaveTimer) clearTimeout(metadataSaveTimer)
-    metadataSaveTimer = setTimeout(async () => {
-      if (!item) return
-      try {
-        savingMetadata = true
-        const store = getStore()
-        await store.items.update(item.id, {
-          metadata: JSON.stringify(mergeReservedMetadata(metadata, item.metadata)),
-        })
-      } catch (e) {
-        error = e instanceof Error ? e.message : 'Failed to save metadata'
-      } finally {
-        savingMetadata = false
-      }
-    }, 1000)
+    metadataPersistor.schedule(metadata)
   }
 
   async function handleSaveNote(content: string) {
@@ -1915,9 +1910,7 @@
       })
 
     geoStore.startListening()
-    return () => {
-      if (metadataSaveTimer) clearTimeout(metadataSaveTimer)
-    }
+    return () => metadataPersistor.cancel()
   })
 
   onDestroy(() => {
@@ -1944,6 +1937,7 @@
     assetReanalysisScheduler.cancelAll()
     annotationPersistor.cancelAll()
     ftsSearchController.cancel()
+    metadataPersistor.cancel()
     if (dragCleanup) dragCleanup()
   })
 </script>
