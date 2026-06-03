@@ -1,4 +1,5 @@
-import type { ViewerAnnotation } from '@entropia/ui'
+import type { Annotation as StoreAnnotation } from '@entropia/store'
+import type { AnnotationKind as ViewerAnnotationKind, ViewerAnnotation } from '@entropia/ui'
 
 type Timer = ReturnType<typeof setTimeout>
 
@@ -12,6 +13,8 @@ export interface PendingAnnotationSave {
   annotations: ViewerAnnotation[]
 }
 
+export type AnnotationFinder = (assetId: string, page: number) => Promise<StoreAnnotation[]>
+
 export function toAnnotationPersistenceInputs(
   annotations: ViewerAnnotation[]
 ): AnnotationPersistenceInput[] {
@@ -23,6 +26,20 @@ export function toAnnotationPersistenceInputs(
     width: annotation.width,
     height: annotation.height,
   }))
+}
+
+export function toViewerAnnotations(annotations: StoreAnnotation[]): ViewerAnnotation[] {
+  return annotations.map((annotation) => ({
+    ...annotation,
+    kind: annotation.kind as ViewerAnnotationKind,
+  }))
+}
+
+export async function loadViewerAnnotationsForAsset(
+  assetId: string,
+  findByAsset: AnnotationFinder
+): Promise<ViewerAnnotation[]> {
+  return toViewerAnnotations(await findByAsset(assetId, 1))
 }
 
 export class DebouncedAnnotationPersistor {

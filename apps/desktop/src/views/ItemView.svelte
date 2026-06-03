@@ -22,6 +22,7 @@
   } from '$lib/item-view-image-edit'
   import {
     DebouncedAnnotationPersistor,
+    loadViewerAnnotationsForAsset,
     toAnnotationPersistenceInputs,
   } from '$lib/item-view-annotation-persistence'
   import { FtsSearchController } from '$lib/item-view-search'
@@ -115,13 +116,11 @@
     Asset,
     Collection,
     Note,
-    Annotation as StoreAnnotation,
   } from '@entropia/store'
   import type {
     Entity,
     ViewerAnnotation,
     ViewerLayoutRegion,
-    AnnotationKind as ViewerAnnotationKind,
     EditTool,
     ImageEditResult,
   } from '@entropia/ui'
@@ -1698,12 +1697,12 @@
     void (async () => {
       try {
         annotationSaveError = null
-        const loadedAnnotations = await getStore().annotations.findByAsset(asset.id, 1)
+        const loadedAnnotations = await loadViewerAnnotationsForAsset(
+          asset.id,
+          getStore().annotations.findByAsset.bind(getStore().annotations)
+        )
         if (!cancelled && selectedAsset?.id === asset.id) {
-          annotations = loadedAnnotations.map((a) => ({
-            ...a,
-            kind: a.kind as ViewerAnnotationKind,
-          }))
+          annotations = loadedAnnotations
         }
       } catch {
         if (!cancelled) {

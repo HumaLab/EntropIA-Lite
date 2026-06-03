@@ -1,12 +1,33 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import type { Annotation as StoreAnnotation } from '@entropia/store'
 import type { ViewerAnnotation } from '@entropia/ui'
 import {
   DebouncedAnnotationPersistor,
+  loadViewerAnnotationsForAsset,
   toAnnotationPersistenceInputs,
+  toViewerAnnotations,
 } from './item-view-annotation-persistence'
 
 function annotation(overrides: Partial<ViewerAnnotation> = {}): ViewerAnnotation {
   const base: ViewerAnnotation = {
+    id: 'annotation-1',
+    assetId: 'asset-1',
+    page: 1,
+    kind: 'rectangle',
+    color: 'var(--color-accent)',
+    x: 0.1,
+    y: 0.2,
+    width: 0.3,
+    height: 0.4,
+    createdAt: 1,
+    updatedAt: 1,
+  }
+
+  return Object.assign(base, overrides)
+}
+
+function storeAnnotation(overrides: Partial<StoreAnnotation> = {}): StoreAnnotation {
+  const base: StoreAnnotation = {
     id: 'annotation-1',
     assetId: 'asset-1',
     page: 1,
@@ -47,6 +68,46 @@ describe('toAnnotationPersistenceInputs', () => {
         height: 0.45,
       },
     ])
+  })
+})
+
+describe('toViewerAnnotations', () => {
+  it('maps stored annotation kinds to viewer annotation kinds', () => {
+    const annotations = toViewerAnnotations([
+      storeAnnotation({
+        id: 'annotation-1',
+        kind: 'underline',
+        color: '#ff0000',
+      }),
+    ])
+
+    expect(annotations).toEqual([
+      {
+        id: 'annotation-1',
+        assetId: 'asset-1',
+        page: 1,
+        kind: 'underline',
+        color: '#ff0000',
+        x: 0.1,
+        y: 0.2,
+        width: 0.3,
+        height: 0.4,
+        createdAt: 1,
+        updatedAt: 1,
+      },
+    ])
+  })
+})
+
+describe('loadViewerAnnotationsForAsset', () => {
+  it('loads page 1 annotations through the injected finder', async () => {
+    const storedAnnotations = [storeAnnotation({ id: 'annotation-2' })]
+    const findByAsset = vi.fn().mockResolvedValue(storedAnnotations)
+
+    const annotations = await loadViewerAnnotationsForAsset('asset-1', findByAsset)
+
+    expect(findByAsset).toHaveBeenCalledWith('asset-1', 1)
+    expect(annotations).toEqual(toViewerAnnotations(storedAnnotations))
   })
 })
 
