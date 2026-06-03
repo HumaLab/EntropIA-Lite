@@ -11,6 +11,14 @@
     parseMetadataRecord,
     type ImportedFileMetadata,
   } from '$lib/item-metadata'
+  import {
+    cropAnnotations,
+    normalizeAnnotationsForAsset,
+    normalizedToPixels,
+    rotateAnnotations,
+    type NormalizedRegion,
+    type RotationDirection,
+  } from '$lib/item-view-geometry'
   import { splitHighlightedSegments } from '$lib/item-view-search'
   import {
     buildLayoutBlockViews,
@@ -896,32 +904,6 @@
     }
   }
 
-  function clampNormalized(value: number) {
-    return Math.max(0, Math.min(1, value))
-  }
-
-  function normalizeAnnotationsForAsset(
-    asset: Asset,
-    nextAnnotations: ViewerAnnotation[]
-  ): ViewerAnnotation[] {
-    return nextAnnotations.map((annotation) => {
-      const now = Date.now()
-      return {
-        ...annotation,
-        id: annotation.id || crypto.randomUUID(),
-        assetId: asset.id,
-        page: 1,
-        color: annotation.color,
-        x: clampNormalized(annotation.x),
-        y: clampNormalized(annotation.y),
-        width: clampNormalized(annotation.width),
-        height: clampNormalized(annotation.height),
-        createdAt: annotation.createdAt || now,
-        updatedAt: now,
-      }
-    })
-  }
-
   async function persistAnnotations(assetId: string, nextAnnotations: ViewerAnnotation[]) {
     try {
       const inputs = nextAnnotations.map((a) => ({
@@ -983,7 +965,12 @@
       return
     }
 
-    annotations = normalizeAnnotationsForAsset(selectedAsset, nextAnnotations)
+    annotations = normalizeAnnotationsForAsset({
+      annotations: nextAnnotations,
+      assetId: selectedAsset.id,
+      now: Date.now(),
+      createId: () => crypto.randomUUID(),
+    })
     annotationSaveError = null
     scheduleAnnotationPersist(selectedAsset.id, annotations)
   }
@@ -1002,68 +989,14 @@
 
   // ── Image editing handlers ────────────────────────────────────────────
 
-  /** Convert normalized (0-1) region to pixel coordinates based on image dimensions */
-  function normalizedToPixels(
-    region: { x: number; y: number; width: number; height: number },
-    naturalW: number,
-    naturalH: number
-  ) {
-    return {
-      x: Math.round(region.x * naturalW),
-      y: Math.round(region.y * naturalH),
-      width: Math.round(region.width * naturalW),
-      height: Math.round(region.height * naturalH),
-    }
-  }
-
   /** Adjust annotations after a rotation. Converted = new image dimensions. */
-  function adjustAnnotationsAfterRotation(rotation: 'left' | 'right') {
-    annotations = annotations.map((a) => {
-      if (rotation === 'right') {
-        // 90° CW: new_x = 1 - old_y - old_height, new_y = old_x
-        const nx = 1 - a.y - a.height
-        const ny = a.x
-        return { ...a, x: nx, y: ny, width: a.height, height: a.width }
-      } else {
-        // 90° CCW: new_x = old_y, new_y = 1 - old_x - old_width
-        const nx = a.y
-        const ny = 1 - a.x - a.width
-        return { ...a, x: nx, y: ny, width: a.height, height: a.width }
-      }
-    })
+  function adjustAnnotationsAfterRotation(rotation: RotationDirection) {
+    annotations = rotateAnnotations(annotations, rotation)
   }
 
   /** Adjust annotations after a crop. Region is the crop area in normalized coords. */
-  function adjustAnnotationsAfterCrop(region: {
-    x: number
-    y: number
-    width: number
-    height: number
-  }) {
-    const { x: cx, y: cy, width: cw, height: ch } = region
-    annotations = annotations
-      .filter((a) => {
-        // Keep annotations that overlap with the crop region
-        const overlapsX = a.x < cx + cw && a.x + a.width > cx
-        const overlapsY = a.y < cy + ch && a.y + a.height > cy
-        return overlapsX && overlapsY
-      })
-      .map((a) => {
-        // Clamp to crop region
-        const clampedX = Math.max(a.x, cx)
-        const clampedY = Math.max(a.y, cy)
-        const clampedRight = Math.min(a.x + a.width, cx + cw)
-        const clampedBottom = Math.min(a.y + a.height, cy + ch)
-        const newWidth = clampedRight - clampedX
-        const newHeight = clampedBottom - clampedY
-        return {
-          ...a,
-          x: (clampedX - cx) / cw,
-          y: (clampedY - cy) / ch,
-          width: newWidth / cw,
-          height: newHeight / ch,
-        }
-      })
+  function adjustAnnotationsAfterCrop(region: NormalizedRegion) {
+    annotations = cropAnnotations(annotations, region)
   }
 
   async function handleEditSelect(region: { x: number; y: number; width: number; height: number }) {
