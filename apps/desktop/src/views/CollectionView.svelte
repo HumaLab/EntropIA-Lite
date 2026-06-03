@@ -32,7 +32,14 @@
   let error = $state<string | null>(null)
   let importing = $state(false)
   let exporting = $state(false)
-  let importNotice = $state<string | null>(null)
+  type ImportSummary = {
+    imported: number
+    skipped: number
+    errors: string[]
+    rejected: string[]
+    lastItemTitle: string | null
+  }
+  let importSummary = $state<ImportSummary | null>(null)
   let dragActive = $state(false)
   let unlistenDragDrop: (() => void) | null = null
   let unlistenAssetUpdate: (() => void) | null = null
@@ -287,6 +294,13 @@
     if (classified.length === 0) {
       if (rejected.length > 0) {
         error = `Unsupported format: ${rejected.join(', ')}`
+        importSummary = {
+          imported: 0,
+          skipped: rejected.length,
+          errors: [],
+          rejected,
+          lastItemTitle: null,
+        }
       }
       return
     }
@@ -344,18 +358,14 @@
       })
     }
 
-    // Build notice for partial imports
-    const noticeParts: string[] = []
-    if (rejected.length > 0) {
-      noticeParts.push(`${rejected.length} unsupported skipped: ${rejected.join(', ')}`)
+    importSummary = {
+      imported: createdItemIds.length,
+      skipped: rejected.length,
+      errors: importError ? [importError] : [],
+      rejected,
+      lastItemTitle:
+        createdItemIds.length > 0 ? classified[createdItemIds.length - 1]!.name.replace(/\.[^.]+$/, '') : null,
     }
-    if (importError) {
-      noticeParts.push(`error: ${importError}`)
-    }
-    importNotice =
-      noticeParts.length > 0
-        ? `${createdItemIds.length} imported (${noticeParts.join(' · ')})`
-        : null
 
     if (importError && createdItemIds.length === 0) {
       error = importError
@@ -365,7 +375,7 @@
   async function handleImport() {
     importing = true
     error = null
-    importNotice = null
+    importSummary = null
 
     // Open file picker — get raw paths BEFORE creating any items.
     let selectedPaths: string[]
@@ -389,7 +399,7 @@
   async function handleImportFromDroppedPaths(paths: string[]) {
     importing = true
     error = null
-    importNotice = null
+    importSummary = null
 
     await importClassifiedPaths(paths, 'Failed to import dropped files')
     importing = false
@@ -612,8 +622,51 @@
     <p class="surface-message surface-message--error">{error}</p>
   {/if}
 
-  {#if importNotice}
-    <p class="surface-message surface-message--success">{importNotice}</p>
+  {#if importing || importSummary}
+    <section class="import-summary" aria-live="polite" aria-label={t('collection.importSummary.title')}>
+      <div class="import-summary__header">
+        <strong>
+          {importing ? t('collection.importSummary.importingTitle') : t('collection.importSummary.title')}
+        </strong>
+        <span>
+          {#if importing}
+            {t('collection.importSummary.importingDescription')}
+          {:else if importSummary?.lastItemTitle}
+            {t('collection.importSummary.openedLast', { title: importSummary.lastItemTitle })}
+          {:else}
+            {t('collection.importSummary.reviewCollection')}
+          {/if}
+        </span>
+      </div>
+
+      {#if importSummary}
+        <dl class="import-summary__counts">
+          <div>
+            <dt>{t('collection.importSummary.imported')}</dt>
+            <dd>{importSummary.imported}</dd>
+          </div>
+          <div>
+            <dt>{t('collection.importSummary.skipped')}</dt>
+            <dd>{importSummary.skipped}</dd>
+          </div>
+          <div>
+            <dt>{t('collection.importSummary.errors')}</dt>
+            <dd>{importSummary.errors.length}</dd>
+          </div>
+        </dl>
+
+        {#if importSummary.rejected.length > 0}
+          <p class="import-summary__detail">
+            {t('collection.importSummary.skippedFiles', { files: importSummary.rejected.join(', ') })}
+          </p>
+        {/if}
+        {#if importSummary.errors.length > 0}
+          <p class="import-summary__detail import-summary__detail--error">
+            {importSummary.errors[0]}
+          </p>
+        {/if}
+      {/if}
+    </section>
   {/if}
 
   {#if dragActive}
@@ -732,5 +785,58 @@
     .collection-toolbar :global(.btn) {
       width: 100%;
     }
+  }
+
+  .import-summary {
+    display: grid;
+    gap: var(--space-3);
+    padding: var(--space-3);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 24%, transparent);
+    border-radius: var(--radius-surface);
+    background: color-mix(in srgb, var(--color-surface) 92%, var(--color-accent));
+  }
+
+  .import-summary__header {
+    display: grid;
+    gap: var(--space-1);
+    color: var(--color-text-secondary);
+  }
+
+  .import-summary__header strong {
+    color: var(--color-text-primary);
+  }
+
+  .import-summary__counts {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0;
+  }
+
+  .import-summary__counts div {
+    min-width: 96px;
+    padding: var(--space-2);
+    border-radius: var(--radius-sm);
+    background: var(--color-surface-sunken);
+  }
+
+  .import-summary__counts dt {
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+  }
+
+  .import-summary__counts dd {
+    margin: 0;
+    color: var(--color-text-primary);
+    font-weight: 700;
+  }
+
+  .import-summary__detail {
+    margin: 0;
+    color: var(--color-text-secondary);
+  }
+
+  .import-summary__detail--error {
+    color: var(--color-danger);
   }
 </style>

@@ -353,6 +353,46 @@ describe('CollectionView import flow', () => {
         itemTitle: 'photo',
       })
     })
+
+    expect(screen.getByRole('region', { name: 'Resumen de importación' })).toBeInTheDocument()
+    expect(screen.getByText('Abrimos el último documento importado: photo.')).toBeInTheDocument()
+    expect(screen.getByText('Importados')).toBeInTheDocument()
+    expect(screen.getByText('Omitidos')).toBeInTheDocument()
+    expect(screen.getByText('Errores')).toBeInTheDocument()
+  })
+
+  it('shows import progress while the picker is pending', async () => {
+    const pendingPicker = deferred<string[]>()
+    fileImportRef.pickFiles.mockReturnValueOnce(pendingPicker.promise)
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Importar documento/ }))
+
+    expect(screen.getByRole('region', { name: 'Resumen de importación' })).toBeInTheDocument()
+    expect(screen.getByText('Importando archivos')).toBeInTheDocument()
+    expect(screen.getByText('Estamos copiando archivos y creando documentos.')).toBeInTheDocument()
+
+    pendingPicker.resolve([])
+    await waitFor(() => {
+      expect(screen.queryByText('Importando archivos')).not.toBeInTheDocument()
+    })
+  })
+
+  it('summarizes skipped unsupported files without creating items', async () => {
+    const sourcePath = 'C:\\tmp\\notes.exe'
+    fileImportRef.pickFiles.mockResolvedValue([sourcePath])
+    fileImportRef.classifyFiles.mockReturnValue({ classified: [], rejected: ['notes.exe'] })
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Importar documento/ }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('region', { name: 'Resumen de importación' })).toBeInTheDocument()
+      expect(screen.getByText('Omitidos: notes.exe')).toBeInTheDocument()
+      expect(storeRef.current.items.create).not.toHaveBeenCalled()
+    })
   })
 
   it('imports dropped paths through the same item/asset workflow', async () => {
