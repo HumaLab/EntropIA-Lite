@@ -236,11 +236,11 @@
   let layoutSelectedBlockId = $state<string | null>(null)
   let layoutHoveredRegionId = $state<string | null>(null)
   let layoutSelectedRegionId = $state<string | null>(null)
-  let layoutLoadToken = 0
+  const layoutLoadGuard = new LatestRequestGuard()
   let notesLoadToken = 0
   let selectedAssetStateLoadToken = 0
   const entitiesLoadGuard = new LatestRequestGuard()
-  let geoMarkersLoadToken = 0
+  const geoMarkersLoadGuard = new LatestRequestGuard()
   const triplesLoadGuard = new LatestRequestGuard()
   const similarAssetsLoadGuard = new LatestRequestGuard()
   let llmSummaryLoadToken = 0
@@ -615,7 +615,7 @@
   let geoMarkers = $state<MapMarker[]>([])
 
   async function loadGeoMarkers(currentEntities = entities, asset: Asset | null = selectedAsset) {
-    const requestToken = ++geoMarkersLoadToken
+    const requestToken = geoMarkersLoadGuard.next()
     try {
       const placeEntitiesById = new Map(
         currentEntities
@@ -624,7 +624,7 @@
       )
 
       if (placeEntitiesById.size === 0) {
-        if (geoMarkersLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+        if (!geoMarkersLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
           return
         }
         geoMarkers = []
@@ -640,7 +640,7 @@
               AND (source IS NULL OR source != 'manual_deleted')`,
         params: [itemId],
       })
-      if (geoMarkersLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+      if (!geoMarkersLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
         return
       }
       geoMarkers = rows.flatMap((r) => {
@@ -1619,7 +1619,7 @@
   }
 
   async function reloadLayoutForAsset(asset: Asset | null) {
-    const requestToken = ++layoutLoadToken
+    const requestToken = layoutLoadGuard.next()
 
     if (!asset || asset.type === 'audio') {
       assetLayout = null
@@ -1633,7 +1633,7 @@
 
     try {
       const layout = await getLayoutByAsset(asset.id)
-      if (layoutLoadToken !== requestToken || selectedAsset?.id !== asset.id) {
+      if (!layoutLoadGuard.isCurrent(requestToken) || selectedAsset?.id !== asset.id) {
         return
       }
 
@@ -1642,7 +1642,7 @@
         showLayout = false
       }
     } catch (e) {
-      if (layoutLoadToken !== requestToken || selectedAsset?.id !== asset.id) {
+      if (!layoutLoadGuard.isCurrent(requestToken) || selectedAsset?.id !== asset.id) {
         return
       }
 
@@ -1650,7 +1650,7 @@
       layoutError = e instanceof Error ? e.message : 'Failed to load layout'
       showLayout = false
     } finally {
-      if (layoutLoadToken === requestToken && selectedAsset?.id === asset.id) {
+      if (layoutLoadGuard.isCurrent(requestToken) && selectedAsset?.id === asset.id) {
         layoutLoading = false
       }
     }
@@ -1915,11 +1915,11 @@
   })
 
   onDestroy(() => {
-    layoutLoadToken++
+    layoutLoadGuard.invalidate()
     notesLoadToken++
     selectedAssetStateLoadToken++
     entitiesLoadGuard.invalidate()
-    geoMarkersLoadToken++
+    geoMarkersLoadGuard.invalidate()
     triplesLoadGuard.invalidate()
     similarAssetsLoadGuard.invalidate()
     llmSummaryLoadToken++
