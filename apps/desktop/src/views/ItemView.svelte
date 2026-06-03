@@ -23,6 +23,7 @@
   import ItemMetadataPanel from './ItemMetadataPanel.svelte'
   import ItemNotesPanel from './ItemNotesPanel.svelte'
   import ItemLayoutPanel from './ItemLayoutPanel.svelte'
+  import ItemTextPanel from './ItemTextPanel.svelte'
   import {
     buildLayoutBlockViews,
     countLayoutBlocksByFilter,
@@ -764,6 +765,7 @@
   let viewerType = $derived<'image' | 'pdf' | 'audio'>(
     selectedAsset?.type === 'pdf' ? 'pdf' : selectedAsset?.type === 'audio' ? 'audio' : 'image'
   )
+  let allAssetsAreImages = $derived(assets.every((asset) => asset.type === 'image'))
 
   let layoutBlocks = $derived(assetLayout ? buildLayoutBlockViews(assetLayout) : [])
   let layoutPages = $derived(getPagesFromLayout(assetLayout))
@@ -815,6 +817,30 @@
       0
   )
   let hasLayoutData = $derived(Boolean(assetLayout && layoutBlocks.length > 0))
+  let textPanelOcrState = $derived(
+    selectedAsset && selectedAsset.type !== 'audio' ? getOcrState(selectedAsset.id) : null
+  )
+  let textPanelOcrEditedText = $derived.by(() => {
+    if (!selectedAsset || selectedAsset.type === 'audio') return ''
+    const ocr = getOcrState(selectedAsset.id)
+    return ocrEditedText.get(selectedAsset.id) ?? ocr.textContent ?? ''
+  })
+  let textPanelTranscriptionState = $derived(
+    selectedAsset && selectedAsset.type === 'audio' ? getTranscriptionState(selectedAsset.id) : null
+  )
+  let textPanelTranscriptionEditedText = $derived.by(() => {
+    if (!selectedAsset || selectedAsset.type !== 'audio') return ''
+    const transcription = getTranscriptionState(selectedAsset.id)
+    return transEditedText.get(selectedAsset.id) ?? transcription.text ?? ''
+  })
+  let textPanelLlmState = $derived(getLlmState())
+  let textPanelCurrentSummary = $derived.by(() => {
+    void summaryTick
+    return selectedAsset ? (summaryTexts.get(selectedAsset.id) ?? null) : null
+  })
+  let textPanelIsSummarizing = $derived(
+    textPanelLlmState.status === 'running' && textPanelLlmState.activeJob === 'summarize'
+  )
 
   function findVisibleLayoutBlockById(blockId: string | null) {
     if (!blockId) return null
@@ -1168,74 +1194,6 @@
 
   async function handleTranscribeDictation(audio: Blob): Promise<string> {
     return transcribeDictation(audio)
-  }
-
-  function getExtractionPrimaryActionLabel(assetType: Asset['type']) {
-    if (assetType === 'pdf') {
-      return translate('item.pdfTextAction')
-    }
-
-    return translate('item.ocrHighAction')
-  }
-
-  function getCorrectionActionLabel(assetType: Asset['type']) {
-    return assetType === 'pdf'
-      ? translate('item.pdfCorrectAction')
-      : translate('item.ocrCorrectAction')
-  }
-
-  function getSummaryActionLabel(assetType: Asset['type']) {
-    if (assetType === 'pdf') {
-      return translate('item.summaryPdfAction')
-    }
-
-    if (assetType === 'audio') {
-      return translate('item.summaryAudioAction')
-    }
-
-    return translate('item.summaryAction')
-  }
-
-  function getTranscriptionActionLabel(busy: boolean) {
-    return busy ? translate('item.transcribeBusyAction') : translate('item.transcribeShortAction')
-  }
-
-  function getTranscriptionStageLabel(stage?: string) {
-    if (!stage) return ''
-
-    switch (stage) {
-      case 'uploading':
-        return translate('item.transcriptionStage.uploading')
-      case 'submitting_remote':
-        return translate('item.transcriptionStage.submitting_remote')
-      case 'polling_remote':
-        return translate('item.transcriptionStage.polling_remote')
-      default:
-        return ''
-    }
-  }
-
-  function getOcrStageLabel(stage?: string) {
-    if (!stage || stage === 'done' || stage === 'error') return ''
-
-    switch (stage) {
-      case 'reading':
-        return translate('item.ocrStage.reading')
-      case 'extracting_native':
-        return translate('item.ocrStage.extracting_native')
-      case 'ocr_inference':
-        return translate('item.ocrStage.ocr_inference')
-      case 'paddlevl_detection':
-        return translate('item.ocrStage.paddlevl_detection')
-      case 'submitting_glm_ocr':
-        return translate('item.ocrStage.submitting_glm_ocr')
-      case 'waiting_glm_ocr':
-        return translate('item.ocrStage.waiting_glm_ocr')
-      case 'parsing_glm_ocr':
-        return translate('item.ocrStage.parsing_glm_ocr')
-      default:
-        return ''
-    }
   }
 
   function getOcrState(assetId: string) {
@@ -2457,264 +2415,38 @@
         </div>
 
         <div class="right-panel-pane" class:is-hidden={rightPanelTab !== 'text'}>
-          {#if selectedAsset && selectedAsset.type !== 'audio'}
-            {@const ocr = getOcrState(selectedAsset.id)}
-            {@const busy = ocr.status === 'pending' || ocr.status === 'running'}
-            {@const isPdfAsset = selectedAsset.type === 'pdf'}
-            <section class="section">
-              <h3>
-                {translate('item.textExtraction')}{#if assets.length > 1}
-                  {translate('item.pageInline', { page: selectedAssetIndex + 1 })}{/if}
-              </h3>
-              <div class="ocr-item">
-                <div class="ocr-item-header">
-                  <span class="ocr-filename">
-                    {assets.length > 1 && assets.every((a) => a.type === 'image')
-                      ? translate('item.assetPageLabel', { page: selectedAssetIndex + 1 })
-                      : (selectedAsset.path.split(/[/\\]/).pop() ??
-                        translate('item.assetNoSelection'))}
-                  </span>
-                  <StatusBadge
-                    variant={getJobStatusBadgeVariant(ocr.status)}
-                    size="sm"
-                    class="ocr-status-badge"
-                  >
-                    {ocr.status}
-                  </StatusBadge>
-                  <div class="ocr-btn-group">
-                    {#if isPdfAsset}
-                      <button
-                        class="ocr-btn ocr-btn--light"
-                        disabled={busy}
-                        onclick={() => handleExtractText(selectedAsset, 'light')}
-                        title={busy
-                          ? translate('item.pdfTextBusyTitle')
-                          : translate('item.pdfTextTitle')}
-                      >
-                        {getExtractionPrimaryActionLabel(selectedAsset.type)}
-                      </button>
-                    {:else}
-                      <button
-                        class="ocr-btn ocr-btn--high"
-                        disabled={busy}
-                        onclick={() => handleExtractText(selectedAsset, 'high')}
-                        title={busy
-                          ? translate('item.ocrHighBusyTitle')
-                          : translate('item.ocrHighTitle')}
-                      >
-                        {translate('item.ocrHighAction')}
-                      </button>
-                    {/if}
-                    {#if llmAvailable && !ocrCorrectedAssets.has(selectedAsset.id)}
-                      <button
-                        class="ocr-btn ocr-btn--correct"
-                        disabled={getLlmState().status === 'running' || ocr.status !== 'done'}
-                        onclick={handleLlmCorrectOcr}
-                        title={!llmAvailable
-                          ? translate('item.ocrCorrectUnavailable')
-                          : ocr.status !== 'done'
-                            ? translate('item.ocrCorrectNeedsText')
-                            : isPdfAsset
-                              ? translate('item.pdfCorrectTitle')
-                              : translate('item.ocrCorrectTitle')}
-                      >
-                        {getCorrectionActionLabel(selectedAsset.type)}
-                      </button>
-                    {/if}
-                    {#if llmAvailable}
-                      <button
-                        class="ocr-btn ocr-btn--summarize"
-                        disabled={getLlmState().status === 'running' || ocr.status !== 'done'}
-                        onclick={handleLlmSummarize}
-                        title={!llmAvailable
-                          ? translate('item.summaryUnavailable')
-                          : ocr.status !== 'done'
-                            ? translate('item.summaryNeedsText')
-                            : translate('item.summaryTitle')}
-                      >
-                        {getSummaryActionLabel(selectedAsset.type)}
-                      </button>
-                    {/if}
-                  </div>
-                  {#if !llmAvailable}
-                    <p class="ocr-llm-hint">{translate('item.llmUnavailableHint')}</p>
-                  {/if}
-                </div>
-
-                {#if ocr.status === 'running'}
-                  {@const ocrStageLabel = getOcrStageLabel(ocr.stage)}
-                  <progress class="ocr-progress" value={ocr.progress} max="100">
-                    {ocr.progress}%
-                  </progress>
-                  <p class="ocr-status-text">
-                    {ocrStageLabel
-                      ? translate('item.extractionRunningStage', {
-                          progress: ocr.progress,
-                          stage: ocrStageLabel,
-                        })
-                      : translate('item.extractionRunning', { progress: ocr.progress })}
-                  </p>
-                {:else if ocr.status === 'pending'}
-                  <p class="ocr-status-text">{translate('item.extractionStarting')}</p>
-                {:else if ocr.status === 'error'}
-                  <p class="ocr-error">
-                    {translate('item.extractionFailed', { error: ocr.error ?? '' })}
-                  </p>
-                {:else if ocr.status === 'done'}
-                  {@const editedText = (() => {
-                    void ocrTick
-                    return ocrEditedText.get(selectedAsset.id) ?? ocr.textContent ?? ''
-                  })()}
-                  {@const displayLength = editedText.length}
-                  <details class="ocr-result">
-                    <summary>
-                      {translate('item.extractedText')}
-                      <span class="ocr-meta">
-                        via {ocr.method ?? translate('item.ocrMethodUnknown')} · {translate(
-                          'item.characters',
-                          { count: displayLength }
-                        )}
-                      </span>
-                    </summary>
-                    <textarea
-                      class="ocr-result-body ocr-textarea"
-                      rows="8"
-                      oninput={(e) => {
-                        const val = e.currentTarget.value
-                        ocrEditedText.set(selectedAsset.id, val)
-                        ocrStore.setTextContent(selectedAsset.id, val)
-                        schedulePersist(selectedAsset.id, val)
-                        ocrTick++
-                      }}>{editedText}</textarea
-                    >
-                  </details>
-                {/if}
-              </div>
-            </section>
-          {/if}
-
-          {#if selectedAsset && selectedAsset.type === 'audio'}
-            {@const ts = getTranscriptionState(selectedAsset.id)}
-            {@const busy = ts.status === 'pending' || ts.status === 'running'}
-            <section class="section">
-              <h3>
-                {translate('item.audioTranscription')}{#if assets.length > 1}
-                  {translate('item.pageInline', { page: selectedAssetIndex + 1 })}{/if}
-              </h3>
-              <div class="ocr-item">
-                <div class="ocr-item-header">
-                  <span class="ocr-filename"
-                    ><ActionIcon name="volume" size={16} />
-                    <span class="ocr-filename__text">
-                      {selectedAsset.path.split(/[/\\]/).pop() ?? translate('item.audioLabel')}
-                    </span></span
-                  >
-                  <StatusBadge
-                    variant={getJobStatusBadgeVariant(ts.status)}
-                    size="sm"
-                    class="ocr-status-badge"
-                  >
-                    {ts.status}
-                  </StatusBadge>
-                  <div class="ocr-btn-group">
-                    <button
-                      class="ocr-btn"
-                      disabled={busy}
-                      onclick={() => handleTranscribeAudio(selectedAsset)}
-                      title={busy
-                        ? translate('item.transcribeBusyTitle')
-                        : translate('item.transcribeTitle')}
-                    >
-                      {getTranscriptionActionLabel(busy)}
-                    </button>
-                    {#if llmAvailable}
-                      <button
-                        class="ocr-btn ocr-btn--summarize"
-                        disabled={getLlmState().status === 'running' || ts.status !== 'done'}
-                        onclick={handleLlmSummarize}
-                        title={!llmAvailable
-                          ? translate('item.summaryUnavailable')
-                          : ts.status !== 'done'
-                            ? translate('item.summaryNeedsText')
-                            : translate('item.summaryTitle')}
-                      >
-                        {getSummaryActionLabel(selectedAsset.type)}
-                      </button>
-                    {/if}
-                  </div>
-                </div>
-
-                {#if ts.status === 'running'}
-                  <progress class="ocr-progress" value={ts.progress} max="100">
-                    {ts.progress}%
-                  </progress>
-                  <p class="ocr-status-text">
-                    {translate('item.transcriptionRunning', { progress: ts.progress })}
-                    {#if getTranscriptionStageLabel(ts.stage)}
-                      · {getTranscriptionStageLabel(ts.stage)}
-                    {/if}
-                  </p>
-                {:else if ts.status === 'pending'}
-                  <p class="ocr-status-text">{translate('item.transcriptionStarting')}</p>
-                {:else if ts.status === 'error'}
-                  <p class="ocr-error">
-                    {translate('item.transcriptionFailed', { error: ts.error ?? '' })}
-                  </p>
-                {:else if ts.status === 'done'}
-                  {@const editedText = transEditedText.get(selectedAsset.id) ?? ts.text ?? ''}
-                  {@const displayLength = editedText.length}
-                  <details class="ocr-result">
-                    <summary>
-                      {translate('item.transcription')}
-                      <span class="ocr-meta">
-                        {#if ts.language}{ts.language} &middot;
-                        {/if}{translate('item.characters', { count: displayLength })}
-                        {#if ts.durationMs}
-                          &middot; {translate('item.audioDurationSeconds', {
-                            count: Math.round(ts.durationMs / 1000),
-                          })}{/if}
-                      </span>
-                    </summary>
-                    <textarea
-                      class="ocr-result-body ocr-textarea"
-                      rows="8"
-                      oninput={(e) => {
-                        const val = e.currentTarget.value
-                        transEditedText.set(selectedAsset.id, val)
-                        transcriptionStore.setTextContent(selectedAsset.id, val)
-                        scheduleTranscriptionPersist(selectedAsset.id, val)
-                        transcriptionTick++
-                      }}>{editedText}</textarea
-                    >
-                  </details>
-                {/if}
-              </div>
-            </section>
-          {/if}
-
-          {#if selectedAsset}
-            {@const currentSummary = (() => {
-              void summaryTick
-              return summaryTexts.get(selectedAsset.id) ?? null
-            })()}
-            {@const isSummarizing =
-              getLlmState().status === 'running' && getLlmState().activeJob === 'summarize'}
-            {#if currentSummary || isSummarizing}
-              <section class="section">
-                <h3>
-                  {translate('item.summary')}{#if assets.length > 1}
-                    {translate('item.pageInline', { page: selectedAssetIndex + 1 })}{/if}
-                </h3>
-                {#if isSummarizing}
-                  <p class="summary-status">{translate('item.generatingSummary')}</p>
-                {:else if currentSummary}
-                  <div class="summary-result">
-                    <pre class="summary-text">{currentSummary}</pre>
-                  </div>
-                {/if}
-              </section>
-            {/if}
-          {/if}
+          <ItemTextPanel
+            {selectedAsset}
+            assetsCount={assets.length}
+            {allAssetsAreImages}
+            {selectedAssetIndex}
+            ocrState={textPanelOcrState}
+            ocrEditedText={textPanelOcrEditedText}
+            transcriptionState={textPanelTranscriptionState}
+            transcriptionEditedText={textPanelTranscriptionEditedText}
+            llmState={textPanelLlmState}
+            {llmAvailable}
+            ocrCorrected={selectedAsset ? ocrCorrectedAssets.has(selectedAsset.id) : false}
+            currentSummary={textPanelCurrentSummary}
+            isSummarizing={textPanelIsSummarizing}
+            {translate}
+            onExtractText={handleExtractText}
+            onCorrectOcr={handleLlmCorrectOcr}
+            onSummarize={handleLlmSummarize}
+            onTranscribeAudio={handleTranscribeAudio}
+            onOcrTextInput={(assetId, value) => {
+              ocrEditedText.set(assetId, value)
+              ocrStore.setTextContent(assetId, value)
+              schedulePersist(assetId, value)
+              ocrTick++
+            }}
+            onTranscriptionTextInput={(assetId, value) => {
+              transEditedText.set(assetId, value)
+              transcriptionStore.setTextContent(assetId, value)
+              scheduleTranscriptionPersist(assetId, value)
+              transcriptionTick++
+            }}
+          />
         </div>
 
         <div class="right-panel-pane" class:is-hidden={rightPanelTab !== 'analysis'}>
@@ -3094,12 +2826,6 @@
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
   }
-  .section h3 {
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-medium);
-    color: var(--color-text-secondary);
-    margin-bottom: var(--space-1);
-  }
   .section {
     display: flex;
     flex-direction: column;
@@ -3158,32 +2884,6 @@
     border-radius: var(--radius-md);
   }
 
-  /* ── Summary (auto-generated by Gemma 4) ── */
-  .summary-result {
-    margin-top: var(--space-2);
-    padding: var(--space-3);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface-sunken);
-  }
-
-  .summary-status {
-    font-size: var(--font-size-sm);
-    color: var(--color-text-muted);
-    font-style: italic;
-  }
-
-  .summary-text {
-    margin: 0;
-    font-size: var(--font-size-sm);
-    font-family: var(--font-sans);
-    white-space: pre-wrap;
-    word-wrap: break-word;
-    max-height: 300px;
-    overflow-y: auto;
-    line-height: 1.6;
-    color: var(--color-text-secondary);
-  }
   .empty-text {
     color: var(--color-text-secondary);
     font-size: var(--font-size-sm);
@@ -3196,140 +2896,6 @@
     color: var(--color-danger);
   }
 
-  /* ── OCR UI ── */
-  .ocr-item {
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-surface);
-    padding: var(--space-3);
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    background: var(--surface-card);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
-  }
-  .ocr-item-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-  }
-  .ocr-filename {
-    display: inline-flex;
-    align-items: center;
-    gap: var(--space-1);
-    font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-    min-width: 0;
-  }
-  .ocr-filename :global(svg) {
-    flex-shrink: 0;
-  }
-  .ocr-filename__text {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  :global(.ocr-status-badge) {
-    flex-shrink: 0;
-    text-transform: uppercase;
-  }
-  .ocr-btn {
-    padding: var(--space-1) var(--space-3);
-    font-size: var(--font-size-xs);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-control);
-    background: var(--surface-card);
-    color: var(--color-text-primary);
-    cursor: pointer;
-    white-space: nowrap;
-    flex-shrink: 0;
-    font-family: var(--font-sans);
-    transition:
-      background-color var(--transition-base),
-      border-color var(--transition-base),
-      box-shadow var(--transition-base),
-      color var(--transition-base);
-  }
-  .ocr-btn:hover:not(:disabled) {
-    border-color: var(--border-panel);
-    background: var(--color-accent-faint);
-  }
-  .ocr-btn:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-  .ocr-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    border-color: var(--border-subtle);
-    background: var(--surface-input);
-    color: var(--color-text-muted);
-  }
-  .ocr-btn-group {
-    display: flex;
-    gap: var(--space-1);
-    flex-shrink: 0;
-  }
-  .ocr-btn--light {
-    border-color: var(--color-success);
-    background: var(--color-success-soft);
-    color: var(--color-success);
-  }
-  .ocr-btn--light:disabled {
-    border-color: var(--border-subtle);
-    background: var(--surface-input);
-    color: var(--color-text-muted);
-  }
-  .ocr-btn--high {
-    border-color: var(--color-info);
-    background: var(--color-info-soft);
-    color: var(--color-info);
-  }
-  .ocr-btn--high:disabled {
-    border-color: var(--border-subtle);
-    background: var(--surface-input);
-    color: var(--color-text-muted);
-  }
-  .ocr-btn--correct {
-    border-color: var(--color-accent);
-    background: var(--color-accent-faint);
-    color: var(--color-accent);
-  }
-  .ocr-btn--correct:disabled {
-    border-color: var(--border-subtle);
-    background: var(--surface-input);
-    color: var(--color-text-muted);
-  }
-  .ocr-btn--summarize {
-    border-color: var(--color-warning);
-    background: var(--color-warning-soft);
-    color: var(--color-warning);
-  }
-  .ocr-btn--summarize:disabled {
-    border-color: var(--border-subtle);
-    background: var(--surface-input);
-    color: var(--color-text-muted);
-  }
-  .ocr-llm-hint {
-    font-size: var(--font-size-xs);
-    color: var(--color-text-muted);
-    margin: var(--space-1) 0 0;
-    font-style: italic;
-  }
-  .ocr-progress {
-    width: 100%;
-    height: 6px;
-    border-radius: var(--radius-sm);
-    appearance: none;
-  }
-  .ocr-status-text {
-    font-size: var(--font-size-xs);
-    color: var(--color-text-muted);
-  }
   .ocr-error {
     font-size: var(--font-size-xs);
     color: var(--color-danger);
@@ -3338,52 +2904,6 @@
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
   }
-  .ocr-result {
-    font-size: var(--font-size-sm);
-  }
-  .ocr-result summary {
-    cursor: pointer;
-    color: var(--color-text-secondary);
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: var(--space-2);
-    padding: var(--space-1) 0;
-  }
-  .ocr-result-body {
-    margin-top: var(--space-1);
-    font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
-  .ocr-textarea {
-    width: 100%;
-    min-height: 7rem;
-    padding: var(--space-1) var(--space-2);
-    font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
-    font-size: var(--font-size-sm);
-    line-height: 1.5;
-    color: var(--color-text-secondary);
-    background: var(--surface-input);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    resize: vertical;
-    white-space: pre-wrap;
-    word-break: break-word;
-    outline: none;
-    transition:
-      border-color var(--transition-base),
-      box-shadow var(--transition-base);
-  }
-  .ocr-textarea:focus {
-    border-color: var(--border-focus);
-    box-shadow: var(--focus-ring);
-  }
-  .ocr-textarea:hover:not(:focus) {
-    border-color: var(--border-panel);
-  }
-
   /* ── Analysis Panel ── */
   .analysis-panel {
     display: flex;
