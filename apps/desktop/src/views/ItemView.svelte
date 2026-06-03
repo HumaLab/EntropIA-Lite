@@ -24,6 +24,7 @@
     DebouncedAnnotationPersistor,
     toAnnotationPersistenceInputs,
   } from '$lib/item-view-annotation-persistence'
+  import { FtsSearchController } from '$lib/item-view-search'
   import {
     DebouncedAssetReanalysisScheduler,
     DebouncedAssetTextPersistor,
@@ -356,7 +357,6 @@
   >([])
   let ftsSearching = $state(false)
   let ftsSearchError = $state<string | null>(null)
-  let ftsSearchTimer: ReturnType<typeof setTimeout> | null = null
   let ftsIndexedRows = $state<number | null>(null)
   let ftsDebug = $state<{
     rawQuery: string
@@ -1341,20 +1341,17 @@
     })
   }
 
-  function clearFtsSearchTimer() {
-    if (ftsSearchTimer) {
-      clearTimeout(ftsSearchTimer)
-      ftsSearchTimer = null
-    }
+  function resetFtsSearchState() {
+    ftsResults = []
+    ftsSearchError = null
+    ftsSearching = false
+    ftsDebug = null
   }
 
   async function runFtsSearch(rawQuery: string) {
     const query = rawQuery.trim()
     if (!query) {
-      ftsResults = []
-      ftsSearchError = null
-      ftsSearching = false
-      ftsDebug = null
+      resetFtsSearchState()
       return
     }
 
@@ -1418,41 +1415,22 @@
     }
   }
 
+  const ftsSearchController = new FtsSearchController({
+    getQuery: () => ftsQuery,
+    setQuery: (value) => {
+      ftsQuery = value
+    },
+    reset: resetFtsSearchState,
+    search: runFtsSearch,
+  })
+
   function handleFtsInput(event: Event) {
     const value = (event.currentTarget as HTMLInputElement).value
-    ftsQuery = value
-
-    clearFtsSearchTimer()
-    if (!value.trim()) {
-      ftsResults = []
-      ftsSearchError = null
-      ftsSearching = false
-      ftsDebug = null
-      return
-    }
-
-    ftsSearchTimer = setTimeout(() => {
-      void runFtsSearch(value)
-    }, 250)
+    ftsSearchController.handleInput(value)
   }
 
   function handleFtsKeydown(event: KeyboardEvent) {
-    if (event.key === 'Enter') {
-      event.preventDefault()
-      clearFtsSearchTimer()
-      void runFtsSearch(ftsQuery)
-      return
-    }
-
-    if (event.key === 'Escape') {
-      event.preventDefault()
-      clearFtsSearchTimer()
-      ftsQuery = ''
-      ftsResults = []
-      ftsSearchError = null
-      ftsSearching = false
-      ftsDebug = null
-    }
+    ftsSearchController.handleKeydown(event)
   }
 
   async function loadTriples(asset: Asset | null = selectedAsset) {
@@ -1965,7 +1943,7 @@
     transcriptionTextPersistor.cancelAll()
     assetReanalysisScheduler.cancelAll()
     annotationPersistor.cancelAll()
-    clearFtsSearchTimer()
+    ftsSearchController.cancel()
     if (dragCleanup) dragCleanup()
   })
 </script>

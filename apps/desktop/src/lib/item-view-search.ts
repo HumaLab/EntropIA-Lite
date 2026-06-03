@@ -3,6 +3,77 @@ export type HighlightSegment = {
   isMatch: boolean
 }
 
+type FtsSearchKeyEvent = Pick<KeyboardEvent, 'key' | 'preventDefault'>
+
+export type FtsSearchControllerOptions = {
+  debounceMs?: number
+  getQuery: () => string
+  setQuery: (query: string) => void
+  reset: () => void
+  search: (query: string) => void | Promise<void>
+}
+
+export class FtsSearchController {
+  private timer: ReturnType<typeof setTimeout> | null = null
+  private readonly debounceMs: number
+  private readonly getQuery: () => string
+  private readonly setQuery: (query: string) => void
+  private readonly reset: () => void
+  private readonly search: (query: string) => void | Promise<void>
+
+  constructor({
+    debounceMs = 250,
+    getQuery,
+    setQuery,
+    reset,
+    search,
+  }: FtsSearchControllerOptions) {
+    this.debounceMs = debounceMs
+    this.getQuery = getQuery
+    this.setQuery = setQuery
+    this.reset = reset
+    this.search = search
+  }
+
+  handleInput(value: string) {
+    this.setQuery(value)
+    this.cancel()
+
+    if (!value.trim()) {
+      this.reset()
+      return
+    }
+
+    this.timer = setTimeout(() => {
+      this.timer = null
+      void this.search(value)
+    }, this.debounceMs)
+  }
+
+  handleKeydown(event: FtsSearchKeyEvent) {
+    if (event.key === 'Enter') {
+      event.preventDefault()
+      this.cancel()
+      void this.search(this.getQuery())
+      return
+    }
+
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      this.cancel()
+      this.setQuery('')
+      this.reset()
+    }
+  }
+
+  cancel() {
+    if (this.timer) {
+      clearTimeout(this.timer)
+      this.timer = null
+    }
+  }
+}
+
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
