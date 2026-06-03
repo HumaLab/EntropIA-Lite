@@ -237,13 +237,13 @@
   let layoutHoveredRegionId = $state<string | null>(null)
   let layoutSelectedRegionId = $state<string | null>(null)
   const layoutLoadGuard = new LatestRequestGuard()
-  let notesLoadToken = 0
-  let selectedAssetStateLoadToken = 0
+  const notesLoadGuard = new LatestRequestGuard()
+  const selectedAssetStateLoadGuard = new LatestRequestGuard()
   const entitiesLoadGuard = new LatestRequestGuard()
   const geoMarkersLoadGuard = new LatestRequestGuard()
   const triplesLoadGuard = new LatestRequestGuard()
   const similarAssetsLoadGuard = new LatestRequestGuard()
-  let llmSummaryLoadToken = 0
+  const llmSummaryLoadGuard = new LatestRequestGuard()
   let viewerPage = $state(1)
   let viewerTotalPages = $state(1)
 
@@ -1463,9 +1463,9 @@
   }
 
   async function refreshNotesForAsset(asset: Asset | null = selectedAsset) {
-    const requestToken = ++notesLoadToken
+    const requestToken = notesLoadGuard.next()
     const loadedNotes = await loadNotesForAsset(asset)
-    if (notesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+    if (!notesLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
       return false
     }
     notes = loadedNotes
@@ -1759,7 +1759,7 @@
   $effect(() => {
     const asset = selectedAsset
     if (!asset) return
-    const requestToken = ++selectedAssetStateLoadToken
+    const requestToken = selectedAssetStateLoadGuard.next()
 
     rightPanelTab = 'notes'
 
@@ -1769,7 +1769,7 @@
     // Load existing extraction text for this asset
     const store = getStore()
     void store.extractions.findByAsset(asset.id).then((extraction) => {
-      if (selectedAssetStateLoadToken === requestToken && isCurrentSelectedAsset(asset) && extraction) {
+      if (selectedAssetStateLoadGuard.isCurrent(requestToken) && isCurrentSelectedAsset(asset) && extraction) {
         ocrStore._updateState(asset.id, {
           status: 'done',
           progress: 100,
@@ -1785,7 +1785,7 @@
     if (asset.type === 'audio') {
       void store.transcriptions.findByAsset(asset.id).then((transcription) => {
         if (
-          selectedAssetStateLoadToken === requestToken &&
+          selectedAssetStateLoadGuard.isCurrent(requestToken) &&
           isCurrentSelectedAsset(asset) &&
           transcription
         ) {
@@ -1815,10 +1815,10 @@
     // Load persisted LLM results for this asset so previous
     // asset-level results (summarize, correct_ocr, etc.) are visible.
     llmStore.loadPersistedResults(asset.id, 'asset')
-    const requestToken = ++llmSummaryLoadToken
+    const requestToken = llmSummaryLoadGuard.next()
     llmGetResult(asset.id, 'summarize', 'asset')
       .then((result) => {
-        if (llmSummaryLoadToken === requestToken && isCurrentSelectedAsset(asset) && result) {
+        if (llmSummaryLoadGuard.isCurrent(requestToken) && isCurrentSelectedAsset(asset) && result) {
           summaryTexts.set(asset.id, result.result)
           summaryTick++
         }
@@ -1916,13 +1916,13 @@
 
   onDestroy(() => {
     layoutLoadGuard.invalidate()
-    notesLoadToken++
-    selectedAssetStateLoadToken++
+    notesLoadGuard.invalidate()
+    selectedAssetStateLoadGuard.invalidate()
     entitiesLoadGuard.invalidate()
     geoMarkersLoadGuard.invalidate()
     triplesLoadGuard.invalidate()
     similarAssetsLoadGuard.invalidate()
-    llmSummaryLoadToken++
+    llmSummaryLoadGuard.invalidate()
     window.removeEventListener(
       DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT,
       handleExplorerAssetSelectRequest
