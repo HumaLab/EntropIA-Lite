@@ -31,6 +31,11 @@
     normalizeManualEntityValue,
     type EditableEntityType,
   } from '$lib/item-view-entities'
+  import {
+    canCancelDelete,
+    getNextExpandedNoteId,
+    getNoteStateAfterDelete,
+  } from '$lib/item-view-notes'
   import { FtsSearchController } from '$lib/item-view-search'
   import {
     DebouncedAssetReanalysisScheduler,
@@ -1499,13 +1504,13 @@
       const store = getStore()
       await store.notes.delete(noteId)
       await refreshNotesForAsset(asset)
-      if (expandedNoteId === noteId) {
-        expandedNoteId = null
-      }
-      if (editingNoteId === noteId) {
-        editingNoteId = null
-      }
-      pendingDeleteNoteId = null
+      const nextNoteState = getNoteStateAfterDelete(
+        { expandedNoteId, editingNoteId, pendingDeleteNoteId },
+        noteId
+      )
+      expandedNoteId = nextNoteState.expandedNoteId
+      editingNoteId = nextNoteState.editingNoteId
+      pendingDeleteNoteId = nextNoteState.pendingDeleteNoteId
     } catch (e) {
       error = e instanceof Error ? e.message : 'Failed to delete note'
     } finally {
@@ -1522,7 +1527,7 @@
   }
 
   function handleDeleteNoteCancel() {
-    if (deletingNote) return
+    if (!canCancelDelete(deletingNote)) return
     pendingDeleteNoteId = null
   }
 
@@ -1536,7 +1541,7 @@
   }
 
   function toggleNoteExpanded(noteId: string) {
-    expandedNoteId = expandedNoteId === noteId ? null : noteId
+    expandedNoteId = getNextExpandedNoteId(expandedNoteId, noteId)
   }
 
   async function handleSaveEdit(noteId: string, content: string) {
