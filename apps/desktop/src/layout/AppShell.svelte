@@ -10,7 +10,7 @@
   import type { Snippet } from 'svelte'
 
   const HLAB_URL = 'https://hlab.com.ar/'
-  const GITHUB_REPO_URL = 'https://github.com/agusnieto77/EntropIA'
+  const GITHUB_REPO_URL = 'https://github.com/hlabrepo/EntropIA-Lite'
 
   let { children }: { children: Snippet } = $props()
   const currentLocale = locale
@@ -338,7 +338,7 @@
     border-top: 1px solid var(--border-subtle);
     background: var(--surface-input);
     font-family: var(--font-mono);
-    font-size: calc(0.6rem + 2px);
+    font-size: calc(0.6rem + 5px);
     color: var(--color-text-muted);
     flex-shrink: 0;
     letter-spacing: 0.02em;
@@ -379,7 +379,7 @@
   :global(.statusbar__badge) {
     min-height: 18px;
     padding: 0 var(--space-2);
-    font-size: 0.58rem;
+    font-size: calc(0.58rem + 3px);
     letter-spacing: 0.04em;
   }
 </style>

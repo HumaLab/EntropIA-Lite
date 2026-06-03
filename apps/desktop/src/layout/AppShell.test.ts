@@ -112,12 +112,19 @@ describe('AppShell', () => {
     expect(source).toContain('color-mix(in srgb, var(--surface-app) 42%, transparent)')
   })
 
+  it('keeps footer typography enlarged for readability', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'AppShell.svelte'), 'utf-8')
+
+    expect(source).toContain('font-size: calc(0.6rem + 5px);')
+    expect(source).toContain('font-size: calc(0.58rem + 3px);')
+  })
+
   it('opens external links through the desktop bridge', async () => {
     render(AppShellHost)
 
     await fireEvent.click(screen.getByRole('link', { name: 'GitHub' }))
     expect(invokeMock).toHaveBeenCalledWith('open_external_url', {
-      url: 'https://github.com/agusnieto77/EntropIA',
+      url: 'https://github.com/hlabrepo/EntropIA-Lite',
     })
 
     await fireEvent.click(screen.getByRole('link', { name: 'HLab' }))
