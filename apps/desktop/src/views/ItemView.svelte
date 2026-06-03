@@ -25,6 +25,12 @@
     loadViewerAnnotationsForAsset,
     toAnnotationPersistenceInputs,
   } from '$lib/item-view-annotation-persistence'
+  import {
+    buildManualEntityCreatePayload,
+    buildManualEntityUpdatePayload,
+    normalizeManualEntityValue,
+    type EditableEntityType,
+  } from '$lib/item-view-entities'
   import { FtsSearchController } from '$lib/item-view-search'
   import {
     DebouncedAssetReanalysisScheduler,
@@ -344,7 +350,6 @@
   const nlpStore = new NlpStore()
   let nlpTick = $state(0)
   let entities = $state<Entity[]>([])
-  type EditableEntityType = 'person' | 'organization' | 'place' | 'misc' | 'date'
   let newEntityValue = $state('')
   let newEntityType = $state<EditableEntityType>('organization')
   let editingEntityId = $state<string | null>(null)
@@ -1226,42 +1231,16 @@
     await loadGeoMarkers(nextEntities, asset)
   }
 
-  function normalizeManualEntityValue(value: string) {
-    return value
-      .trim()
-      .replace(/^["'“”‘’«»\-–—\s]+|["'“”‘’«»\-–—\s]+$/g, '')
-      .trim()
-  }
-
-  function toEditableEntityType(entityType: Entity['entityType']): EditableEntityType {
-    if (
-      entityType === 'person' ||
-      entityType === 'organization' ||
-      entityType === 'place' ||
-      entityType === 'misc' ||
-      entityType === 'date'
-    ) {
-      return entityType
-    }
-    return 'organization'
-  }
-
   async function handleCreateEntity() {
     const value = normalizeManualEntityValue(newEntityValue)
     if (!value) return
     try {
-      await getStore().entities.create({
+      await getStore().entities.create(buildManualEntityCreatePayload({
         itemId,
         assetId: selectedAsset?.id ?? null,
         entityType: newEntityType,
         value,
-        startOffset: 0,
-        endOffset: 0,
-        confidence: 1.0,
-        source: 'manual',
-        modelName: null,
-        createdAt: Date.now(),
-      })
+      }))
       newEntityValue = ''
       newEntityType = 'organization'
       entityActionError = null
@@ -1292,12 +1271,7 @@
     const entity = entities.find((candidate) => candidate.id === entityId)
     if (!entity) return
     try {
-      await getStore().entities.update(entityId, {
-        entityType: toEditableEntityType(entity.entityType),
-        value,
-        confidence: 1.0,
-        source: 'manual',
-      })
+      await getStore().entities.update(entityId, buildManualEntityUpdatePayload(entity, value))
       cancelEditingEntity()
       entityActionError = null
       await reloadEntitiesAndGeoMarkers()
