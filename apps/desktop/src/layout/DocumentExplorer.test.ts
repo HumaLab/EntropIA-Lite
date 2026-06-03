@@ -309,22 +309,14 @@ describe('DocumentExplorer', () => {
     expect(screen.getByText('image')).toBeInTheDocument()
   })
 
-  it('persists collapsed state', async () => {
+  it('keeps the document explorer open and removes the internal collapse control', async () => {
+    localStorage.setItem('entropia-document-explorer-open', 'false')
+
     render(DocumentExplorer)
 
-    const toggle = await screen.findByRole('button', {
-      name: 'Cerrar explorador de documentos',
-    })
-
-    await fireEvent.click(toggle)
-
-    expect(localStorage.getItem('entropia-document-explorer-open')).toBe('false')
-
-    await waitFor(() => {
-      expect(
-        screen.getByRole('button', { name: 'Abrir explorador de documentos' })
-      ).toBeInTheDocument()
-    })
+    expect(await screen.findByRole('tree', { name: 'Explorador de documentos' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Cerrar explorador de documentos' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Abrir explorador de documentos' })).not.toBeInTheDocument()
   })
 
   it('persists expanded nodes and restores them while auto-expanding the active path', async () => {
@@ -351,9 +343,6 @@ describe('DocumentExplorer', () => {
   it('renders centralized svg icons for explorer controls and nodes', async () => {
     const { container } = render(DocumentExplorer)
 
-    const railToggle = await screen.findByRole('button', {
-      name: 'Cerrar explorador de documentos',
-    })
     await screen.findByText('Colección 1')
     await screen.findByText('Acta 1')
     await screen.findByText('acta-1.pdf')
@@ -368,12 +357,11 @@ describe('DocumentExplorer', () => {
       throw new Error('Expected explorer node buttons to be rendered')
     }
 
-    expect(railToggle.querySelector('svg')).not.toBeNull()
     expect(collectionButton.querySelector('svg')).not.toBeNull()
     expect(itemButton.querySelector('svg')).not.toBeNull()
     expect(pdfAssetButton.querySelector('svg')).not.toBeNull()
     expect(audioAssetButton.querySelector('svg')).not.toBeNull()
-    expect(container.querySelectorAll('svg').length).toBeGreaterThanOrEqual(8)
+    expect(container.querySelectorAll('svg').length).toBeGreaterThanOrEqual(7)
   })
 
   it('renders centralized svg icons for flattened image assets', async () => {

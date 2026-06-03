@@ -19,6 +19,8 @@
     $currentLocale
     return {
       aria: t('appshell.sidebarAria'),
+      collapse: t('appshell.sidebarCollapse'),
+      expand: t('appshell.sidebarExpand'),
       newCollection: t('appshell.sidebarNewCollection'),
       filter: t('appshell.sidebarFilterCollections'),
       filterPlaceholder: t('appshell.sidebarFilterCollectionsPlaceholder'),
@@ -35,6 +37,10 @@
   let searchFilter = $state('')
   let searchInputEl: HTMLInputElement | undefined = $state()
   let showCreateForm = $state(false)
+
+  function toggleSidebar() {
+    sidebarOpen = !sidebarOpen
+  }
 
   function expandSearch() {
     searchExpanded = true
@@ -110,6 +116,18 @@
     <aside class="sidebar" class:sidebar--collapsed={!sidebarOpen} aria-label={sidebarLabels.aria}>
       <!-- Sidebar toolbar -->
       <div class="sidebar__toolbar">
+        <!-- Toggle sidebar -->
+        <IconButton
+          class="sidebar__tool"
+          size="sm"
+          variant="ghost"
+          label={sidebarOpen ? sidebarLabels.collapse : sidebarLabels.expand}
+          onclick={toggleSidebar}
+          title={sidebarOpen ? sidebarLabels.collapse : sidebarLabels.expand}
+        >
+          <ActionIcon name={sidebarOpen ? 'panel-left-close' : 'panel-left'} size={16} />
+        </IconButton>
+
         {#if sidebarOpen}
           <!-- New collection -->
           <IconButton

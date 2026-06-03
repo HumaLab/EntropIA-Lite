@@ -13,19 +13,16 @@
 
   let { filterText = '' }: { filterText?: string } = $props()
 
-  const STORAGE_KEY = 'entropia-document-explorer-open'
   const TREE_STORAGE_KEY = 'entropia-document-explorer-tree'
   const WIDTH_STORAGE_KEY = 'entropia-document-explorer-width'
   const DEFAULT_WIDTH = 244
   const MIN_WIDTH = 220
   const MAX_WIDTH = Math.round(DEFAULT_WIDTH * 1.1)
-  const COLLAPSED_WIDTH = 36
 
   const pendingItemLoads = new Map<string, Promise<void>>()
   const pendingAssetLoads = new Map<string, Promise<void>>()
 
   let collectionsRequest: Promise<void> | null = null
-  let isOpen = $state(true)
   let loading = $state(false)
   let loadError = $state<string | null>(null)
   let collections = $state<Collection[]>([])
@@ -45,23 +42,6 @@
   let explorerWidth = $state(DEFAULT_WIDTH)
   const currentLocale = locale
   const translateExplorer = (key: string) => t(key as I18nKey)
-
-  function readPersistedOpenState() {
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY)
-      if (stored === 'true') return true
-      if (stored === 'false') return false
-    } catch {}
-
-    return true
-  }
-
-  function persistOpenState(value: boolean) {
-    try {
-      localStorage.setItem(STORAGE_KEY, String(value))
-    } catch {}
-  }
-
 
   function clampExplorerWidth(value: number) {
     return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(value)))
@@ -156,11 +136,6 @@
     }
 
     return `${expanded ? 'Colapsar' : 'Expandir'} ${kind === 'collection' ? 'colección' : 'documento'} ${label}`
-  }
-
-  function toggleOpen() {
-    isOpen = !isOpen
-    persistOpenState(isOpen)
   }
 
   function getActiveCollectionId(view: View): string | null {
@@ -473,7 +448,6 @@
   })
 
   onMount(() => {
-    isOpen = readPersistedOpenState()
     explorerWidth = readPersistedWidth()
     const persistedTree = readPersistedTreeState()
     openCollections = persistedTree.collections
@@ -496,22 +470,9 @@
 
 <aside
   class="explorer"
-  class:is-open={isOpen}
-  class:is-collapsed={!isOpen}
-  style:width={`${isOpen ? explorerWidth : COLLAPSED_WIDTH}px`}
+  style:width={`${explorerWidth}px`}
   aria-label={$currentLocale && translateExplorer('explorer.aria')}
 >
-  <button
-    type="button"
-    class="explorer__rail-toggle"
-    aria-label={$currentLocale && translateExplorer(isOpen ? 'explorer.collapse' : 'explorer.expand')}
-    title={$currentLocale && translateExplorer(isOpen ? 'explorer.collapse' : 'explorer.expand')}
-    onclick={toggleOpen}
-  >
-    <ActionIcon name={isOpen ? 'chevron-left' : 'chevron-right'} size={14} />
-  </button>
-
-  {#if isOpen}
   <div id="document-explorer-panel" class="explorer__panel">
       <div id="document-explorer-content" class="explorer__scroll">
         {#if loadError}
@@ -748,7 +709,6 @@
         onpointerdown={startResize}
       ></div>
   </div>
-  {/if}
 </aside>
 
 <style>
@@ -762,49 +722,6 @@
     background: var(--color-surface);
     overflow: hidden;
     font-size: 12px;
-  }
-
-  .explorer.is-collapsed {
-    width: 36px;
-    min-width: 36px;
-    max-width: 36px;
-  }
-
-  .explorer__rail-toggle {
-    position: absolute;
-    top: 6px;
-    right: 5px;
-    z-index: 6;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 24px;
-    height: 24px;
-    border: 1px solid var(--color-border-subtle);
-    border-radius: 7px;
-    background: color-mix(in srgb, var(--color-surface) 92%, transparent);
-    color: var(--color-text-muted);
-    cursor: pointer;
-    transition:
-      color var(--transition-base),
-      background-color var(--transition-base),
-      border-color var(--transition-base);
-  }
-
-  .explorer__rail-toggle:hover {
-    border-color: color-mix(in srgb, var(--color-accent) 44%, transparent);
-    background: color-mix(in srgb, var(--color-accent) 10%, transparent);
-    color: var(--color-text);
-  }
-
-  .explorer__rail-toggle:focus-visible {
-    outline: 2px solid color-mix(in srgb, var(--color-accent) 70%, transparent);
-    outline-offset: 2px;
-  }
-
-  .explorer__rail-toggle :global(svg) {
-    width: 14px;
-    height: 14px;
   }
 
   .explorer__panel {
@@ -1146,7 +1063,7 @@
   }
 
   @media (max-width: 900px) {
-    .explorer.is-open {
+    .explorer {
       width: min(70vw, 280px);
       max-width: min(70vw, 280px);
     }
