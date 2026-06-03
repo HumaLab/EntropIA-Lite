@@ -21,6 +21,10 @@
     type ImageEditUndoEntry,
   } from '$lib/item-view-image-edit'
   import {
+    DebouncedAnnotationPersistor,
+    toAnnotationPersistenceInputs,
+  } from '$lib/item-view-annotation-persistence'
+  import {
     DebouncedAssetReanalysisScheduler,
     DebouncedAssetTextPersistor,
   } from '$lib/item-view-text-persistence'
@@ -110,7 +114,6 @@
     Collection,
     Note,
     Annotation as StoreAnnotation,
-    AnnotationKind as StoreAnnotationKind,
   } from '@entropia/store'
   import type {
     Entity,
@@ -221,11 +224,6 @@
   let annotationTool = $state<'select' | 'rectangle' | 'underline'>('select')
   let annotationColor = $state('var(--color-accent)')
   let annotationSaveError = $state<string | null>(null)
-  let annotationSaveTimer: ReturnType<typeof setTimeout> | null = null
-  let pendingAnnotationSave: {
-    assetId: string
-    annotations: ViewerAnnotation[]
-  } | null = null
 
   let assetLayout = $state<Awaited<ReturnType<typeof getLayoutByAsset>>>(null)
   let layoutLoading = $state(false)
@@ -320,6 +318,11 @@
     onError: (error) => {
       console.error('[ItemView] Failed to persist transcription correction:', error)
     },
+  })
+
+  const annotationPersistor = new DebouncedAnnotationPersistor({
+    delayMs: PERSIST_IDLE_MS,
+    persist: persistAnnotations,
   })
 
   function scheduleAssetReanalysis(assetId: string) {
@@ -846,14 +849,7 @@
 
   async function persistAnnotations(assetId: string, nextAnnotations: ViewerAnnotation[]) {
     try {
-      const inputs = nextAnnotations.map((a) => ({
-        kind: a.kind as StoreAnnotationKind,
-        color: a.color,
-        x: a.x,
-        y: a.y,
-        width: a.width,
-        height: a.height,
-      }))
+      const inputs = toAnnotationPersistenceInputs(nextAnnotations)
       await getStore().annotations.replaceForAssetPage(assetId, 1, inputs)
       annotationSaveError = null
     } catch {
@@ -861,43 +857,12 @@
     }
   }
 
-  function clearAnnotationSaveTimer() {
-    if (annotationSaveTimer) {
-      clearTimeout(annotationSaveTimer)
-      annotationSaveTimer = null
-    }
-  }
-
   async function flushPendingAnnotationSave() {
-    clearAnnotationSaveTimer()
-
-    if (!pendingAnnotationSave) {
-      return
-    }
-
-    const saveJob = pendingAnnotationSave
-    pendingAnnotationSave = null
-    await persistAnnotations(saveJob.assetId, saveJob.annotations)
+    await annotationPersistor.flushPending()
   }
 
   function scheduleAnnotationPersist(assetId: string, nextAnnotations: ViewerAnnotation[]) {
-    clearAnnotationSaveTimer()
-    pendingAnnotationSave = {
-      assetId,
-      annotations: nextAnnotations,
-    }
-
-    annotationSaveTimer = setTimeout(async () => {
-      const saveJob = pendingAnnotationSave
-      pendingAnnotationSave = null
-      annotationSaveTimer = null
-
-      if (!saveJob) {
-        return
-      }
-
-      await persistAnnotations(saveJob.assetId, saveJob.annotations)
-    }, 500)
+    annotationPersistor.schedule(assetId, nextAnnotations)
   }
 
   function handleAnnotationsChange(nextAnnotations: ViewerAnnotation[]) {
@@ -1742,7 +1707,9 @@
       undoStack = []
     }
 
-    if (pendingAnnotationSave && pendingAnnotationSave.assetId !== currentAssetId) {
+    const pendingAnnotationAssetId = annotationPersistor.getPendingAssetId()
+
+    if (pendingAnnotationAssetId !== null && pendingAnnotationAssetId !== currentAssetId) {
       void flushPendingAnnotationSave()
     }
 
@@ -1997,7 +1964,7 @@
     ocrTextPersistor.cancelAll()
     transcriptionTextPersistor.cancelAll()
     assetReanalysisScheduler.cancelAll()
-    clearAnnotationSaveTimer()
+    annotationPersistor.cancelAll()
     clearFtsSearchTimer()
     if (dragCleanup) dragCleanup()
   })
