@@ -22,6 +22,7 @@ use rusqlite::Connection;
 use rusqlite::OptionalExtension;
 use std::fs;
 use std::path::Path;
+#[cfg(not(target_os = "windows"))]
 use std::process::Command;
 use tauri::Manager;
 use transcription::TranscriptionQueue;
@@ -32,32 +33,57 @@ const SQLITE_BASENAME: &str = "entropia.sqlite";
 
 #[tauri::command]
 fn open_external_url(url: String) -> Result<(), String> {
+    let url = url.trim();
     if !(url.starts_with("https://") || url.starts_with("http://")) {
         return Err("Only HTTP(S) URLs are allowed".to_string());
     }
 
-    #[cfg(target_os = "windows")]
-    let mut command = {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", "start", "", &url]);
-        cmd
+    open_external_url_system(url)
+}
+
+#[cfg(target_os = "windows")]
+fn open_external_url_system(url: &str) -> Result<(), String> {
+    use windows_sys::Win32::UI::Shell::ShellExecuteW;
+    use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+
+    fn to_wide(value: &str) -> Vec<u16> {
+        value.encode_utf16().chain(std::iter::once(0)).collect()
+    }
+
+    let operation = to_wide("open");
+    let target = to_wide(url);
+    let result = unsafe {
+        ShellExecuteW(
+            std::ptr::null_mut(),
+            operation.as_ptr(),
+            target.as_ptr(),
+            std::ptr::null(),
+            std::ptr::null(),
+            SW_SHOWNORMAL,
+        ) as isize
     };
 
-    #[cfg(target_os = "macos")]
-    let mut command = {
-        let mut cmd = Command::new("open");
-        cmd.arg(&url);
-        cmd
-    };
+    if result <= 32 {
+        return Err(format!("Failed to open URL with system browser: {result}"));
+    }
 
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = {
-        let mut cmd = Command::new("xdg-open");
-        cmd.arg(&url);
-        cmd
-    };
+    Ok(())
+}
 
-    command
+#[cfg(target_os = "macos")]
+fn open_external_url_system(url: &str) -> Result<(), String> {
+    Command::new("open")
+        .arg(url)
+        .spawn()
+        .map_err(|error| format!("Failed to open URL: {error}"))?;
+
+    Ok(())
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn open_external_url_system(url: &str) -> Result<(), String> {
+    Command::new("xdg-open")
+        .arg(url)
         .spawn()
         .map_err(|error| format!("Failed to open URL: {error}"))?;
 

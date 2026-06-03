@@ -15,6 +15,7 @@ export type ActionIconName =
   | 'expand'
   | 'eye'
   | 'eye-off'
+  | 'external-link'
   | 'file'
   | 'file-audio'
   | 'file-image'

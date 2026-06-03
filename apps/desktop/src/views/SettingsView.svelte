@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { locale, t } from '$lib/i18n'
+  import { openExternalUrlFromClick } from '$lib/external-links'
   import {
     settingsGet,
     settingsSet,
@@ -46,8 +47,8 @@
 
   const SECRET_REF_PREFIX = 'secret_ref:'
   const PROVIDER_LINKS = {
-    openrouter: 'https://openrouter.ai/',
-    assemblyai: 'https://www.assemblyai.com/',
+    openrouter: 'https://openrouter.ai/settings/keys',
+    assemblyai: 'https://www.assemblyai.com/app/account',
     glmOcr: 'https://z.ai/manage-apikey/apikey-list',
   } as const
 
@@ -225,6 +226,14 @@
   function handleModelSelect(modelId: string) {
     model = modelId
   }
+
+  async function openProviderLink(event: MouseEvent, url: string, providerName: string) {
+    try {
+      await openExternalUrlFromClick(event, url)
+    } catch (error) {
+      console.error(`[Settings] No se pudo abrir el enlace de ${providerName}`, error)
+    }
+  }
 </script>
 
 {#key activeLocale}
@@ -280,29 +289,15 @@
     <Card>
       <section class="settings-card-section">
         <div class="settings-card-section__copy">
-          <h2>{t('settings.embeddingProvider.title')}</h2>
-          <p>{t('settings.embeddingProvider.description')}</p>
-        </div>
-
-        <div class="settings__field settings__field--stacked">
-          <Input
-            label={t('settings.embeddingProvider.model')}
-            type="text"
-            bind:value={embeddingModel}
-            placeholder={DEFAULT_OPENROUTER_EMBEDDING_MODEL}
-          />
-          <p class="settings__hint">{t('settings.embeddingProvider.modelHint')}</p>
-        </div>
-      </section>
-    </Card>
-
-    <Card>
-      <section class="settings-card-section">
-        <div class="settings-card-section__copy">
           <h2>{t('settings.openrouter.title')}</h2>
           <p>{t('settings.openrouter.description')}</p>
-          <a class="settings__provider-link" href={PROVIDER_LINKS.openrouter} target="_blank" rel="noreferrer">
-            Obtener API key en OpenRouter ↗
+          <a
+            class="settings__provider-link"
+            href={PROVIDER_LINKS.openrouter}
+            onclick={(event) => openProviderLink(event, PROVIDER_LINKS.openrouter, 'OpenRouter')}
+          >
+            <span>Obtener API key en OpenRouter</span>
+            <ActionIcon name="external-link" size={14} />
           </a>
         </div>
 
@@ -388,6 +383,16 @@
             </div>
           {/if}
         </div>
+
+        <div class="settings__field settings__field--stacked">
+          <Input
+            label={t('settings.embeddingProvider.model')}
+            type="text"
+            bind:value={embeddingModel}
+            placeholder={DEFAULT_OPENROUTER_EMBEDDING_MODEL}
+          />
+          <p class="settings__hint">{t('settings.embeddingProvider.modelHint')}</p>
+        </div>
       </section>
     </Card>
 
@@ -396,8 +401,13 @@
         <div class="settings-card-section__copy">
           <h2>{t('settings.assemblyai.title')}</h2>
           <p>{t('settings.assemblyai.description')}</p>
-          <a class="settings__provider-link" href={PROVIDER_LINKS.assemblyai} target="_blank" rel="noreferrer">
-            Obtener API key en AssemblyAI ↗
+          <a
+            class="settings__provider-link"
+            href={PROVIDER_LINKS.assemblyai}
+            onclick={(event) => openProviderLink(event, PROVIDER_LINKS.assemblyai, 'AssemblyAI')}
+          >
+            <span>Obtener API key en AssemblyAI</span>
+            <ActionIcon name="external-link" size={14} />
           </a>
         </div>
 
@@ -452,8 +462,13 @@
         <div class="settings-card-section__copy">
           <h2>{t('settings.glmOcr.title')}</h2>
           <p>{t('settings.glmOcr.description')}</p>
-          <a class="settings__provider-link" href={PROVIDER_LINKS.glmOcr} target="_blank" rel="noreferrer">
-            Obtener API key en Z.ai ↗
+          <a
+            class="settings__provider-link"
+            href={PROVIDER_LINKS.glmOcr}
+            onclick={(event) => openProviderLink(event, PROVIDER_LINKS.glmOcr, 'Z.ai')}
+          >
+            <span>Obtener API key en Z.ai</span>
+            <ActionIcon name="external-link" size={14} />
           </a>
         </div>
 
@@ -575,7 +590,9 @@
   }
 
   .settings__provider-link {
+    align-items: center;
     display: inline-flex;
+    gap: var(--space-1);
     width: fit-content;
     color: var(--color-accent);
     font-size: var(--font-size-sm);

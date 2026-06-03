@@ -1,9 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import SettingsView from './SettingsView.svelte'
 import { locale } from '$lib/i18n'
 
 const {
+  invokeMock,
   settingsGetMock,
   settingsSetMock,
   testOpenrouterConnectionMock,
@@ -11,12 +12,17 @@ const {
   testGlmOcrConnectionMock,
 } =
   vi.hoisted(() => ({
+    invokeMock: vi.fn(),
     settingsGetMock: vi.fn(),
     settingsSetMock: vi.fn(),
     testOpenrouterConnectionMock: vi.fn(),
     testAssemblyaiConnectionMock: vi.fn(),
     testGlmOcrConnectionMock: vi.fn(),
   }))
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: invokeMock,
+}))
 
 vi.mock('$lib/settings', async () => {
   const actual = await vi.importActual<typeof import('$lib/settings')>('$lib/settings')
@@ -33,6 +39,7 @@ vi.mock('$lib/settings', async () => {
 describe('SettingsView', () => {
   beforeEach(() => {
     locale.set('es')
+    invokeMock.mockReset().mockResolvedValue(undefined)
     settingsGetMock.mockReset()
     settingsSetMock.mockReset().mockResolvedValue(undefined)
     testOpenrouterConnectionMock.mockReset()
@@ -67,6 +74,36 @@ describe('SettingsView', () => {
     expect(screen.getByRole('tab', { name: 'APIs remotas' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Dependencias de IA' })).not.toBeInTheDocument()
+  })
+
+  it('groups OpenRouter generative and embedding models in one provider block', async () => {
+    render(SettingsView)
+
+    const openRouterHeading = await screen.findByRole('heading', { name: 'OpenRouter' })
+    const openRouterSection = openRouterHeading.closest('section')
+    expect(openRouterSection).not.toBeNull()
+
+    expect(screen.queryByRole('heading', { name: 'Embeddings BGE-M3' })).not.toBeInTheDocument()
+    expect(within(openRouterSection!).getByLabelText('Modelo generativo')).toBeInTheDocument()
+    expect(within(openRouterSection!).getByLabelText('Modelo de embeddings')).toBeInTheDocument()
+  })
+
+  it('opens provider API key links through the desktop bridge', async () => {
+    render(SettingsView)
+
+    await fireEvent.click(await screen.findByRole('link', { name: /OpenRouter/ }))
+    await fireEvent.click(screen.getByRole('link', { name: /AssemblyAI/ }))
+    await fireEvent.click(screen.getByRole('link', { name: /Z\.ai/ }))
+
+    expect(invokeMock).toHaveBeenCalledWith('open_external_url', {
+      url: 'https://openrouter.ai/settings/keys',
+    })
+    expect(invokeMock).toHaveBeenCalledWith('open_external_url', {
+      url: 'https://www.assemblyai.com/app/account',
+    })
+    expect(invokeMock).toHaveBeenCalledWith('open_external_url', {
+      url: 'https://z.ai/manage-apikey/apikey-list',
+    })
   })
 
   it('shows refined success feedback for connection checks and saves', async () => {

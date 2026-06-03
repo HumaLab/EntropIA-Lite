@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte'
-  import { invoke } from '@tauri-apps/api/core'
+  import { openExternalUrlFromClick } from '$lib/external-links'
   import { locale, t } from '$lib/i18n'
   import { navigation } from '$lib/navigation'
   import { ActionIcon, IconButton, StatusBadge } from '@entropia/ui'
@@ -87,18 +87,16 @@
   })
 
   async function openHlabWebsite(event: MouseEvent) {
-    event.preventDefault()
     try {
-      await invoke('open_external_url', { url: HLAB_URL })
+      await openExternalUrlFromClick(event, HLAB_URL)
     } catch (error) {
       console.error('[Footer] No se pudo abrir el sitio de HLab', error)
     }
   }
 
   async function openGithubRepo(event: MouseEvent) {
-    event.preventDefault()
     try {
-      await invoke('open_external_url', { url: GITHUB_REPO_URL })
+      await openExternalUrlFromClick(event, GITHUB_REPO_URL)
     } catch (error) {
       console.error('[Footer] No se pudo abrir el repositorio de GitHub', error)
     }

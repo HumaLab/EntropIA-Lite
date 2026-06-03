@@ -13,6 +13,7 @@
     Expand,
     Eye,
     EyeOff,
+    ExternalLink,
     File,
     FileAudio,
     FileImage,
@@ -78,6 +79,8 @@
   <Eye {size} aria-hidden="true" />
 {:else if name === 'eye-off'}
   <EyeOff {size} aria-hidden="true" />
+{:else if name === 'external-link'}
+  <ExternalLink {size} aria-hidden="true" />
 {:else if name === 'file'}
   <File {size} aria-hidden="true" />
 {:else if name === 'file-audio'}

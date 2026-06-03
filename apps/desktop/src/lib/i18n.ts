@@ -83,7 +83,7 @@ const es = {
     'Dejá baai/bge-m3 salvo que tu cuenta de OpenRouter use otro identificador compatible.',
   'settings.openrouter.title': 'OpenRouter',
   'settings.openrouter.description':
-    'Configurá la cuenta remota, validá el acceso y elegí el modelo por defecto.',
+    'Configurá la cuenta remota, validá el acceso y elegí los modelos de generación y embeddings.',
   'settings.assemblyai.title': 'AssemblyAI',
   'settings.assemblyai.description':
     'Configurá la cuenta remota para transcripción, validá el acceso y usala como proveedor STT cloud.',
@@ -142,7 +142,7 @@ const es = {
   'settings.loadedKey': 'Clave cargada: {key}',
   'settings.connectionReady': 'Conexión lista · {count} modelos disponibles.',
   'settings.enterApiKey': 'Ingresá una API key antes de probar la conexión.',
-  'settings.model': 'Modelo',
+  'settings.model': 'Modelo generativo',
   'settings.modelPlaceholder': 'google/gemma-3-4b-it',
   'settings.suggestedModels': 'Modelos sugeridos desde OpenRouter',
   'collections.eyebrow': 'Corpus',
@@ -667,7 +667,7 @@ const en: Record<keyof typeof es | ExtraI18nKey, string> = {
     'Keep baai/bge-m3 unless your OpenRouter account uses another compatible identifier.',
   'settings.openrouter.title': 'OpenRouter',
   'settings.openrouter.description':
-    'Configure the remote account, validate access, and choose the default model.',
+    'Configure the remote account, validate access, and choose the generative and embedding models.',
   'settings.assemblyai.title': 'AssemblyAI',
   'settings.assemblyai.description':
     'Configure the remote transcription account, validate access, and use it as the cloud STT provider.',
@@ -726,7 +726,7 @@ const en: Record<keyof typeof es | ExtraI18nKey, string> = {
   'settings.loadedKey': 'Loaded key: {key}',
   'settings.connectionReady': 'Connection ready · {count} models available.',
   'settings.enterApiKey': 'Enter an API key before testing the connection.',
-  'settings.model': 'Model',
+  'settings.model': 'Generative model',
   'settings.modelPlaceholder': 'google/gemma-3-4b-it',
   'settings.suggestedModels': 'Suggested models from OpenRouter',
   'collections.eyebrow': 'Corpus',
