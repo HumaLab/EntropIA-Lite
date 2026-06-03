@@ -24,6 +24,7 @@
   import ItemNotesPanel from './ItemNotesPanel.svelte'
   import ItemLayoutPanel from './ItemLayoutPanel.svelte'
   import ItemTextPanel from './ItemTextPanel.svelte'
+  import ItemAnalysisPanel from './ItemAnalysisPanel.svelte'
   import {
     buildLayoutBlockViews,
     countLayoutBlocksByFilter,
@@ -62,16 +63,13 @@
   import {
     DocumentViewer,
     ActionIcon,
-    EntityViewer,
     IconButton,
-    MapViewer,
     Panel,
-    StatusBadge,
     TabButton,
     TabList,
     isNoteHtmlEffectivelyEmpty,
   } from '@entropia/ui'
-  import type { MapMarker, StatusBadgeVariant } from '@entropia/ui'
+  import type { MapMarker } from '@entropia/ui'
   import { onMount, onDestroy } from 'svelte'
   import { listen, emit } from '@tauri-apps/api/event'
   import { invoke } from '@tauri-apps/api/core'
@@ -353,13 +351,6 @@
   let nlpTick = $state(0)
   let entities = $state<Entity[]>([])
   type EditableEntityType = 'person' | 'organization' | 'place' | 'misc' | 'date'
-  const EDITABLE_ENTITY_TYPES: EditableEntityType[] = [
-    'person',
-    'organization',
-    'place',
-    'misc',
-    'date',
-  ]
   let newEntityValue = $state('')
   let newEntityType = $state<EditableEntityType>('organization')
   let editingEntityId = $state<string | null>(null)
@@ -387,15 +378,6 @@
     'notes'
   )
   let rightPanelOpen = $state(true)
-
-  function getJobStatusBadgeVariant(status: string): StatusBadgeVariant {
-    if (status === 'done') return 'success'
-    if (status === 'running') return 'warning'
-    if (status === 'pending') return 'info'
-    if (status === 'error') return 'danger'
-    return 'neutral'
-  }
-
   const metadataEditorLabels = {
     keyPlaceholder: 'Campo',
     valuePlaceholder: 'Valor',
@@ -2450,150 +2432,39 @@
         </div>
 
         <div class="right-panel-pane" class:is-hidden={rightPanelTab !== 'analysis'}>
-          {#if assets.length > 0}
-            {@const nlp = getNlpState()}
-            <section class="section">
-              <div class="analysis-panel analysis-panel--tabbed">
-                <div class="nlp-actions">
-                  <button
-                    class="nlp-btn"
-                    disabled={nlp.fts === 'pending' || nlp.fts === 'running'}
-                    onclick={handleIndexFts}
-                  >
-                    {translate('item.indexAction')}
-                    <StatusBadge variant={getJobStatusBadgeVariant(nlp.fts)} size="sm" class="nlp-badge">{nlp.fts}</StatusBadge>
-                  </button>
-
-                  <button
-                    class="nlp-btn"
-                    disabled={!selectedAsset || nlp.embed === 'pending' || nlp.embed === 'running'}
-                    onclick={handleEmbedAsset}
-                  >
-                    {translate('item.embedAction')}
-                    <StatusBadge variant={getJobStatusBadgeVariant(nlp.embed)} size="sm" class="nlp-badge">{nlp.embed}</StatusBadge>
-                  </button>
-
-                  <button
-                    class="nlp-btn"
-                    disabled={nlp.ner === 'pending' || nlp.ner === 'running'}
-                    onclick={handleExtractEntities}
-                  >
-                    {translate('item.nerAction')}
-                    <StatusBadge variant={getJobStatusBadgeVariant(nlp.ner)} size="sm" class="nlp-badge">{nlp.ner}</StatusBadge>
-                  </button>
-
-                  <button
-                    class="nlp-btn"
-                    disabled={!llmAvailable ||
-                      nlp.triples === 'pending' ||
-                      nlp.triples === 'running'}
-                    onclick={handleLlmExtractTriples}
-                  >
-                    {translate('item.triplesAction')}
-                    <StatusBadge variant={getJobStatusBadgeVariant(nlp.triples)} size="sm" class="nlp-badge">{nlp.triples}</StatusBadge>
-                  </button>
-                </div>
-
-                {#if nlp.errors?.embed}
-                  <p class="ocr-error">
-                    {translate('item.embeddingError', { error: nlp.errors.embed })}
-                  </p>
-                {/if}
-
-                {#if !selectedAsset}
-                  <p class="empty-text">
-                    {translate('item.analysisNeedAsset')}
-                  </p>
-                {/if}
-
-                <div class="geo-section">
-                  <MapViewer
-                    markers={geoMarkers}
-                    height="280px"
-                    visible={rightPanelTab === 'analysis'}
-                  />
-                </div>
-
-                <div class="entities-section">
-                  <h4>{translate('item.entities')}</h4>
-                  <EntityViewer
-                    {entities}
-                    {editingEntityId}
-                    editingValue={editingEntityValue}
-                    labels={{
-                      editValueAria: translate('item.entityEditValueAria'),
-                      deleteEntityAria: (value: string) =>
-                        translate('item.entityDeleteAria', { value }),
-                    }}
-                    onentityclick={startEditingEntity}
-                    oneditvaluechange={handleEditingEntityValueChange}
-                    onsaveentity={handleSaveEntity}
-                    oncancelentityedit={cancelEditingEntity}
-                    ondeleteentity={handleDeleteEntity}
-                  />
-
-                  <div class="entity-editor">
-                    <h5>{translate('item.manualEntities')}</h5>
-                    <p class="entity-editor__hint">
-                      {translate('item.entityHint')}
-                    </p>
-
-                    <div class="entity-editor__create">
-                      <select
-                        value={newEntityType}
-                        aria-label={translate('item.newEntityType')}
-                        onchange={(event) => {
-                          newEntityType = event.currentTarget.value as EditableEntityType
-                        }}
-                      >
-                        {#each EDITABLE_ENTITY_TYPES as type}
-                          <option value={type}>{type.toUpperCase()}</option>
-                        {/each}
-                      </select>
-                      <input
-                        bind:value={newEntityValue}
-                        type="text"
-                        placeholder={translate('item.newEntityValue')}
-                        aria-label={translate('item.newEntityValue')}
-                        onkeydown={(event) => event.key === 'Enter' && void handleCreateEntity()}
-                      />
-                      <button type="button" class="nlp-btn" onclick={handleCreateEntity}
-                        >{translate('item.addEntity')}</button
-                      >
-                    </div>
-
-                    {#if entityActionError}
-                      <p class="error">{entityActionError}</p>
-                    {/if}
-                  </div>
-                </div>
-
-                <div class="triples-section">
-                  <h4>
-                    {translate('item.semanticTriples')}{#if assets.length > 1}
-                      {translate('item.pageInline', { page: selectedAssetIndex + 1 })}{/if}
-                  </h4>
-                  {#if triples.length === 0}
-                    <p class="empty-text">
-                      {translate('item.noTriples', {
-                        suffix: assets.length > 1 ? translate('item.noTriplesPageSuffix') : '',
-                      })}
-                    </p>
-                  {:else}
-                    <ul class="triples-list">
-                      {#each triples as triple, i (`${triple.subject}-${triple.predicate}-${triple.object}-${i}`)}
-                        <li class="triple-item">
-                          <span class="triple-cell">{triple.subject}</span>
-                          <span class="triple-cell">{triple.predicate}</span>
-                          <span class="triple-cell">{triple.object}</span>
-                        </li>
-                      {/each}
-                    </ul>
-                  {/if}
-                </div>
-              </div>
-            </section>
-          {/if}
+          <ItemAnalysisPanel
+            assetsCount={assets.length}
+            selectedAsset={Boolean(selectedAsset)}
+            {selectedAssetIndex}
+            nlpState={getNlpState()}
+            {llmAvailable}
+            {geoMarkers}
+            visible={rightPanelTab === 'analysis'}
+            {entities}
+            {editingEntityId}
+            {editingEntityValue}
+            {newEntityType}
+            {newEntityValue}
+            {entityActionError}
+            {triples}
+            {translate}
+            onIndexFts={handleIndexFts}
+            onEmbedAsset={handleEmbedAsset}
+            onExtractEntities={handleExtractEntities}
+            onExtractTriples={handleLlmExtractTriples}
+            onEntityClick={startEditingEntity}
+            onEditValueChange={handleEditingEntityValueChange}
+            onSaveEntity={handleSaveEntity}
+            onCancelEntityEdit={cancelEditingEntity}
+            onDeleteEntity={handleDeleteEntity}
+            onNewEntityTypeChange={(type) => {
+              newEntityType = type
+            }}
+            onNewEntityValueChange={(value) => {
+              newEntityValue = value
+            }}
+            onCreateEntity={handleCreateEntity}
+          />
         </div>
 
         <div class="right-panel-pane" class:is-hidden={rightPanelTab !== 'search'}>
@@ -2751,10 +2622,6 @@
   .right-panel-pane.is-hidden {
     display: none;
   }
-  .analysis-panel--tabbed {
-    border-top: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
-  }
   .item-header {
     display: flex;
     flex-direction: column;
@@ -2826,16 +2693,6 @@
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
   }
-  .section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-    padding: var(--space-2);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-surface);
-    background: var(--color-surface);
-    box-shadow: var(--shadow-surface);
-  }
   .asset-pagination {
     display: flex;
     align-items: center;
@@ -2896,184 +2753,9 @@
     color: var(--color-danger);
   }
 
-  .ocr-error {
-    font-size: var(--font-size-xs);
-    color: var(--color-danger);
-  }
   .ocr-meta {
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
-  }
-  /* ── Analysis Panel ── */
-  .analysis-panel {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-3);
-    padding: var(--space-2);
-    border: 1px solid var(--border-subtle);
-    border-top: none;
-    border-radius: 0 0 var(--radius-md) var(--radius-md);
-    overflow: hidden;
-    background: var(--surface-card);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
-  }
-
-  .nlp-actions {
-    display: flex;
-    flex-direction: row;
-    gap: var(--space-1);
-  }
-
-  .nlp-btn {
-    display: inline-flex;
-    flex-direction: row;
-    align-items: center;
-    justify-content: center;
-    gap: var(--space-1);
-    flex: 1 1 25%;
-    min-width: 0;
-    padding: 6px var(--space-1);
-    font-size: var(--font-size-xs);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    background: var(--surface-card);
-    cursor: pointer;
-    color: var(--color-text-primary);
-    font-family: var(--font-sans);
-    text-align: center;
-    white-space: nowrap;
-  }
-
-  .nlp-btn:hover:not(:disabled) {
-    border-color: var(--border-panel);
-    background: var(--color-accent-faint);
-  }
-
-  .nlp-btn:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-
-  .nlp-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  :global(.nlp-badge) {
-    font-size: 10px;
-    text-transform: uppercase;
-  }
-
-  .entities-section,
-  .triples-section {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-  }
-
-  .entities-section h4 {
-    font-size: var(--font-size-sm);
-    font-weight: var(--font-weight-medium);
-    color: var(--color-text-secondary);
-  }
-
-  .entity-editor {
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-2);
-    margin-top: var(--space-3);
-    min-width: 0;
-  }
-
-  .entity-editor h5 {
-    margin: 0;
-    font-size: var(--font-size-xs);
-    color: var(--color-text-secondary);
-    text-transform: uppercase;
-    letter-spacing: 0.04em;
-  }
-
-  .entity-editor__hint {
-    margin: 0;
-    font-size: var(--font-size-xs);
-    color: var(--color-text-muted);
-  }
-
-  .entity-editor__create {
-    display: grid;
-    grid-template-columns: 35fr 50fr 15fr;
-    gap: var(--space-2);
-    align-items: center;
-    padding-bottom: var(--space-2);
-    min-width: 0;
-  }
-
-  .entity-editor__create select {
-    min-width: 0;
-    padding: var(--space-2);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    background: var(--surface-input);
-    color: var(--color-text-primary);
-    font-size: var(--font-size-xs);
-  }
-
-  .entity-editor__create input {
-    min-width: 0;
-    padding: var(--space-2);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
-    background: var(--surface-input);
-    color: var(--color-text-primary);
-    font-size: var(--font-size-sm);
-  }
-
-  .entity-editor__create select:focus-visible,
-  .entity-editor__create input:focus-visible {
-    outline: none;
-    border-color: var(--border-focus);
-    box-shadow: var(--focus-ring);
-  }
-
-  .entity-editor__create .nlp-btn {
-    width: 100%;
-    flex-direction: row;
-    justify-content: center;
-    font-size: var(--font-size-sm);
-    padding: var(--space-2) var(--space-3);
-  }
-
-  .triples-list {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    display: flex;
-    flex-direction: column;
-    gap: var(--space-1);
-  }
-
-  .triple-item {
-    display: grid;
-    grid-template-columns: 1fr 1fr 1fr;
-    gap: var(--space-2);
-    padding: var(--space-1) var(--space-2);
-    border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface-raised);
-  }
-
-  .triple-cell {
-    font-size: var(--font-size-xs);
-    color: var(--color-text-secondary);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  /* Geo Section */
-  .geo-section {
-    margin-top: var(--space-4);
-    padding-top: var(--space-4);
-    border-top: 1px solid var(--color-hairline);
   }
 
 </style>
