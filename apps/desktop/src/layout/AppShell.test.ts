@@ -134,7 +134,7 @@ describe('AppShell', () => {
     expect(await screen.findByText('Archive, OCR, and assisted analysis.')).toBeInTheDocument()
     expect(screen.getByText('Developed by')).toBeInTheDocument()
     expect(screen.getByRole('complementary', { name: 'Sidebar' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: 'Collapse sidebar (Ctrl+B)' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: 'Collapse sidebar (Ctrl+B)' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'New collection' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Filter collections' })).toBeInTheDocument()
     expect(screen.getByText('Open a collection to view the explorer')).toBeInTheDocument()
