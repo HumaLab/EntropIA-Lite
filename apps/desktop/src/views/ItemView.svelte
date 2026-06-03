@@ -81,6 +81,7 @@
     pruneLayoutInteractionSelectionState,
     type LayoutBlockFilterId,
   } from '$lib/layouts'
+  import { runPendingAssetJob } from '$lib/item-view-media-jobs'
   import { OcrStore, extractText, type OcrMode } from '$lib/ocr'
   import { TranscriptionStore, transcribeAudio, transcribeDictation } from '$lib/transcription'
   import {
@@ -1097,31 +1098,27 @@
   })
 
   async function handleExtractText(asset: Asset, mode: OcrMode = 'light') {
-    ocrStore._updateState(asset.id, { status: 'pending', progress: 0 })
-    ocrTick++
-    try {
-      await extractText(asset.id, asset.path, asset.type, mode)
-    } catch (e) {
-      ocrStore._updateState(asset.id, {
-        status: 'error',
-        error: e instanceof Error ? e.message : 'Extraction failed',
-      })
-      ocrTick++
-    }
+    await runPendingAssetJob({
+      assetId: asset.id,
+      updateState: (assetId, state) => ocrStore._updateState(assetId, state),
+      bumpTick: () => {
+        ocrTick++
+      },
+      execute: () => extractText(asset.id, asset.path, asset.type, mode),
+      fallbackError: 'Extraction failed',
+    })
   }
 
   async function handleTranscribeAudio(asset: Asset) {
-    transcriptionStore._updateState(asset.id, { status: 'pending', progress: 0 })
-    transcriptionTick++
-    try {
-      await transcribeAudio(asset.id, asset.path)
-    } catch (e) {
-      transcriptionStore._updateState(asset.id, {
-        status: 'error',
-        error: e instanceof Error ? e.message : 'Transcription failed',
-      })
-      transcriptionTick++
-    }
+    await runPendingAssetJob({
+      assetId: asset.id,
+      updateState: (assetId, state) => transcriptionStore._updateState(assetId, state),
+      bumpTick: () => {
+        transcriptionTick++
+      },
+      execute: () => transcribeAudio(asset.id, asset.path),
+      fallbackError: 'Transcription failed',
+    })
   }
 
   async function handleTranscribeDictation(audio: Blob): Promise<string> {
