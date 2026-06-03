@@ -29,6 +29,7 @@
     DebouncedAssetReanalysisScheduler,
     DebouncedAssetTextPersistor,
   } from '$lib/item-view-text-persistence'
+  import { LatestRequestGuard } from '$lib/item-view-load-guards'
   import {
     getActiveLlmTarget,
     getErrorMessage,
@@ -238,10 +239,10 @@
   let layoutLoadToken = 0
   let notesLoadToken = 0
   let selectedAssetStateLoadToken = 0
-  let entitiesLoadToken = 0
+  const entitiesLoadGuard = new LatestRequestGuard()
   let geoMarkersLoadToken = 0
-  let triplesLoadToken = 0
-  let similarAssetsLoadToken = 0
+  const triplesLoadGuard = new LatestRequestGuard()
+  const similarAssetsLoadGuard = new LatestRequestGuard()
   let llmSummaryLoadToken = 0
   let viewerPage = $state(1)
   let viewerTotalPages = $state(1)
@@ -1192,7 +1193,7 @@
   }
 
   async function loadEntities(asset: Asset | null = selectedAsset) {
-    const requestToken = ++entitiesLoadToken
+    const requestToken = entitiesLoadGuard.next()
     try {
       const store = getStore()
       let nextEntities: Entity[]
@@ -1205,13 +1206,13 @@
           (entity) => entity.confidence == null || entity.confidence > 0.89
         )
       }
-      if (entitiesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+      if (!entitiesLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
         return null
       }
       entities = nextEntities
       return nextEntities
     } catch {
-      if (entitiesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+      if (!entitiesLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
         return null
       }
       // Non-fatal: entities panel shows empty state
@@ -1320,7 +1321,7 @@
   }
 
   async function loadSimilarAssets(asset: Asset | null = selectedAsset) {
-    const requestToken = ++similarAssetsLoadToken
+    const requestToken = similarAssetsLoadGuard.next()
     if (!asset) {
       similarAssets = []
       return
@@ -1328,12 +1329,12 @@
 
     try {
       const nextSimilarAssets = await fetchSimilarAssets(asset.id, 5)
-      if (similarAssetsLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+      if (!similarAssetsLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
         return
       }
       similarAssets = nextSimilarAssets
     } catch {
-      if (similarAssetsLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+      if (!similarAssetsLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
         return
       }
       similarAssets = []
@@ -1443,18 +1444,18 @@
   }
 
   async function loadTriples(asset: Asset | null = selectedAsset) {
-    const requestToken = ++triplesLoadToken
+    const requestToken = triplesLoadGuard.next()
     try {
       const store = getStore()
       const nextTriples = asset
         ? await store.triples.findByAssetId(itemId, asset.id)
         : await store.triples.findByItemId(itemId)
-      if (triplesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+      if (!triplesLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
         return
       }
       triples = nextTriples
     } catch {
-      if (triplesLoadToken !== requestToken || !isCurrentSelectedAsset(asset)) {
+      if (!triplesLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
         return
       }
       triples = []
@@ -1917,10 +1918,10 @@
     layoutLoadToken++
     notesLoadToken++
     selectedAssetStateLoadToken++
-    entitiesLoadToken++
+    entitiesLoadGuard.invalidate()
     geoMarkersLoadToken++
-    triplesLoadToken++
-    similarAssetsLoadToken++
+    triplesLoadGuard.invalidate()
+    similarAssetsLoadGuard.invalidate()
     llmSummaryLoadToken++
     window.removeEventListener(
       DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT,
