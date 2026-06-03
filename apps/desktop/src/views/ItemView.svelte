@@ -21,6 +21,10 @@
     type ImageEditUndoEntry,
   } from '$lib/item-view-image-edit'
   import {
+    DebouncedAssetReanalysisScheduler,
+    DebouncedAssetTextPersistor,
+  } from '$lib/item-view-text-persistence'
+  import {
     cropAnnotations,
     normalizeAnnotationsForAsset,
     normalizedToPixels,
@@ -253,10 +257,6 @@
   let ocrTick = $state(0)
   // Edited text per asset — tracks user corrections to OCR output
   let ocrEditedText = $state(new Map<string, string>())
-  // Debounce timers per asset for persisting edits to DB
-  let ocrPersistTimers = $state(new Map<string, ReturnType<typeof setTimeout>>())
-  // Debounce timers per asset for downstream NLP reprocessing after user inactivity
-  let assetReanalysisTimers = $state(new Map<string, ReturnType<typeof setTimeout>>())
 
   // Transcription state — mirrors OcrStore pattern for audio assets
   const transcriptionStore = new TranscriptionStore({
@@ -270,76 +270,57 @@
   let transcriptionTick = $state(0)
 
   let transEditedText = $state(new Map<string, string>())
-  let transPersistTimers = $state(new Map<string, ReturnType<typeof setTimeout>>())
 
   const PERSIST_IDLE_MS = 500
   const REANALYSIS_IDLE_MS = 1500
 
+  const assetReanalysisScheduler = new DebouncedAssetReanalysisScheduler({
+    delayMs: REANALYSIS_IDLE_MS,
+    getJobs: (assetId) => [
+      ['ner', () => extractEntitiesForAsset(itemId, assetId)],
+      ['fts', () => indexFts(itemId)],
+      ['embed', () => embedAsset(itemId, assetId)],
+    ],
+    onStart: (assetId) => {
+      console.info('[ItemView] Re-running post-edit analysis', { itemId, assetId })
+    },
+    onJobError: (jobName, reason) => {
+      console.error(`[ItemView] Post-edit ${jobName} failed`, reason)
+    },
+  })
+
+  const ocrTextPersistor = new DebouncedAssetTextPersistor({
+    delayMs: PERSIST_IDLE_MS,
+    persist: (assetId, text) =>
+      invoke('update_extraction_text_cmd', { assetId, textContent: text }),
+    afterPersist: (assetId) => scheduleAssetReanalysis(assetId),
+    onError: (error) => {
+      console.error('[ItemView] Failed to persist OCR correction:', error)
+    },
+  })
+
+  const transcriptionTextPersistor = new DebouncedAssetTextPersistor({
+    delayMs: PERSIST_IDLE_MS,
+    persist: (assetId, text) =>
+      invoke('update_transcription_text_cmd', { assetId, textContent: text }),
+    afterPersist: (assetId) => scheduleAssetReanalysis(assetId),
+    onError: (error) => {
+      console.error('[ItemView] Failed to persist transcription correction:', error)
+    },
+  })
+
   function scheduleAssetReanalysis(assetId: string) {
-    const existing = assetReanalysisTimers.get(assetId)
-    if (existing) clearTimeout(existing)
-
-    const timer = setTimeout(async () => {
-      const jobs: Array<[string, () => Promise<unknown>]> = [
-        ['ner', () => extractEntitiesForAsset(itemId, assetId)],
-        ['fts', () => indexFts(itemId)],
-        ['embed', () => embedAsset(itemId, assetId)],
-      ]
-
-      try {
-        console.info('[ItemView] Re-running post-edit analysis', { itemId, assetId })
-
-        const results = await Promise.allSettled(jobs.map(([, run]) => run()))
-        results.forEach((result, index) => {
-          const jobName = jobs[index]?.[0] ?? 'unknown'
-          if (result.status === 'rejected') {
-            console.error(`[ItemView] Post-edit ${jobName} failed`, result.reason)
-          }
-        })
-      } finally {
-        assetReanalysisTimers.delete(assetId)
-      }
-    }, REANALYSIS_IDLE_MS)
-
-    assetReanalysisTimers.set(assetId, timer)
+    assetReanalysisScheduler.schedule(assetId)
   }
 
   /** Save quickly, but only re-run expensive analysis after longer inactivity. */
   function schedulePersist(assetId: string, text: string) {
-    // Cancel any pending timer for this asset
-    const existing = ocrPersistTimers.get(assetId)
-    if (existing) clearTimeout(existing)
-
-    // Schedule new persist
-    const timer = setTimeout(async () => {
-      try {
-        await invoke('update_extraction_text_cmd', { assetId, textContent: text })
-        scheduleAssetReanalysis(assetId)
-      } catch (e) {
-        console.error('[ItemView] Failed to persist OCR correction:', e)
-      }
-      ocrPersistTimers.delete(assetId)
-    }, PERSIST_IDLE_MS)
-
-    ocrPersistTimers.set(assetId, timer)
+    ocrTextPersistor.schedule(assetId, text)
   }
 
   /** Schedule a debounced persist of edited transcription text to the DB. */
   function scheduleTranscriptionPersist(assetId: string, text: string) {
-    const existing = transPersistTimers.get(assetId)
-    if (existing) clearTimeout(existing)
-
-    const timer = setTimeout(async () => {
-      try {
-        await invoke('update_transcription_text_cmd', { assetId, textContent: text })
-        scheduleAssetReanalysis(assetId)
-      } catch (e) {
-        console.error('[ItemView] Failed to persist transcription correction:', e)
-      }
-      transPersistTimers.delete(assetId)
-    }, PERSIST_IDLE_MS)
-
-    transPersistTimers.set(assetId, timer)
+    transcriptionTextPersistor.schedule(assetId, text)
   }
 
   // NLP state — mirrors OcrStore pattern
@@ -2000,18 +1981,9 @@
     llmStore.stopListening()
     geoStore.stopListening()
     // Clear any pending debounce timers to avoid stale persist after unmount
-    for (const timer of ocrPersistTimers.values()) {
-      clearTimeout(timer)
-    }
-    ocrPersistTimers.clear()
-    for (const timer of transPersistTimers.values()) {
-      clearTimeout(timer)
-    }
-    transPersistTimers.clear()
-    for (const timer of assetReanalysisTimers.values()) {
-      clearTimeout(timer)
-    }
-    assetReanalysisTimers.clear()
+    ocrTextPersistor.cancelAll()
+    transcriptionTextPersistor.cancelAll()
+    assetReanalysisScheduler.cancelAll()
     clearAnnotationSaveTimer()
     clearFtsSearchTimer()
     if (dragCleanup) dragCleanup()
