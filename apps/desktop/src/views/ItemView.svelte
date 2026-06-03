@@ -35,6 +35,7 @@
     canCancelDelete,
     getNextExpandedNoteId,
     getNoteStateAfterDelete,
+    loadNotesForAssetScope,
   } from '$lib/item-view-notes'
   import { FtsSearchController } from '$lib/item-view-search'
   import {
@@ -1564,12 +1565,13 @@
 
   /** Load notes scoped to the current asset (plus item-level notes). */
   async function loadNotesForAsset(asset: Asset | null = selectedAsset): Promise<Note[]> {
-    if (!asset) {
-      const store = getStore()
-      return store.notes.findByItem(itemId)
-    }
     const store = getStore()
-    return store.notes.findByAsset(itemId, asset.id)
+    return loadNotesForAssetScope({
+      itemId,
+      asset,
+      findByItem: (itemId) => store.notes.findByItem(itemId),
+      findByAsset: (itemId, assetId) => store.notes.findByAsset(itemId, assetId),
+    })
   }
 
   async function loadData() {

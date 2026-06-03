@@ -1,5 +1,54 @@
 import { describe, expect, it } from 'vitest'
-import { canCancelDelete, getNextExpandedNoteId, getNoteStateAfterDelete } from './item-view-notes'
+import {
+  canCancelDelete,
+  getNextExpandedNoteId,
+  getNoteStateAfterDelete,
+  loadNotesForAssetScope,
+} from './item-view-notes'
+
+describe('loadNotesForAssetScope', () => {
+  it('loads item-level notes when no asset is selected', async () => {
+    const calls: string[] = []
+    const itemNotes = ['item-note']
+
+    const notes = await loadNotesForAssetScope({
+      itemId: 'item-1',
+      asset: null,
+      findByItem: async (itemId) => {
+        calls.push(`item:${itemId}`)
+        return itemNotes
+      },
+      findByAsset: async (itemId, assetId) => {
+        calls.push(`asset:${itemId}:${assetId}`)
+        return ['asset-note']
+      },
+    })
+
+    expect(notes).toBe(itemNotes)
+    expect(calls).toEqual(['item:item-1'])
+  })
+
+  it('loads asset-scoped notes when an asset is selected', async () => {
+    const calls: string[] = []
+    const assetNotes = ['asset-note']
+
+    const notes = await loadNotesForAssetScope({
+      itemId: 'item-1',
+      asset: { id: 'asset-1' },
+      findByItem: async (itemId) => {
+        calls.push(`item:${itemId}`)
+        return ['item-note']
+      },
+      findByAsset: async (itemId, assetId) => {
+        calls.push(`asset:${itemId}:${assetId}`)
+        return assetNotes
+      },
+    })
+
+    expect(notes).toBe(assetNotes)
+    expect(calls).toEqual(['asset:item-1:asset-1'])
+  })
+})
 
 describe('getNextExpandedNoteId', () => {
   it('expands the selected note when another note is expanded', () => {
