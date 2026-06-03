@@ -2185,6 +2185,7 @@
             transcriptionState={textPanelTranscriptionState}
             transcriptionEditedText={textPanelTranscriptionEditedText}
             llmState={textPanelLlmState}
+            nlpState={getNlpState()}
             {llmAvailable}
             ocrCorrected={selectedAsset ? ocrCorrectedAssets.has(selectedAsset.id) : false}
             currentSummary={textPanelCurrentSummary}

@@ -5,6 +5,8 @@
   import type { AssetOcrState, OcrMode } from '$lib/ocr'
   import type { AssetTranscriptionState } from '$lib/transcription'
   import type { ItemLlmState } from '$lib/llm'
+  import type { ItemNlpState } from '$lib/nlp'
+  import { buildProcessingChecklist, type ProcessingChecklistStatus } from '$lib/processing-checklist'
 
   let {
     selectedAsset,
@@ -16,6 +18,7 @@
     transcriptionState,
     transcriptionEditedText,
     llmState,
+    nlpState,
     llmAvailable,
     ocrCorrected,
     currentSummary,
@@ -37,6 +40,7 @@
     transcriptionState: AssetTranscriptionState | null
     transcriptionEditedText: string
     llmState: ItemLlmState
+    nlpState: ItemNlpState
     llmAvailable: boolean
     ocrCorrected: boolean
     currentSummary: string | null
@@ -55,6 +59,12 @@
     if (status === 'running') return 'warning'
     if (status === 'pending') return 'info'
     if (status === 'error') return 'danger'
+    return 'neutral'
+  }
+
+  function getChecklistBadgeVariant(status: ProcessingChecklistStatus): StatusBadgeVariant {
+    if (status === 'ready') return 'success'
+    if (status === 'blocked') return 'danger'
     return 'neutral'
   }
 
@@ -127,7 +137,49 @@
   function getAssetFilename(asset: Asset) {
     return asset.path.split(/[/\\]/).pop()
   }
+
+  const processingChecklist = $derived(
+    buildProcessingChecklist({
+      selectedAsset,
+      ocrState,
+      ocrEditedText,
+      transcriptionState,
+      transcriptionEditedText,
+      llmState,
+      nlpState,
+      llmAvailable,
+      ocrCorrected,
+      currentSummary,
+      isSummarizing,
+    })
+  )
 </script>
+
+{#if selectedAsset}
+  <section class="section processing-checklist" aria-label={translate('item.processingChecklistTitle')}>
+    <div class="processing-checklist__header">
+      <h3>{translate('item.processingChecklistTitle')}</h3>
+      <span>{translate('item.processingChecklistHint')}</span>
+    </div>
+    <ol class="processing-checklist__steps">
+      {#each processingChecklist as step}
+        <li class:processing-checklist__step--blocked={step.status === 'blocked'}>
+          <span class="processing-checklist__label">{translate(step.labelKey as I18nKey)}</span>
+          <StatusBadge
+            variant={getChecklistBadgeVariant(step.status)}
+            size="sm"
+            class="processing-checklist__badge"
+          >
+            {translate(`item.processingStatus.${step.status}` as I18nKey)}
+          </StatusBadge>
+          {#if step.reasonKey}
+            <span class="processing-checklist__reason">{translate(step.reasonKey as I18nKey)}</span>
+          {/if}
+        </li>
+      {/each}
+    </ol>
+  </section>
+{/if}
 
 {#if selectedAsset && selectedAsset.type !== 'audio' && ocrState}
   {@const busy = ocrState.status === 'pending' || ocrState.status === 'running'}
@@ -374,6 +426,73 @@
     font-weight: var(--font-weight-medium);
     color: var(--color-text-secondary);
     margin-bottom: var(--space-1);
+  }
+
+  .processing-checklist {
+    gap: var(--space-2);
+  }
+
+  .processing-checklist__header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
+  .processing-checklist__header h3 {
+    margin: 0;
+  }
+
+  .processing-checklist__header span {
+    font-size: var(--font-size-xs);
+    color: var(--color-text-muted);
+  }
+
+  .processing-checklist__steps {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--space-1);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .processing-checklist__steps li {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 2px var(--space-1);
+    align-items: center;
+    min-width: 0;
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-sm);
+    background: var(--surface-card);
+  }
+
+  .processing-checklist__step--blocked {
+    opacity: 0.78;
+  }
+
+  .processing-checklist__label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: var(--font-size-xs);
+    color: var(--color-text-secondary);
+  }
+
+  :global(.processing-checklist__badge) {
+    text-transform: uppercase;
+  }
+
+  .processing-checklist__reason {
+    grid-column: 1 / -1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    color: var(--color-text-muted);
   }
 
   .summary-result {
