@@ -12,12 +12,19 @@
     type ImportedFileMetadata,
   } from '$lib/item-metadata'
   import {
+    appendImageEditUndoEntry,
+    createImageEditUndoEntry,
+    createImageUpdatedPayload,
+    discardLatestImageEditUndoEntry,
+    getLatestImageEditUndoEntry,
+    updateAssetPathInList,
+    type ImageEditUndoEntry,
+  } from '$lib/item-view-image-edit'
+  import {
     cropAnnotations,
     normalizeAnnotationsForAsset,
     normalizedToPixels,
     rotateAnnotations,
-    type NormalizedRegion,
-    type RotationDirection,
   } from '$lib/item-view-geometry'
   import ItemSearchPanel from './ItemSearchPanel.svelte'
   import ItemMetadataPanel from './ItemMetadataPanel.svelte'
@@ -227,17 +234,7 @@
   let editTool = $state<EditTool>('none')
   let imageVersion = $state(0)
 
-  // Undo history: stack of { path, width, height, annotations } snapshots
-  // Each entry represents the state BEFORE an edit operation. Popping restores
-  // the asset to that state (the file is still on disk because edits create
-  // versioned files rather than overwriting in-place).
-  interface UndoEntry {
-    path: string
-    width: number
-    height: number
-    annotations: ViewerAnnotation[]
-  }
-  let undoStack = $state<UndoEntry[]>([])
+  let undoStack = $state<ImageEditUndoEntry[]>([])
   let canUndo = $derived(undoStack.length > 0)
   let lastSelectedAssetId = $state<string | null>(null)
 
@@ -948,16 +945,6 @@
 
   // ── Image editing handlers ────────────────────────────────────────────
 
-  /** Adjust annotations after a rotation. Converted = new image dimensions. */
-  function adjustAnnotationsAfterRotation(rotation: RotationDirection) {
-    annotations = rotateAnnotations(annotations, rotation)
-  }
-
-  /** Adjust annotations after a crop. Region is the crop area in normalized coords. */
-  function adjustAnnotationsAfterCrop(region: NormalizedRegion) {
-    annotations = cropAnnotations(annotations, region)
-  }
-
   async function handleEditSelect(region: { x: number; y: number; width: number; height: number }) {
     if (!selectedAsset || selectedAsset.type !== 'image') return
     if (imageNaturalW === 0 || imageNaturalH === 0) return
@@ -967,16 +954,15 @@
     const asset = selectedAsset
     const pixelRegion = normalizedToPixels(region, imageNaturalW, imageNaturalH)
 
-    // Push current state onto undo stack before performing the edit
-    undoStack = [
-      ...undoStack,
-      {
+    undoStack = appendImageEditUndoEntry(
+      undoStack,
+      createImageEditUndoEntry({
         path: asset.path,
         width: imageNaturalW,
         height: imageNaturalH,
-        annotations: JSON.parse(JSON.stringify(annotations)),
-      },
-    ]
+        annotations,
+      })
+    )
 
     try {
       if (editTool === 'crop') {
@@ -987,7 +973,7 @@
           width: pixelRegion.width,
           height: pixelRegion.height,
         })
-        adjustAnnotationsAfterCrop(region)
+        annotations = cropAnnotations(annotations, region)
         await handleImageEditResult(result, asset.id)
       } else if (editTool === 'erase') {
         const result: ImageEditResult = await invoke('erase_region', {
@@ -1001,8 +987,7 @@
         await handleImageEditResult(result, asset.id)
       }
     } catch (e) {
-      // On failure, pop the undo entry since the edit didn't succeed
-      undoStack = undoStack.slice(0, -1)
+      undoStack = discardLatestImageEditUndoEntry(undoStack)
       console.error('[ItemView] Image edit failed:', e)
     } finally {
       // Reset edit tool after operation
@@ -1015,26 +1000,25 @@
     await flushPendingAnnotationSave()
     const asset = selectedAsset
 
-    // Push current state onto undo stack before rotating
-    undoStack = [
-      ...undoStack,
-      {
+    undoStack = appendImageEditUndoEntry(
+      undoStack,
+      createImageEditUndoEntry({
         path: asset.path,
         width: imageNaturalW,
         height: imageNaturalH,
-        annotations: JSON.parse(JSON.stringify(annotations)),
-      },
-    ]
+        annotations,
+      })
+    )
 
     try {
       const result: ImageEditResult = await invoke('rotate_image', {
         path: asset.path,
         direction: 'left',
       })
-      adjustAnnotationsAfterRotation('left')
+      annotations = rotateAnnotations(annotations, 'left')
       await handleImageEditResult(result, asset.id)
     } catch (e) {
-      undoStack = undoStack.slice(0, -1)
+      undoStack = discardLatestImageEditUndoEntry(undoStack)
       console.error('[ItemView] Rotate left failed:', e)
     }
   }
@@ -1044,26 +1028,25 @@
     await flushPendingAnnotationSave()
     const asset = selectedAsset
 
-    // Push current state onto undo stack before rotating
-    undoStack = [
-      ...undoStack,
-      {
+    undoStack = appendImageEditUndoEntry(
+      undoStack,
+      createImageEditUndoEntry({
         path: asset.path,
         width: imageNaturalW,
         height: imageNaturalH,
-        annotations: JSON.parse(JSON.stringify(annotations)),
-      },
-    ]
+        annotations,
+      })
+    )
 
     try {
       const result: ImageEditResult = await invoke('rotate_image', {
         path: asset.path,
         direction: 'right',
       })
-      adjustAnnotationsAfterRotation('right')
+      annotations = rotateAnnotations(annotations, 'right')
       await handleImageEditResult(result, asset.id)
     } catch (e) {
-      undoStack = undoStack.slice(0, -1)
+      undoStack = discardLatestImageEditUndoEntry(undoStack)
       console.error('[ItemView] Rotate right failed:', e)
     }
   }
@@ -1076,13 +1059,14 @@
 
     await flushPendingAnnotationSave()
 
-    const entry = undoStack[undoStack.length - 1]!
+    const entry = getLatestImageEditUndoEntry(undoStack)
+    if (!entry) return
     const assetId = selectedAsset.id
 
     // Restore state from undo entry
     const store = getStore()
     await store.assets.updatePath(assetId, entry.path)
-    assets = assets.map((a) => (a.id === assetId ? { ...a, path: entry.path } : a))
+    assets = updateAssetPathInList(assets, assetId, entry.path)
     annotations = entry.annotations
     selectedAnnotationId = null
     // Force image refresh
@@ -1092,15 +1076,14 @@
     await persistAnnotations(assetId, annotations)
 
     // Pop the undo stack
-    undoStack = undoStack.slice(0, -1)
+    undoStack = discardLatestImageEditUndoEntry(undoStack)
 
     // Notify other views
     try {
-      await emit('asset:image-updated', {
-        itemId,
-        assetId,
-        path: entry.path,
-      })
+      await emit(
+        'asset:image-updated',
+        createImageUpdatedPayload({ itemId, assetId, path: entry.path })
+      )
     } catch (e) {
       console.warn('[ItemView] Failed to emit asset:image-updated event on undo:', e)
     }
@@ -1114,7 +1097,7 @@
     const store = getStore()
     await store.assets.updatePath(assetId, result.path)
     // Update the local assets array with the new path
-    assets = assets.map((a) => (a.id === assetId ? { ...a, path: result.path } : a))
+    assets = updateAssetPathInList(assets, assetId, result.path)
 
     // Force image refresh: bump version counter so the browser fetches the
     // new file (versioned paths already make the URL unique, but this helps
@@ -1129,11 +1112,10 @@
     // Notify CollectionView (and any other listeners) that the asset path
     // has changed, so they can invalidate their cached thumbnail URLs.
     try {
-      await emit('asset:image-updated', {
-        itemId,
-        assetId,
-        path: result.path,
-      })
+      await emit(
+        'asset:image-updated',
+        createImageUpdatedPayload({ itemId, assetId, path: result.path })
+      )
     } catch (e) {
       console.warn('[ItemView] Failed to emit asset:image-updated event:', e)
     }
