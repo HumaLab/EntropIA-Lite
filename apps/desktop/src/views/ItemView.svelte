@@ -52,10 +52,14 @@
     filterBlocksByPage,
     filterRegionsByPage,
     filterLayoutBlocksByType,
+    findLayoutBlockById,
+    getLayoutInteractionStateFromBlockId,
+    getLayoutInteractionStateFromRegionId,
     getBlockCountByPage,
     getLayoutByAsset,
     getPagesFromLayout,
     LAYOUT_BLOCK_FILTERS,
+    pruneLayoutInteractionSelectionState,
     type LayoutBlockFilterId,
   } from '$lib/layouts'
   import { OcrStore, extractText, type OcrMode } from '$lib/ocr'
@@ -759,7 +763,7 @@
   )
   let layoutFilterCounts = $derived(countLayoutBlocksByFilter(layoutPageBlocks))
   let visibleLayoutBlocks = $derived(filterLayoutBlocksByType(layoutPageBlocks, layoutTypeFilter))
-  let selectedLayoutBlock = $derived(findVisibleLayoutBlockById(layoutSelectedBlockId))
+  let selectedLayoutBlock = $derived(findLayoutBlockById(visibleLayoutBlocks, layoutSelectedBlockId))
   let layoutRegions = $derived<ViewerLayoutRegion[]>(
     visibleLayoutBlocks.map((block) => ({
       id: block.regionId,
@@ -810,42 +814,32 @@
     textPanelLlmState.status === 'running' && textPanelLlmState.activeJob === 'summarize'
   )
 
-  function findVisibleLayoutBlockById(blockId: string | null) {
-    if (!blockId) return null
-    return visibleLayoutBlocks.find((block) => block.id === blockId) ?? null
-  }
-
-  function findVisibleLayoutBlockByRegionId(regionId: string | null) {
-    if (!regionId) return null
-    return visibleLayoutBlocks.find((block) => block.regionId === regionId) ?? null
-  }
-
   function syncLayoutHoverFromBlock(blockId: string | null) {
-    const block = findVisibleLayoutBlockById(blockId)
-    layoutHoveredBlockId = block?.id ?? null
-    layoutHoveredRegionId = block?.regionId ?? null
+    const nextState = getLayoutInteractionStateFromBlockId(visibleLayoutBlocks, blockId)
+    layoutHoveredBlockId = nextState.blockId
+    layoutHoveredRegionId = nextState.regionId
   }
 
   function syncLayoutHoverFromRegion(regionId: string | null) {
-    const block = findVisibleLayoutBlockByRegionId(regionId)
-    layoutHoveredBlockId = block?.id ?? null
-    layoutHoveredRegionId = block?.regionId ?? null
+    const nextState = getLayoutInteractionStateFromRegionId(visibleLayoutBlocks, regionId)
+    layoutHoveredBlockId = nextState.blockId
+    layoutHoveredRegionId = nextState.regionId
   }
 
   function setSelectedLayoutBlock(blockId: string | null) {
-    const block = findVisibleLayoutBlockById(blockId)
-    layoutSelectedBlockId = block?.id ?? null
-    layoutSelectedRegionId = block?.regionId ?? null
-    if (block) {
+    const nextState = getLayoutInteractionStateFromBlockId(visibleLayoutBlocks, blockId)
+    layoutSelectedBlockId = nextState.blockId
+    layoutSelectedRegionId = nextState.regionId
+    if (nextState.hasMatch) {
       showLayout = true
     }
   }
 
   function setSelectedLayoutRegion(regionId: string | null) {
-    const block = findVisibleLayoutBlockByRegionId(regionId)
-    layoutSelectedBlockId = block?.id ?? null
-    layoutSelectedRegionId = block?.regionId ?? null
-    if (block) {
+    const nextState = getLayoutInteractionStateFromRegionId(visibleLayoutBlocks, regionId)
+    layoutSelectedBlockId = nextState.blockId
+    layoutSelectedRegionId = nextState.regionId
+    if (nextState.hasMatch) {
       showLayout = true
     }
   }
@@ -1799,14 +1793,24 @@
   })
 
   $effect(() => {
-    if (!visibleLayoutBlocks.some((block) => block.id === layoutSelectedBlockId)) {
-      layoutSelectedBlockId = null
-      layoutSelectedRegionId = null
-    }
+    const nextState = pruneLayoutInteractionSelectionState(visibleLayoutBlocks, {
+      selectedBlockId: layoutSelectedBlockId,
+      selectedRegionId: layoutSelectedRegionId,
+      hoveredBlockId: layoutHoveredBlockId,
+      hoveredRegionId: layoutHoveredRegionId,
+    })
 
-    if (!visibleLayoutBlocks.some((block) => block.id === layoutHoveredBlockId)) {
-      layoutHoveredBlockId = null
-      layoutHoveredRegionId = null
+    if (layoutSelectedBlockId !== nextState.selectedBlockId) {
+      layoutSelectedBlockId = nextState.selectedBlockId
+    }
+    if (layoutSelectedRegionId !== nextState.selectedRegionId) {
+      layoutSelectedRegionId = nextState.selectedRegionId
+    }
+    if (layoutHoveredBlockId !== nextState.hoveredBlockId) {
+      layoutHoveredBlockId = nextState.hoveredBlockId
+    }
+    if (layoutHoveredRegionId !== nextState.hoveredRegionId) {
+      layoutHoveredRegionId = nextState.hoveredRegionId
     }
   })
 
