@@ -25,6 +25,7 @@
   import ItemLayoutPanel from './ItemLayoutPanel.svelte'
   import ItemTextPanel from './ItemTextPanel.svelte'
   import ItemAnalysisPanel from './ItemAnalysisPanel.svelte'
+  import ItemAssetPanel from './ItemAssetPanel.svelte'
   import {
     buildLayoutBlockViews,
     countLayoutBlocksByFilter,
@@ -61,7 +62,6 @@
   } from '$lib/llm'
   import { GeoStore } from '$lib/geo'
   import {
-    DocumentViewer,
     ActionIcon,
     IconButton,
     Panel,
@@ -222,7 +222,6 @@
   let llmSummaryLoadToken = 0
   let viewerPage = $state(1)
   let viewerTotalPages = $state(1)
-  let leftPanelTab = $state<'document' | 'text'>('document')
 
   // Image edit state
   let editTool = $state<EditTool>('none')
@@ -1845,7 +1844,6 @@
     if (!asset) return
     const requestToken = ++selectedAssetStateLoadToken
 
-    leftPanelTab = 'document'
     rightPanelTab = 'notes'
 
     // Reload notes for this asset (plus item-level notes)
@@ -2049,158 +2047,54 @@
     style="grid-template-columns: 1fr auto {rightPanelOpen ? `6px ${sidebarWidth}%` : ''}"
   >
     <Panel variant="glass" padding="none" class="left-panel">
-      {#if selectedAsset}
-        <TabList class="left-panel-tabs" aria-label={translate('item.assetPanel')}>
-          <TabButton
-            id="left-panel-tab-document"
-            active={leftPanelTab === 'document'}
-            class="left-panel-tab"
-            aria-controls="left-panel-document"
-            onclick={() => {
-              leftPanelTab = 'document'
-            }}
-          >
-            {translate('item.documentTab')}
-          </TabButton>
-          <TabButton
-            id="left-panel-tab-text"
-            active={leftPanelTab === 'text'}
-            class="left-panel-tab"
-            aria-controls="left-panel-text"
-            onclick={() => {
-              leftPanelTab = 'text'
-            }}
-          >
-            {translate('item.extractedTextTab')}
-          </TabButton>
-        </TabList>
-
-        <div class="left-panel-content">
-          <div
-            id="left-panel-document"
-            role="tabpanel"
-            aria-labelledby="left-panel-tab-document"
-            class="left-panel-pane left-panel-pane--document"
-            class:is-hidden={leftPanelTab !== 'document'}
-          >
-            <DocumentViewer
-              path={selectedAsset.path}
-              assetUrl={viewerSrc}
-              type={viewerType}
-              {annotations}
-              {layoutRegions}
-              showLayoutOverlay={showLayout && layoutRegions.length > 0}
-              hoveredLayoutRegionId={layoutHoveredRegionId}
-              selectedLayoutRegionId={layoutSelectedRegionId}
-              {layoutReferenceWidth}
-              {layoutReferenceHeight}
-              {selectedAnnotationId}
-              {annotationTool}
-              {annotationColor}
-              {editTool}
-              {canUndo}
-              currentPage={viewerPage}
-              onAnnotationsChange={handleAnnotationsChange}
-              onSelectedAnnotationIdChange={handleSelectedAnnotationIdChange}
-              onAnnotationToolChange={handleAnnotationToolChange}
-              onAnnotationColorChange={handleAnnotationColorChange}
-              onLayoutRegionHoverChange={(regionId: string | null) => {
-                syncLayoutHoverFromRegion(regionId)
-              }}
-              onLayoutRegionSelect={(regionId: string) => {
-                setSelectedLayoutRegion(regionId)
-              }}
-              onEditSelect={handleEditSelect}
-              onEditToolChange={(tool: EditTool) => {
-                editTool = tool
-                if (tool !== 'none') annotationTool = 'select'
-              }}
-              onRotateLeft={handleRotateLeft}
-              onRotateRight={handleRotateRight}
-              onUndo={handleUndo}
-              onPageChange={(page: number, totalPages: number) => {
-                viewerPage = page
-                viewerTotalPages = totalPages
-              }}
-              onDimensionsChange={(dims: { width: number; height: number }) => {
-                imageNaturalW = dims.width
-                imageNaturalH = dims.height
-              }}
-              labels={documentViewerLabels}
-              {annotationToolbarLabels}
-            />
-
-            {#if annotationSaveError}
-              <p class="error">{annotationSaveError}</p>
-            {/if}
-          </div>
-
-          <div
-            id="left-panel-text"
-            role="tabpanel"
-            aria-labelledby="left-panel-tab-text"
-            class="left-panel-pane left-panel-pane--text"
-            class:is-hidden={leftPanelTab !== 'text'}
-          >
-            {#if selectedAsset.type !== 'audio'}
-              {@const ocr = getOcrState(selectedAsset.id)}
-              <section class="left-text-panel-section">
-                <div class="left-text-panel-card">
-                  {#if (ocrEditedText.get(selectedAsset.id) ?? ocr.textContent ?? '').trim()}
-                    <div class="left-text-panel-meta">
-                      <span>{translate('item.extractedText')}</span>
-                      <span class="ocr-meta"
-                        >via {ocr.method ?? translate('item.ocrMethodUnknown')} · {translate(
-                          'item.characters',
-                          {
-                            count: (ocrEditedText.get(selectedAsset.id) ?? ocr.textContent ?? '')
-                              .length,
-                          }
-                        )}</span
-                      >
-                    </div>
-                    <div class="left-text-panel-body">
-                      {ocrEditedText.get(selectedAsset.id) ?? ocr.textContent ?? ''}
-                    </div>
-                  {:else}
-                    <p class="empty-text">{translate('item.noExtractedText')}</p>
-                  {/if}
-                </div>
-              </section>
-            {:else}
-              {@const ts = getTranscriptionState(selectedAsset.id)}
-              <section class="left-text-panel-section">
-                <div class="left-text-panel-card">
-                  {#if (transEditedText.get(selectedAsset.id) ?? ts.text ?? '').trim()}
-                    <div class="left-text-panel-meta">
-                      <span>{translate('item.transcription')}</span>
-                      <span class="ocr-meta">
-                        {#if ts.language}{ts.language} &middot;
-                        {/if}{translate('item.characters', {
-                          count: (transEditedText.get(selectedAsset.id) ?? ts.text ?? '').length,
-                        })}
-                        {#if ts.durationMs}
-                          &middot; {translate('item.audioDurationSeconds', {
-                            count: Math.round(ts.durationMs / 1000),
-                          })}{/if}
-                      </span>
-                    </div>
-                    <div class="left-text-panel-body">
-                      {transEditedText.get(selectedAsset.id) ?? ts.text ?? ''}
-                    </div>
-                  {:else}
-                    <p class="empty-text">{translate('item.noExtractedText')}</p>
-                  {/if}
-                </div>
-              </section>
-            {/if}
-          </div>
-        </div>
-      {:else}
-        <div class="empty-viewer">
-          <p>{translate('item.noAssets')}</p>
-        </div>
-      {/if}
+      <ItemAssetPanel
+        {selectedAsset}
+        {viewerSrc}
+        {viewerType}
+        {annotations}
+        {layoutRegions}
+        showLayoutOverlay={showLayout && layoutRegions.length > 0}
+        hoveredLayoutRegionId={layoutHoveredRegionId}
+        selectedLayoutRegionId={layoutSelectedRegionId}
+        {layoutReferenceWidth}
+        {layoutReferenceHeight}
+        {selectedAnnotationId}
+        {annotationTool}
+        {annotationColor}
+        {editTool}
+        {canUndo}
+        {viewerPage}
+        {annotationSaveError}
+        ocrState={textPanelOcrState}
+        ocrEditedText={textPanelOcrEditedText}
+        transcriptionState={textPanelTranscriptionState}
+        transcriptionEditedText={textPanelTranscriptionEditedText}
+        {documentViewerLabels}
+        {annotationToolbarLabels}
+        {translate}
+        onAnnotationsChange={handleAnnotationsChange}
+        onSelectedAnnotationIdChange={handleSelectedAnnotationIdChange}
+        onAnnotationToolChange={handleAnnotationToolChange}
+        onAnnotationColorChange={handleAnnotationColorChange}
+        onLayoutRegionHoverChange={syncLayoutHoverFromRegion}
+        onLayoutRegionSelect={setSelectedLayoutRegion}
+        onEditSelect={handleEditSelect}
+        onEditToolChange={(tool: EditTool) => {
+          editTool = tool
+          if (tool !== 'none') annotationTool = 'select'
+        }}
+        onRotateLeft={handleRotateLeft}
+        onRotateRight={handleRotateRight}
+        onUndo={handleUndo}
+        onPageChange={(page: number, totalPages: number) => {
+          viewerPage = page
+          viewerTotalPages = totalPages
+        }}
+        onDimensionsChange={(dims: { width: number; height: number }) => {
+          imageNaturalW = dims.width
+          imageNaturalH = dims.height
+        }}
+      />
 
       {#if assets.length > 1}
         <div class="asset-pagination">
@@ -2512,75 +2406,6 @@
     padding: var(--space-2);
     min-height: 0;
   }
-  :global(.left-panel-tabs) {
-    display: flex;
-    width: 100%;
-    flex-shrink: 0;
-    border-color: var(--border-subtle);
-    background: var(--surface-input);
-  }
-  :global(.left-panel-tab) {
-    flex: 1;
-    min-width: 0;
-  }
-  .left-panel-content {
-    position: relative;
-    display: flex;
-    flex-direction: column;
-    min-height: 0;
-    flex: 1;
-  }
-  .left-panel-pane {
-    min-height: 0;
-  }
-  .left-panel-pane.is-hidden {
-    display: none;
-  }
-  .left-panel-pane--text {
-    flex: 1;
-    padding: 0 var(--space-2);
-    min-height: 0;
-  }
-  .left-text-panel-section {
-    display: flex;
-    flex-direction: column;
-    flex: 1;
-    min-height: 0;
-  }
-  .left-text-panel-card {
-    display: flex;
-    flex: 1;
-    flex-direction: column;
-    min-height: 0;
-    gap: var(--space-3);
-    padding: var(--space-3);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-surface);
-    background: var(--surface-panel);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
-  }
-  .left-text-panel-meta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: var(--space-2);
-    font-size: var(--font-size-sm);
-    color: var(--color-text-secondary);
-  }
-  .left-text-panel-body {
-    flex: 1;
-    min-height: 0;
-    overflow-y: auto;
-    padding: var(--space-3);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-md);
-    background: var(--surface-input);
-    color: var(--color-text-primary);
-    font-size: var(--font-size-sm);
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-word;
-  }
   :global(.right-panel) {
     display: flex;
     flex-direction: column;
@@ -2731,20 +2556,6 @@
     text-align: center;
     font-variant-numeric: tabular-nums;
   }
-  .empty-viewer {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    min-height: 300px;
-    color: var(--color-text-secondary);
-    border: 1px dashed var(--color-hairline);
-    border-radius: var(--radius-md);
-  }
-
-  .empty-text {
-    color: var(--color-text-secondary);
-    font-size: var(--font-size-sm);
-  }
   .status {
     color: var(--color-text-secondary);
     text-align: center;
@@ -2752,10 +2563,4 @@
   .error {
     color: var(--color-danger);
   }
-
-  .ocr-meta {
-    font-size: var(--font-size-xs);
-    color: var(--color-text-muted);
-  }
-
 </style>
