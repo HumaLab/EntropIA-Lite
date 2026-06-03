@@ -25,6 +25,15 @@
     DebouncedAssetTextPersistor,
   } from '$lib/item-view-text-persistence'
   import {
+    getActiveLlmTarget,
+    getErrorMessage,
+    isLlmCorrectOcrJob,
+    isLlmSummaryJob,
+    isLlmTriplesJob,
+    runScopedLlmAction,
+    selectOcrCorrectionAssetId,
+  } from '$lib/item-view-llm-orchestration'
+  import {
     cropAnnotations,
     normalizeAnnotationsForAsset,
     normalizedToPixels,
@@ -480,32 +489,29 @@
     onComplete: (id, job, result) => {
       llmTick++
       // Track summary results in the dedicated map
-      if (job === 'summarize') {
+      if (isLlmSummaryJob(job)) {
         summaryTexts.set(id, result)
         summaryTick++
       }
       // When LLM triples complete, reload triples from DB (they're now in the triples table)
-      if (job === 'extract_triples') {
+      if (isLlmTriplesJob(job)) {
         loadTriples()
         nlpStore._setJobStatus(itemId, 'triples', 'done')
         nlpTick++
       }
-      if (job === 'correct_ocr') {
+      if (isLlmCorrectOcrJob(job)) {
         ocrCorrectedAssets.add(id)
         ocrTick++ // Force Svelte reactivity for the textarea
-        const assetId = selectedAsset?.id === id ? id : null
+        const assetId = selectOcrCorrectionAssetId({
+          completedTargetId: id,
+          selectedAssetId: selectedAsset?.id ?? null,
+          assets,
+          hasOcrText: (assetId) => Boolean(ocrStore.getTextContent(assetId)),
+        })
         if (assetId) {
           ocrEditedText.set(assetId, result)
           ocrStore.setTextContent(assetId, result)
           schedulePersist(assetId, result)
-        } else {
-          // Item-level (legacy): update the first asset's text or whichever asset has OCR text
-          const asset = assets.find((a: Asset) => ocrStore.getTextContent(a.id))
-          if (asset) {
-            ocrEditedText.set(asset.id, result)
-            ocrStore.setTextContent(asset.id, result)
-            schedulePersist(asset.id, result)
-          }
         }
       }
     },
@@ -515,7 +521,7 @@
     },
     onError: (id, job, error) => {
       // When LLM triples extraction fails, set NLP triples status to error
-      if (job === 'extract_triples') {
+      if (isLlmTriplesJob(job)) {
         nlpStore._setJobStatus(itemId, 'triples', 'error', error)
         nlpTick++
       }
@@ -538,18 +544,19 @@
    */
   function getLlmState() {
     void llmTick
-    const targetId = selectedAsset ? selectedAsset.id : itemId
-    return llmStore.getState(targetId)
+    const target = getActiveLlmTarget({ itemId, selectedAssetId: selectedAsset?.id ?? null })
+    return llmStore.getState(target.targetId)
   }
 
   async function handleLlmSummarize() {
     error = null
     try {
-      if (selectedAsset) {
-        await llmSummarizeAsset(selectedAsset.id)
-      } else {
-        await llmSummarize(itemId)
-      }
+      await runScopedLlmAction({
+        itemId,
+        selectedAssetId: selectedAsset?.id ?? null,
+        runAsset: llmSummarizeAsset,
+        runItem: llmSummarize,
+      })
     } catch (e) {
       console.error('[LLM] summarize failed:', e)
       error = translate('item.error.summarize')
@@ -559,11 +566,12 @@
   async function handleLlmCorrectOcr() {
     error = null
     try {
-      if (selectedAsset) {
-        await llmCorrectOcrAsset(selectedAsset.id)
-      } else {
-        await llmCorrectOcr(itemId)
-      }
+      await runScopedLlmAction({
+        itemId,
+        selectedAssetId: selectedAsset?.id ?? null,
+        runAsset: llmCorrectOcrAsset,
+        runItem: llmCorrectOcr,
+      })
     } catch (e) {
       console.error('[LLM] correct OCR failed:', e)
       error = translate('item.error.correctOcr')
@@ -574,14 +582,15 @@
     nlpStore._setJobStatus(itemId, 'triples', 'pending')
     nlpTick++
     try {
-      if (selectedAsset) {
-        await llmExtractTriplesAsset(selectedAsset.id)
-      } else {
-        await llmExtractTriples(itemId)
-      }
+      await runScopedLlmAction({
+        itemId,
+        selectedAssetId: selectedAsset?.id ?? null,
+        runAsset: llmExtractTriplesAsset,
+        runItem: llmExtractTriples,
+      })
     } catch (e) {
       console.error('[LLM] extract triples failed:', e)
-      nlpStore._setJobStatus(itemId, 'triples', 'error', e instanceof Error ? e.message : 'Failed')
+      nlpStore._setJobStatus(itemId, 'triples', 'error', getErrorMessage(e))
       nlpTick++
     }
   }
