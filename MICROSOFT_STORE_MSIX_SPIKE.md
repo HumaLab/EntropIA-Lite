@@ -63,7 +63,7 @@ Regla crítica: si aparece `EntropIA Lite Dev`, se usó el build equivocado.
 
 Herramienta candidata: MSIX Packaging Tool.
 
-Preparar una VM o entorno limpio Windows para evitar capturar ruido del sistema.
+Preparar una VM Windows completa y limpia, idealmente con snapshot/checkpoint, para evitar capturar ruido del sistema sin depender de Windows Sandbox.
 
 Pasos:
 
@@ -78,6 +78,20 @@ Pasos:
 5. Registrar cualquier fixup necesario.
 
 Riesgo principal: MSIX puede restringir o alterar accesos que el instalador tradicional permite. No asumir compatibilidad sin pruebas reales.
+
+### Resultado del intento con Windows Sandbox
+
+Windows Sandbox no queda recomendado como entorno de conversión para este spike.
+
+Hallazgos del intento:
+
+- La VM Sandbox inicia correctamente y ejecuta scripts como administrador.
+- MSIX Packaging Tool 1.2024.405.0 se instala dentro del Sandbox.
+- La CLI lee el template de conversión y reconoce el MSI normal de EntropIA Lite.
+- La conversión falla antes de capturar porque DISM no logra instalar `Msix.PackagingTool.Driver~~~~0.0.1.0`.
+- El error persiste incluso usando el paquete FOD offline oficial `Msix-PackagingTool-Driver-Package-amd64.cab` y `/ScratchDir:C:\DismScratch`.
+
+Conclusión: para avanzar con MSIX hace falta una VM Windows completa, no Sandbox. Si el driver de captura no instala en la VM completa, recién ahí descartar MSIX Packaging Tool como camino viable.
 
 ## Fase 3 — Matriz de validación runtime
 
@@ -181,4 +195,4 @@ Descartar o pausar este camino si:
 
 ## Próximo paso recomendado
 
-Ejecutar la Fase 1 y Fase 2 en una VM limpia Windows, registrar resultados y decidir si avanzamos a Partner Center.
+Ejecutar la Fase 2 en una VM Windows completa con snapshot/checkpoint, registrar resultados y decidir si avanzamos a WACK y Partner Center.
