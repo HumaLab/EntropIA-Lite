@@ -103,6 +103,15 @@
   // Manual zoom multiplier applied on top of auto-fit sizing.
   let imageZoom = $state(1.0)
   let containerMeasureFrame = $state<number | null>(null)
+  let panToolActive = $state(false)
+  let isPanning = $state(false)
+  let panDrag: {
+    pointerId: number
+    startClientX: number
+    startClientY: number
+    startScrollLeft: number
+    startScrollTop: number
+  } | null = null
 
   let draft = $state<{
     startX: number
@@ -145,10 +154,20 @@
   const canPdfZoomOut = $derived(pdfZoom > MIN_ZOOM + 0.001)
 
   const overlayCursor = $derived(
-    editTool !== 'none' ? 'crosshair' : annotationTool === 'select' ? 'default' : 'crosshair'
+    isPanning
+      ? 'grabbing'
+      : panToolActive
+        ? 'grab'
+        : editTool !== 'none'
+          ? 'crosshair'
+          : annotationTool === 'select'
+            ? 'default'
+            : 'crosshair'
   )
 
-  const layoutOverlayInteractive = $derived(annotationTool === 'select' && editTool === 'none')
+  const layoutOverlayInteractive = $derived(
+    annotationTool === 'select' && editTool === 'none' && !panToolActive
+  )
   const layoutViewportW = $derived(type === 'image' ? naturalW : layoutReferenceWidth)
   const layoutViewportH = $derived(type === 'image' ? naturalH : layoutReferenceHeight)
   const layoutDisplayW = $derived(type === 'image' ? displayW : pdfCanvasW)
@@ -313,6 +332,9 @@
 
   // ── Handlers ────────────────────────────────────────────────────────
   function handleToolbarToolChange(tool: AnnotationTool) {
+    panToolActive = false
+    panDrag = null
+    isPanning = false
     onAnnotationToolChange(tool)
     // Reset edit tool when switching to annotation mode
     if (tool !== 'select') {
@@ -320,6 +342,27 @@
     }
     if (tool !== annotationTool) {
       draft = null
+    }
+  }
+
+  function handleToolbarEditToolChange(tool: EditTool) {
+    panToolActive = false
+    panDrag = null
+    isPanning = false
+    onEditToolChange(tool)
+  }
+
+  function handlePanToggle() {
+    const nextActive = !panToolActive
+    panToolActive = nextActive
+    panDrag = null
+    isPanning = false
+    draft = null
+    editDraft = null
+    if (nextActive) {
+      onEditToolChange('none')
+      onAnnotationToolChange('select')
+      onSelectedAnnotationIdChange(null)
     }
   }
 
@@ -402,6 +445,21 @@
 
   function handleOverlayPointerDown(event: PointerEvent) {
     if (!hasRenderableBounds || event.button !== 0) return
+
+    if (panToolActive && containerEl) {
+      event.preventDefault()
+      panDrag = {
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startScrollLeft: containerEl.scrollLeft,
+        startScrollTop: containerEl.scrollTop,
+      }
+      isPanning = true
+      ;(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId)
+      return
+    }
+
     const point = getNormalizedPoint(event)
     if (!point) return
 
@@ -431,6 +489,13 @@
   }
 
   function handleOverlayPointerMove(event: PointerEvent) {
+    if (panDrag && containerEl) {
+      event.preventDefault()
+      containerEl.scrollLeft = panDrag.startScrollLeft + (panDrag.startClientX - event.clientX)
+      containerEl.scrollTop = panDrag.startScrollTop + (panDrag.startClientY - event.clientY)
+      return
+    }
+
     if (editDraft) {
       const point = getNormalizedPoint(event)
       if (!point) return
@@ -453,6 +518,12 @@
   }
 
   function finishDraft() {
+    if (panDrag) {
+      panDrag = null
+      isPanning = false
+      return
+    }
+
     // Handle edit draft completion
     if (editDraft) {
       const box = toEditBox(editDraft)
@@ -692,12 +763,14 @@
         <AnnotationToolbar
           tool={annotationTool}
           {editTool}
+          panActive={panToolActive}
           color={annotationColor}
           hasSelection={selectedAnnotationId !== null}
           {canUndo}
           colors={presetColors}
           onToolChange={handleToolbarToolChange}
-          {onEditToolChange}
+          onEditToolChange={handleToolbarEditToolChange}
+          onPanToggle={handlePanToggle}
           onColorChange={handleToolbarColorChange}
           onDeleteSelected={handleDeleteSelected}
           {onRotateLeft}
@@ -803,7 +876,7 @@
                         : annotation.color}
                       stroke-width={annotation.id === selectedAnnotationId ? 2 : 1.5}
                       vector-effect="non-scaling-stroke"
-                      style={editTool !== 'none' ? 'pointer-events:none' : ''}
+                      style={editTool !== 'none' || panToolActive ? 'pointer-events:none' : ''}
                       role="button"
                       tabindex="-1"
                       aria-label={labels.annotationAriaLabel(annotation.id)}
@@ -815,7 +888,7 @@
                       onpointerdown={(event) => handleShapePointerDown(event, annotation.id)}
                     />
                   {:else}
-                    <g style={editTool !== 'none' ? 'pointer-events:none' : ''}>
+                    <g style={editTool !== 'none' || panToolActive ? 'pointer-events:none' : ''}>
                       <rect
                         data-testid={`annotation-hitbox-${annotation.id}`}
                         x={px(annotation.x, 'x')}
@@ -1091,11 +1164,17 @@
   .document-viewer__toolbar-anchor {
     position: sticky;
     top: 0;
+    left: 0;
+    right: 0;
     z-index: 3;
     display: flex;
     justify-content: flex-end;
     align-items: flex-start;
     gap: var(--space-2);
+    width: 100%;
+    inline-size: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
     pointer-events: none;
     padding: 0 var(--space-2) var(--space-2) 0;
   }

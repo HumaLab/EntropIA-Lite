@@ -434,6 +434,7 @@
       toolbarAriaLabel: translate('item.toolbar.imageTools'),
       undo: translate('item.toolbar.undo'),
       undoTitle: translate('item.toolbar.undoTitle'),
+      panTool: translate('item.toolbar.pan'),
       rectangleTool: translate('item.toolbar.rectangle'),
       underlineTool: translate('item.toolbar.underline'),
       cropTool: translate('item.toolbar.crop'),

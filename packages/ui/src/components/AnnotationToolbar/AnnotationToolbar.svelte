@@ -14,9 +14,11 @@
     color: string
     hasSelection: boolean
     canUndo?: boolean
+    panActive?: boolean
     colors: AnnotationColorOption[]
     onToolChange?: (tool: AnnotationTool) => void
     onEditToolChange?: (tool: EditTool) => void
+    onPanToggle?: () => void
     onColorChange?: (color: string) => void
     onDeleteSelected?: () => void
     onRotateLeft?: () => void
@@ -38,6 +40,7 @@
     toolbarAriaLabel: string
     undo: string
     undoTitle: string
+    panTool: string
     rectangleTool: string
     underlineTool: string
     cropTool: string
@@ -58,6 +61,7 @@
     toolbarAriaLabel: 'Image editing tools',
     undo: 'Undo last edit',
     undoTitle: 'Undo',
+    panTool: 'Pan image (hand tool)',
     rectangleTool: 'Rectangle annotation tool',
     underlineTool: 'Underline annotation tool',
     cropTool: 'Crop to selection',
@@ -76,9 +80,11 @@
     color,
     hasSelection,
     canUndo = false,
+    panActive = false,
     colors,
     onToolChange = () => {},
     onEditToolChange = () => {},
+    onPanToggle = () => {},
     onColorChange = () => {},
     onDeleteSelected = () => {},
     onRotateLeft = () => {},
@@ -163,6 +169,20 @@
         onclick={onUndo}
       >
         <ActionIcon name="undo" size={18} />
+      </button>
+
+      <span class="annotation-toolbar__separator"></span>
+
+      <button
+        type="button"
+        class="annotation-toolbar__button"
+        class:annotation-toolbar__button--active={panActive}
+        aria-label={labels.panTool}
+        aria-pressed={panActive}
+        title={labels.panTool}
+        onclick={onPanToggle}
+      >
+        <ActionIcon name="hand" size={18} />
       </button>
 
       <span class="annotation-toolbar__separator"></span>
@@ -340,7 +360,10 @@
   .annotation-toolbar {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--space-2);
+    max-width: 100%;
+    box-sizing: border-box;
     padding: var(--space-2);
     border: 1px solid var(--color-border);
     border-radius: var(--radius-lg);
@@ -380,7 +403,9 @@
   .annotation-toolbar__group {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: var(--space-1);
+    min-width: 0;
   }
 
   .annotation-toolbar__separator {
@@ -406,6 +431,7 @@
     justify-content: center;
     width: 32px;
     height: 32px;
+    flex: 0 0 32px;
     padding: 0;
     border: 1px solid var(--color-border);
     border-radius: var(--radius-md);
@@ -466,9 +492,13 @@
     border: 1px solid color-mix(in srgb, var(--color-text-primary) 35%, transparent);
   }
 
-  @media (max-width: 720px) {
+  @media (max-width: 420px) {
     .annotation-toolbar {
-      flex-wrap: wrap;
+      gap: var(--space-1);
+    }
+
+    .annotation-toolbar__separator {
+      margin: 0;
     }
   }
 </style>

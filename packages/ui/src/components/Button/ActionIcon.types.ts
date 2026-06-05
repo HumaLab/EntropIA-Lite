@@ -22,6 +22,7 @@ export type ActionIconName =
   | 'file-text'
   | 'folder'
   | 'folder-plus'
+  | 'hand'
   | 'moon'
   | 'panel-left'
   | 'panel-left-close'

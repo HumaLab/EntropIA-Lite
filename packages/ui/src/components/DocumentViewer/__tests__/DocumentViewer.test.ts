@@ -717,8 +717,100 @@ describe('DocumentViewer', () => {
       expect(
         screen.queryByRole('button', { name: /select annotation tool/i })
       ).not.toBeInTheDocument()
+      expect(screen.getByRole('button', { name: 'Pan image (hand tool)' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /rectangle annotation tool/i })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /underline annotation tool/i })).toBeInTheDocument()
+    })
+
+    it('toggles the hand pan tool and resets edit/annotation modes', async () => {
+      const onAnnotationToolChange = vi.fn()
+      const onEditToolChange = vi.fn()
+
+      render(DocumentViewer, {
+        props: {
+          path: '/path/to/image.jpg',
+          type: 'image',
+          assetUrl: 'asset://localhost/path/to/image.jpg',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'rectangle',
+          annotationColor: 'var(--color-accent)',
+          editTool: 'crop',
+          onAnnotationToolChange,
+          onEditToolChange,
+        },
+      })
+
+      const panButton = screen.getByRole('button', { name: 'Pan image (hand tool)' })
+      expect(panButton).toHaveAttribute('aria-pressed', 'false')
+
+      await fireEvent.click(panButton)
+
+      await waitFor(() => expect(panButton).toHaveAttribute('aria-pressed', 'true'))
+      expect(onEditToolChange).toHaveBeenCalledWith('none')
+      expect(onAnnotationToolChange).toHaveBeenCalledWith('select')
+
+      await fireEvent.click(panButton)
+
+      await waitFor(() => expect(panButton).toHaveAttribute('aria-pressed', 'false'))
+    })
+
+    it('pans the zoomed image without creating annotations while the hand tool is active', async () => {
+      const onAnnotationsChange = vi.fn()
+
+      render(DocumentViewer, {
+        props: {
+          path: '/path/to/image.jpg',
+          type: 'image',
+          assetUrl: 'asset://localhost/path/to/image.jpg',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'rectangle',
+          annotationColor: 'var(--color-accent)',
+          onAnnotationsChange,
+        },
+      })
+
+      const img = screen.getByRole('img') as HTMLImageElement
+      const container = img.closest('.document-viewer__image-container') as HTMLElement
+      setupImage(img, 200, 100, 200, 100)
+      setupContainer(container, 120, 80)
+      await fireEvent.load(img)
+      await triggerResizeObservers(container)
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Pan image (hand tool)' }))
+      await waitFor(() =>
+        expect(screen.getByRole('button', { name: 'Pan image (hand tool)' })).toHaveAttribute(
+          'aria-pressed',
+          'true'
+        )
+      )
+      await fireEvent.click(screen.getByRole('button', { name: 'Zoom in' }))
+
+      const overlay = await screen.findByTestId('annotation-overlay')
+      overlay.getBoundingClientRect = vi.fn(() => ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 220,
+        bottom: 110,
+        width: 220,
+        height: 110,
+        toJSON: () => ({}),
+      }))
+
+      container.scrollLeft = 40
+      container.scrollTop = 15
+
+      await fireEvent.pointerDown(overlay, { clientX: 100, clientY: 60, button: 0, pointerId: 7 })
+      await Promise.resolve()
+      await fireEvent.pointerMove(overlay, { clientX: 70, clientY: 35, button: 0, pointerId: 7 })
+      await fireEvent.pointerUp(overlay, { clientX: 70, clientY: 35, button: 0, pointerId: 7 })
+
+      expect(container.scrollLeft).toBe(70)
+      expect(container.scrollTop).toBe(40)
+      expect(onAnnotationsChange).not.toHaveBeenCalled()
     })
 
     it('toggles tool off when clicking the already-active tool button', async () => {

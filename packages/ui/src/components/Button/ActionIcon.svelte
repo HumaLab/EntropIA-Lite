@@ -20,6 +20,7 @@
     FileText,
     Folder,
     FolderPlus,
+    Hand,
     Moon,
     PanelLeft,
     PanelLeftClose,
@@ -93,6 +94,8 @@
   <Folder {size} aria-hidden="true" />
 {:else if name === 'folder-plus'}
   <FolderPlus {size} aria-hidden="true" />
+{:else if name === 'hand'}
+  <Hand {size} aria-hidden="true" />
 {:else if name === 'moon'}
   <Moon {size} aria-hidden="true" />
 {:else if name === 'panel-left'}

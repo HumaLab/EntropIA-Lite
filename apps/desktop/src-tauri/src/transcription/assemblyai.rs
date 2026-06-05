@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use std::path::Path;
 
 const ASSEMBLYAI_API_BASE: &str = "https://api.assemblyai.com/v2";
+const DEFAULT_SPEECH_MODELS: [&str; 2] = ["universal-3-pro", "universal-2"];
 
 #[derive(Deserialize)]
 struct AssemblyAiApiError {
@@ -18,7 +19,7 @@ struct UploadResponse {
 #[derive(Serialize)]
 struct CreateTranscriptRequest {
     audio_url: String,
-    speech_model: &'static str,
+    speech_models: [&'static str; 2],
     language_detection: bool,
     temperature: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -149,7 +150,7 @@ impl AssemblyAiClient {
             .header("Authorization", &self.api_key)
             .json(&CreateTranscriptRequest {
                 audio_url: upload.upload_url,
-                speech_model: "universal",
+                speech_models: DEFAULT_SPEECH_MODELS,
                 language_detection: true,
                 temperature: 0,
                 speaker_labels: enable_role_speaker_identification.then_some(true),
@@ -355,7 +356,7 @@ mod tests {
     fn transcript_request_omits_speech_understanding_when_disabled() {
         let payload = serde_json::to_value(CreateTranscriptRequest {
             audio_url: "https://example.test/audio.mp3".to_string(),
-            speech_model: "universal",
+            speech_models: DEFAULT_SPEECH_MODELS,
             language_detection: true,
             temperature: 0,
             speaker_labels: None,
@@ -365,13 +366,18 @@ mod tests {
 
         assert_eq!(payload.get("speaker_labels"), None);
         assert_eq!(payload.get("speech_understanding"), None);
+        assert_eq!(payload.get("speech_model"), None);
+        assert_eq!(
+            payload.get("speech_models"),
+            Some(&json!(["universal-3-pro", "universal-2"]))
+        );
     }
 
     #[test]
     fn transcript_request_includes_role_speaker_identification_when_enabled() {
         let payload = serde_json::to_value(CreateTranscriptRequest {
             audio_url: "https://example.test/audio.mp3".to_string(),
-            speech_model: "universal",
+            speech_models: DEFAULT_SPEECH_MODELS,
             language_detection: true,
             temperature: 0,
             speaker_labels: Some(true),
@@ -390,7 +396,7 @@ mod tests {
             payload,
             json!({
                 "audio_url": "https://example.test/audio.mp3",
-                "speech_model": "universal",
+                "speech_models": ["universal-3-pro", "universal-2"],
                 "language_detection": true,
                 "temperature": 0,
                 "speaker_labels": true,
