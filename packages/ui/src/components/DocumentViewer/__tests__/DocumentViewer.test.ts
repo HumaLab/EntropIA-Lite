@@ -48,6 +48,8 @@ vi.stubGlobal('cancelAnimationFrame', (id: number) => {
   rafQueue = rafQueue.filter((entry) => entry.id !== id)
 })
 
+vi.stubGlobal('getComputedStyle', window.getComputedStyle.bind(window))
+
 // Mock pdfjs-dist for test environment
 vi.mock('pdfjs-dist', () => {
   const mockPage = {
@@ -244,7 +246,7 @@ describe('DocumentViewer', () => {
       })
 
       const img = screen.getByRole('img') as HTMLImageElement
-      const container = img.closest('.document-viewer__image-container') as HTMLElement
+      const container = img.closest('.document-viewer') as HTMLElement
       const stageSizer = img.parentElement?.parentElement as HTMLElement
 
       setupImage(img, 200, 100, 200, 100)
@@ -717,6 +719,10 @@ describe('DocumentViewer', () => {
       expect(
         screen.queryByRole('button', { name: /select annotation tool/i })
       ).not.toBeInTheDocument()
+      expect(screen.getByTestId('annotation-toolbar')).toHaveAttribute(
+        'aria-orientation',
+        'vertical'
+      )
       expect(screen.getByRole('button', { name: 'Pan image (hand tool)' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /rectangle annotation tool/i })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /underline annotation tool/i })).toBeInTheDocument()
@@ -772,7 +778,7 @@ describe('DocumentViewer', () => {
       })
 
       const img = screen.getByRole('img') as HTMLImageElement
-      const container = img.closest('.document-viewer__image-container') as HTMLElement
+      const container = img.closest('.document-viewer') as HTMLElement
       setupImage(img, 200, 100, 200, 100)
       setupContainer(container, 120, 80)
       await fireEvent.load(img)
@@ -811,6 +817,51 @@ describe('DocumentViewer', () => {
       expect(container.scrollLeft).toBe(70)
       expect(container.scrollTop).toBe(40)
       expect(onAnnotationsChange).not.toHaveBeenCalled()
+    })
+
+    it('does not apply a crop selection when the pointer reaches the image edge before release', async () => {
+      const onEditSelect = vi.fn()
+
+      render(DocumentViewer, {
+        props: {
+          path: '/path/to/image.jpg',
+          type: 'image',
+          assetUrl: 'asset://localhost/path/to/image.jpg',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+          editTool: 'crop',
+          onEditSelect,
+        },
+      })
+
+      const img = screen.getByRole('img') as HTMLImageElement
+      const container = img.closest('.document-viewer') as HTMLElement
+      setupImage(img, 200, 100, 200, 100)
+      setupContainer(container, 200, 100)
+      await fireEvent.load(img)
+      await triggerResizeObservers(container)
+
+      const overlay = await screen.findByTestId('annotation-overlay')
+      overlay.getBoundingClientRect = vi.fn(() => ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+        toJSON: () => ({}),
+      }))
+
+      await fireEvent.pointerDown(overlay, { clientX: 20, clientY: 10, button: 0, pointerId: 3 })
+      await fireEvent.pointerMove(overlay, { clientX: 200, clientY: 100, button: 0, pointerId: 3 })
+      await fireEvent.pointerLeave(overlay, { clientX: 201, clientY: 101, pointerId: 3 })
+
+      expect(onEditSelect).not.toHaveBeenCalled()
+      expect(screen.getByTestId('edit-selection-rect')).toBeInTheDocument()
     })
 
     it('toggles tool off when clicking the already-active tool button', async () => {

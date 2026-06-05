@@ -443,6 +443,24 @@
     onSelectedAnnotationIdChange(null)
   }
 
+  function captureOverlayPointer(event: PointerEvent) {
+    ;(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId)
+  }
+
+  function releaseOverlayPointer(event: PointerEvent) {
+    const target = event.currentTarget as SVGSVGElement
+    if (!target.hasPointerCapture?.(event.pointerId)) return
+    target.releasePointerCapture?.(event.pointerId)
+  }
+
+  function cancelDrafts(event: PointerEvent) {
+    releaseOverlayPointer(event)
+    panDrag = null
+    isPanning = false
+    draft = null
+    editDraft = null
+  }
+
   function handleOverlayPointerDown(event: PointerEvent) {
     if (!hasRenderableBounds || event.button !== 0) return
 
@@ -456,7 +474,7 @@
         startScrollTop: containerEl.scrollTop,
       }
       isPanning = true
-      ;(event.currentTarget as SVGSVGElement).setPointerCapture?.(event.pointerId)
+      captureOverlayPointer(event)
       return
     }
 
@@ -471,6 +489,7 @@
         currentX: point.x,
         currentY: point.y,
       }
+      captureOverlayPointer(event)
       return
     }
 
@@ -486,6 +505,7 @@
       currentY: point.y,
       kind: annotationTool,
     }
+    captureOverlayPointer(event)
   }
 
   function handleOverlayPointerMove(event: PointerEvent) {
@@ -517,7 +537,9 @@
     }
   }
 
-  function finishDraft() {
+  function finishDraft(event?: PointerEvent) {
+    if (event) releaseOverlayPointer(event)
+
     if (panDrag) {
       panDrag = null
       isPanning = false
@@ -755,10 +777,9 @@
   )
 </script>
 
-<div class="document-viewer">
+<div class="document-viewer" class:document-viewer--image={type === 'image'} bind:this={containerEl}>
   {#if type === 'image'}
     <!-- svelte-ignore a11y_no_static_element_interactions — overlay needs pointer events -->
-    <div class="document-viewer__image-container" bind:this={containerEl}>
       <div class="document-viewer__toolbar-anchor">
         <AnnotationToolbar
           tool={annotationTool}
@@ -822,7 +843,7 @@
                 onpointerdown={handleOverlayPointerDown}
                 onpointermove={handleOverlayPointerMove}
                 onpointerup={finishDraft}
-                onpointerleave={finishDraft}
+                onpointercancel={cancelDrafts}
               >
                 {#if canRenderLayoutOverlay}
                   {#each layoutRegions as region (region.id)}
@@ -1020,7 +1041,6 @@
           </div>
         </div>
       </div>
-    </div>
   {:else if type === 'audio'}
     <AudioPlayer
       src={assetUrl}
@@ -1147,18 +1167,19 @@
     display: flex;
     flex-direction: column;
     height: 100%;
-    background-color: var(--color-bg);
-    border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    min-height: 0;
+    background-color: transparent;
+    border: 0;
+    border-radius: 0;
     overflow: hidden;
   }
 
-  .document-viewer__image-container {
+  .document-viewer--image {
+    position: relative;
     flex: 1;
     overflow: auto;
     scrollbar-gutter: stable both-edges;
-    padding: var(--space-4);
-    position: relative;
+    padding: 0;
   }
 
   .document-viewer__toolbar-anchor {
@@ -1176,7 +1197,9 @@
     max-width: 100%;
     box-sizing: border-box;
     pointer-events: none;
-    padding: 0 var(--space-2) var(--space-2) 0;
+    height: 0;
+    min-height: 0;
+    padding: 0 var(--space-2) 0 0;
   }
 
   .document-viewer__image-stage {

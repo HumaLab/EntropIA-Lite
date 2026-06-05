@@ -259,9 +259,21 @@
     flex-direction: column;
     min-height: 0;
     flex: 1;
+    overflow: hidden;
   }
 
   .left-panel-pane {
+    min-height: 0;
+  }
+
+  .left-panel-pane--document {
+    display: flex;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .left-panel-pane--document :global(.document-viewer) {
+    flex: 1;
     min-height: 0;
   }
 

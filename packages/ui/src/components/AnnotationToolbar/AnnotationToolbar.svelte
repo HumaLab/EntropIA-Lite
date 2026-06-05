@@ -139,6 +139,7 @@
       onEditToolChange(option.value)
     }
   }
+
 </script>
 
 {#if collapsed}
@@ -157,9 +158,9 @@
     class="annotation-toolbar"
     data-testid="annotation-toolbar"
     role="toolbar"
+    aria-orientation="vertical"
     aria-label={labels.toolbarAriaLabel}
   >
-    <div class="annotation-toolbar__group">
       <button
         type="button"
         class="annotation-toolbar__button"
@@ -170,9 +171,6 @@
       >
         <ActionIcon name="undo" size={18} />
       </button>
-
-      <span class="annotation-toolbar__separator"></span>
-
       <button
         type="button"
         class="annotation-toolbar__button"
@@ -184,9 +182,6 @@
       >
         <ActionIcon name="hand" size={18} />
       </button>
-
-      <span class="annotation-toolbar__separator"></span>
-
       {#each toolOptions as option (option.value)}
         <button
           type="button"
@@ -200,9 +195,6 @@
           <ActionIcon name={option.icon} size={18} />
         </button>
       {/each}
-
-      <span class="annotation-toolbar__separator"></span>
-
       {#each editToolOptions as option (option.value)}
         <button
           type="button"
@@ -216,9 +208,6 @@
           <ActionIcon name={option.icon} size={18} />
         </button>
       {/each}
-
-      <span class="annotation-toolbar__separator"></span>
-
       <button
         type="button"
         class="annotation-toolbar__button"
@@ -240,8 +229,6 @@
       </button>
 
       {#if zoomPercent !== null}
-        <span class="annotation-toolbar__separator"></span>
-
         <button
           type="button"
           class="annotation-toolbar__button"
@@ -315,9 +302,7 @@
           </svg>
         </button>
       {/if}
-    </div>
 
-    <div class="annotation-toolbar__group">
       {#each colors as option (option.value)}
         <button
           type="button"
@@ -331,7 +316,6 @@
           <span class="annotation-toolbar__swatch-fill" style={`background:${option.value}`}></span>
         </button>
       {/each}
-    </div>
 
     <button
       type="button"
@@ -357,31 +341,90 @@
 {/if}
 
 <style>
+  .annotation-toolbar,
+  .annotation-toolbar__fab {
+    --annotation-toolbar-scale: 1;
+    --annotation-toolbar-control-size: calc(30px * var(--annotation-toolbar-scale));
+    --annotation-toolbar-icon-size: calc(17px * var(--annotation-toolbar-scale));
+    --annotation-toolbar-padding: calc(6px * var(--annotation-toolbar-scale));
+    --annotation-toolbar-gap: calc(4px * var(--annotation-toolbar-scale));
+    --annotation-toolbar-swatch-size: calc(13px * var(--annotation-toolbar-scale));
+    --annotation-toolbar-radius: calc(8px * var(--annotation-toolbar-scale));
+  }
+
   .annotation-toolbar {
     display: flex;
+    flex-direction: column;
     align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-2);
-    max-width: 100%;
+    flex-wrap: nowrap;
+    gap: var(--annotation-toolbar-gap);
+    width: max-content;
+    max-width: max-content;
+    overflow: visible;
     box-sizing: border-box;
-    padding: var(--space-2);
+    padding: var(--annotation-toolbar-padding);
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-lg);
+    border-radius: var(--annotation-toolbar-radius);
     background: color-mix(in srgb, var(--color-surface-raised) 92%, transparent);
     box-shadow: var(--shadow-md);
     backdrop-filter: blur(10px);
     pointer-events: auto;
   }
 
+  @media (max-height: 760px) {
+    .annotation-toolbar,
+    .annotation-toolbar__fab {
+      --annotation-toolbar-scale: 0.9;
+    }
+  }
+
+  @media (max-height: 680px) {
+    .annotation-toolbar,
+    .annotation-toolbar__fab {
+      --annotation-toolbar-scale: 0.82;
+    }
+  }
+
+  @media (max-height: 600px), (max-width: 520px) {
+    .annotation-toolbar,
+    .annotation-toolbar__fab {
+      --annotation-toolbar-scale: 0.78;
+    }
+
+    .annotation-toolbar {
+      display: grid;
+      grid-auto-flow: column;
+      grid-template-rows: repeat(9, max-content);
+      align-items: center;
+      justify-items: center;
+      column-gap: calc(var(--annotation-toolbar-gap) * 1.25);
+      row-gap: var(--annotation-toolbar-gap);
+    }
+  }
+
+  @media (max-height: 480px) {
+    .annotation-toolbar,
+    .annotation-toolbar__fab {
+      --annotation-toolbar-scale: 0.68;
+    }
+  }
+
+  @media (max-height: 420px) {
+    .annotation-toolbar,
+    .annotation-toolbar__fab {
+      --annotation-toolbar-scale: 0.6;
+    }
+  }
+
   .annotation-toolbar__fab {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
+    width: var(--annotation-toolbar-control-size);
+    height: var(--annotation-toolbar-control-size);
     padding: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--annotation-toolbar-radius);
     background: color-mix(in srgb, var(--color-surface-raised) 90%, transparent);
     box-shadow: var(--shadow-sm);
     backdrop-filter: blur(10px);
@@ -400,26 +443,13 @@
     color: var(--color-text-primary);
   }
 
-  .annotation-toolbar__group {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: var(--space-1);
-    min-width: 0;
-  }
-
-  .annotation-toolbar__separator {
-    width: 1px;
-    height: 20px;
-    background-color: var(--color-border);
-    margin: 0 var(--space-1);
-  }
-
   .annotation-toolbar__zoom {
-    min-width: 52px;
+    min-width: calc(var(--annotation-toolbar-control-size) + 2px);
+    max-width: calc(var(--annotation-toolbar-control-size) + 8px);
+    padding-inline: 1px;
     text-align: center;
     font-family: var(--font-mono);
-    font-size: var(--font-size-sm);
+    font-size: calc(0.78rem * var(--annotation-toolbar-scale));
     color: var(--color-text-secondary);
     font-variant-numeric: tabular-nums;
   }
@@ -429,12 +459,12 @@
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 32px;
-    height: 32px;
-    flex: 0 0 32px;
+    width: var(--annotation-toolbar-control-size);
+    height: var(--annotation-toolbar-control-size);
+    flex: 0 0 var(--annotation-toolbar-control-size);
     padding: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--annotation-toolbar-radius);
     background: var(--color-surface);
     color: var(--color-text-primary);
     cursor: pointer;
@@ -451,9 +481,15 @@
   }
 
   .annotation-toolbar__icon {
-    width: 18px;
-    height: 18px;
+    width: var(--annotation-toolbar-icon-size);
+    height: var(--annotation-toolbar-icon-size);
     display: block;
+  }
+
+  .annotation-toolbar__button :global(svg),
+  .annotation-toolbar__fab :global(svg) {
+    width: var(--annotation-toolbar-icon-size);
+    height: var(--annotation-toolbar-icon-size);
   }
 
   .annotation-toolbar__button:disabled,
@@ -486,19 +522,15 @@
   }
 
   .annotation-toolbar__swatch-fill {
-    width: 14px;
-    height: 14px;
+    width: var(--annotation-toolbar-swatch-size);
+    height: var(--annotation-toolbar-swatch-size);
     border-radius: var(--radius-full);
     border: 1px solid color-mix(in srgb, var(--color-text-primary) 35%, transparent);
   }
 
-  @media (max-width: 420px) {
+  @media (max-width: 420px), (max-height: 520px) {
     .annotation-toolbar {
-      gap: var(--space-1);
-    }
-
-    .annotation-toolbar__separator {
-      margin: 0;
+      box-shadow: var(--shadow-sm);
     }
   }
 </style>
