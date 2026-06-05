@@ -76,6 +76,8 @@
   const MIN_ZOOM = 0.4
   const MAX_ZOOM = 3.0
   const ZOOM_STEP = 0.1
+  const MIN_FINE_ROTATION_DEGREES = -30
+  const MAX_FINE_ROTATION_DEGREES = 30
   const SIZE_DEADBAND_PX = 1.5
 
   // PDF state
@@ -102,6 +104,7 @@
 
   // Manual zoom multiplier applied on top of auto-fit sizing.
   let imageZoom = $state(1.0)
+  let imageRotation = $state(0)
   let containerMeasureFrame = $state<number | null>(null)
   let panToolActive = $state(false)
   let isPanning = $state(false)
@@ -147,6 +150,8 @@
 
   const canZoomIn = $derived(imageZoom < MAX_ZOOM - 0.001)
   const canZoomOut = $derived(imageZoom > MIN_ZOOM + 0.001)
+  const canFineRotateLeft = $derived(imageRotation > MIN_FINE_ROTATION_DEGREES)
+  const canFineRotateRight = $derived(imageRotation < MAX_FINE_ROTATION_DEGREES)
 
   const canGoPrev = $derived(pdfPage > 1)
   const canGoNext = $derived(pdfPage < totalPages)
@@ -195,6 +200,10 @@
     return Number(Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, value)).toFixed(2))
   }
 
+  function clampFineRotation(value: number) {
+    return Math.min(MAX_FINE_ROTATION_DEGREES, Math.max(MIN_FINE_ROTATION_DEGREES, value))
+  }
+
   function readPx(value: string) {
     const parsed = Number.parseFloat(value)
     return Number.isFinite(parsed) ? parsed : 0
@@ -234,10 +243,29 @@
   }
 
   /** Convert a viewport PointerEvent to normalized [0,1] coordinates.
-   *  Uses getBoundingClientRect which accounts for CSS transforms, so this
-   *  works correctly at any zoom level. */
+   *  Prefer the SVG screen matrix so rotation/zoom transforms are inverted
+   *  before translating the pointer to natural-image coordinates. */
   function getNormalizedPoint(event: PointerEvent) {
     const target = event.currentTarget as SVGSVGElement
+    const ctm = target.getScreenCTM?.()
+
+    if (ctm && typeof ctm.inverse === 'function' && typeof target.createSVGPoint === 'function') {
+      const point = target.createSVGPoint()
+      point.x = event.clientX
+      point.y = event.clientY
+
+      if (typeof point.matrixTransform === 'function') {
+        const localPoint = point.matrixTransform(ctm.inverse())
+
+        if (Number.isFinite(localPoint.x) && Number.isFinite(localPoint.y)) {
+          return {
+            x: clamp01(localPoint.x / Math.max(naturalW, 1)),
+            y: clamp01(localPoint.y / Math.max(naturalH, 1)),
+          }
+        }
+      }
+    }
+
     const rect = target.getBoundingClientRect()
     if (rect.width === 0 || rect.height === 0) return null
 
@@ -631,6 +659,10 @@
     if (canZoomOut) imageZoom = clampZoom(imageZoom - ZOOM_STEP)
   }
 
+  function adjustFineRotation(deltaDegrees: number) {
+    imageRotation = clampFineRotation(imageRotation + deltaDegrees)
+  }
+
   // ── PDF ─────────────────────────────────────────────────────────────
   function resetViewerState() {
     loading = false
@@ -717,6 +749,7 @@
     const _url = assetUrl
     if (type === 'image') {
       imageZoom = 1.0
+      imageRotation = 0
     }
   })
 
@@ -796,6 +829,10 @@
           onDeleteSelected={handleDeleteSelected}
           {onRotateLeft}
           {onRotateRight}
+          fineRotationDegrees={imageRotation}
+          {canFineRotateLeft}
+          {canFineRotateRight}
+          onFineRotate={adjustFineRotation}
           {onUndo}
           zoomPercent={Math.round(imageZoom * 100)}
           {canZoomOut}
@@ -819,6 +856,11 @@
             class="document-viewer__image-stage-content"
             style={`width:${baseDisplayW}px;height:${baseDisplayH}px;transform: scale(${imageZoom});`}
           >
+            <div
+              class="document-viewer__image-rotator"
+              data-testid="image-rotator"
+              style={`width:${baseDisplayW}px;height:${baseDisplayH}px;transform: rotate(${imageRotation}deg);`}
+            >
             {#key assetUrl}
               <img
                 bind:this={imgEl}
@@ -1038,6 +1080,7 @@
                 {/if}
               </svg>
             {/if}
+            </div>
           </div>
         </div>
       </div>
@@ -1218,6 +1261,12 @@
   .document-viewer__image-stage-content {
     position: relative;
     transform-origin: top left;
+  }
+
+  .document-viewer__image-rotator {
+    position: relative;
+    transform-origin: center center;
+    transition: transform 0.08s linear;
   }
 
   .document-viewer__image {

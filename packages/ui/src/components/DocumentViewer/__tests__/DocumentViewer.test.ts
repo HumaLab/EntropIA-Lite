@@ -218,7 +218,8 @@ describe('DocumentViewer', () => {
       await fireEvent.load(img)
       await triggerResizeObservers(img)
 
-      const stageSizer = img.parentElement?.parentElement as HTMLElement
+      const stageContent = img.closest('.document-viewer__image-stage-content') as HTMLElement
+      const stageSizer = stageContent.parentElement as HTMLElement
       expect(stageSizer.style.width).toBe('200px')
       expect(stageSizer.style.height).toBe('100px')
 
@@ -227,7 +228,7 @@ describe('DocumentViewer', () => {
       expect(screen.getByTestId('toolbar-zoom-info')).toHaveTextContent('90%')
       expect(img.style.width).toBe('200px')
       expect(img.style.height).toBe('100px')
-      expect(img.parentElement).toHaveStyle({ transform: 'scale(0.9)' })
+      expect(stageContent).toHaveStyle({ transform: 'scale(0.9)' })
       expect(stageSizer.style.width).toBe('180px')
       expect(stageSizer.style.height).toBe('90px')
     })
@@ -247,7 +248,8 @@ describe('DocumentViewer', () => {
 
       const img = screen.getByRole('img') as HTMLImageElement
       const container = img.closest('.document-viewer') as HTMLElement
-      const stageSizer = img.parentElement?.parentElement as HTMLElement
+      const stageContent = img.closest('.document-viewer__image-stage-content') as HTMLElement
+      const stageSizer = stageContent.parentElement as HTMLElement
 
       setupImage(img, 200, 100, 200, 100)
       setupContainer(container, 300, 240)
@@ -273,7 +275,7 @@ describe('DocumentViewer', () => {
       expect(screen.getByTestId('toolbar-zoom-info')).toHaveTextContent('110%')
       expect(stageSizer.style.width).toBe('330px')
       expect(stageSizer.style.height).toBe('165px')
-      expect(img.parentElement).toHaveStyle({ transform: 'scale(1.1)' })
+      expect(stageContent).toHaveStyle({ transform: 'scale(1.1)' })
 
       setupContainer(container, 301.4, 240)
       await triggerResizeObservers(container)
@@ -286,7 +288,7 @@ describe('DocumentViewer', () => {
 
       expect(stageSizer.style.width).toBe('308px')
       expect(stageSizer.style.height).toBe('154px')
-      expect(img.parentElement).toHaveStyle({ transform: 'scale(1.1)' })
+      expect(stageContent).toHaveStyle({ transform: 'scale(1.1)' })
     })
 
     it('renders layout regions and syncs hover/select callbacks', async () => {
@@ -726,6 +728,140 @@ describe('DocumentViewer', () => {
       expect(screen.getByRole('button', { name: 'Pan image (hand tool)' })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /rectangle annotation tool/i })).toBeInTheDocument()
       expect(screen.getByRole('button', { name: /underline annotation tool/i })).toBeInTheDocument()
+      expect(
+        screen
+          .getByRole('button', { name: /rotate 90° left/i })
+          .querySelector('[data-action-icon="rotate-90-ccw"]')
+      ).toBeInTheDocument()
+      expect(
+        screen
+          .getByRole('button', { name: /rotate 90° right/i })
+          .querySelector('[data-action-icon="rotate-90-cw"]')
+      ).toBeInTheDocument()
+      expect(
+        screen
+          .getByRole('button', { name: /fine rotation left/i })
+          .querySelector('[data-action-icon="rotate-fine-ccw"]')
+      ).toBeInTheDocument()
+      expect(
+        screen
+          .getByRole('button', { name: /fine rotation right/i })
+          .querySelector('[data-action-icon="rotate-fine-cw"]')
+      ).toBeInTheDocument()
+      expect(screen.getByTestId('toolbar-fine-rotation-info')).toHaveTextContent('0°')
+    })
+
+    it('scales the vertical toolbar before switching cleanly to two columns', async () => {
+      render(DocumentViewer, {
+        props: {
+          path: '/path/to/image.jpg',
+          type: 'image',
+          assetUrl: 'asset://localhost/path/to/image.jpg',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+        },
+      })
+
+      const img = screen.getByRole('img') as HTMLImageElement
+      const container = img.closest('.document-viewer') as HTMLElement
+      const toolbar = screen.getByTestId('annotation-toolbar')
+
+      setupImage(img, 200, 100, 200, 100)
+      setupContainer(container, 900, 650)
+      await fireEvent.load(img)
+      await triggerResizeObservers(container)
+
+      expect(toolbar.getAttribute('style')).toMatch(
+        /grid-template-columns:\s*repeat\(1,max-content\)/
+      )
+      const oneColumnScale = Number(
+        toolbar.getAttribute('style')?.match(/--annotation-toolbar-scale:([^;]+)/)?.[1]
+      )
+      expect(oneColumnScale).toBeLessThan(1)
+      expect(oneColumnScale).toBeGreaterThanOrEqual(0.78)
+
+      setupContainer(container, 900, 520)
+      await triggerResizeObservers(container)
+
+      expect(toolbar.getAttribute('style')).toMatch(
+        /grid-template-columns:\s*repeat\(2,max-content\)/
+      )
+      expect(toolbar.getAttribute('style')).toMatch(/grid-template-rows:\s*repeat\(10,max-content\)/)
+    })
+
+    it('fine-rotates the image in one-degree steps and clamps to thirty degrees', async () => {
+      render(DocumentViewer, {
+        props: {
+          path: '/path/to/image.jpg',
+          type: 'image',
+          assetUrl: 'asset://localhost/path/to/image.jpg',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+        },
+      })
+
+      const img = screen.getByRole('img') as HTMLImageElement
+      const container = img.closest('.document-viewer') as HTMLElement
+      setupImage(img, 200, 100, 200, 100)
+      setupContainer(container, 200, 100)
+      await fireEvent.load(img)
+      await triggerResizeObservers(container)
+
+      const rotateLeft = screen.getByRole('button', { name: /fine rotation left/i })
+      const rotateRight = screen.getByRole('button', { name: /fine rotation right/i })
+      const rotationInfo = screen.getByTestId('toolbar-fine-rotation-info')
+      const rotator = screen.getByTestId('image-rotator')
+
+      await fireEvent.click(rotateRight)
+
+      expect(rotationInfo).toHaveTextContent('+1°')
+      expect(rotator.getAttribute('style')).toContain('rotate(1deg)')
+
+      for (let i = 0; i < 40; i++) {
+        await fireEvent.click(rotateRight)
+      }
+
+      expect(rotationInfo).toHaveTextContent('+30°')
+      expect(rotateRight).toBeDisabled()
+
+      for (let i = 0; i < 70; i++) {
+        await fireEvent.click(rotateLeft)
+      }
+
+      expect(rotationInfo).toHaveTextContent('-30°')
+      expect(rotateLeft).toBeDisabled()
+      expect(rotator.getAttribute('style')).toContain('rotate(-30deg)')
+    })
+
+    it('fine-rotates from drag and wheel input on the toolbar buttons', async () => {
+      render(DocumentViewer, {
+        props: {
+          path: '/path/to/image.jpg',
+          type: 'image',
+          assetUrl: 'asset://localhost/path/to/image.jpg',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+        },
+      })
+
+      const rotateRight = screen.getByRole('button', { name: /fine rotation right/i })
+      const rotationInfo = screen.getByTestId('toolbar-fine-rotation-info')
+
+      await fireEvent.pointerDown(rotateRight, { pointerId: 2, clientX: 0, clientY: 0, button: 0 })
+      await fireEvent.pointerMove(rotateRight, { pointerId: 2, clientX: 36, clientY: 0, button: 0 })
+      await fireEvent.pointerUp(rotateRight, { pointerId: 2, clientX: 36, clientY: 0, button: 0 })
+
+      expect(rotationInfo).toHaveTextContent('+3°')
+
+      await fireEvent.wheel(rotateRight, { deltaY: 200 })
+
+      expect(rotationInfo).toHaveTextContent('+5°')
     })
 
     it('toggles the hand pan tool and resets edit/annotation modes', async () => {

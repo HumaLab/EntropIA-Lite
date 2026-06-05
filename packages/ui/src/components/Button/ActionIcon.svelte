@@ -114,6 +114,116 @@
   <RotateCcw {size} aria-hidden="true" />
 {:else if name === 'rotate-cw'}
   <RotateCw {size} aria-hidden="true" />
+{:else if name === 'rotate-90-ccw'}
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+    data-action-icon="rotate-90-ccw"
+  >
+    <path d="M16 4.8a7.2 7.2 0 0 0-8.8 8.8" />
+    <path d="M7.2 13.6H3.9v-3.3" />
+    <path d="M14.8 4.8h2.6v2.6" />
+    <text
+      x="12.5"
+      y="17.8"
+      fill="currentColor"
+      stroke="none"
+      font-size="5.2"
+      font-family="monospace"
+      font-weight="700"
+      text-anchor="middle"
+    >90°</text>
+  </svg>
+{:else if name === 'rotate-90-cw'}
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.8"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+    data-action-icon="rotate-90-cw"
+  >
+    <path d="M8 4.8a7.2 7.2 0 0 1 8.8 8.8" />
+    <path d="M16.8 13.6h3.3v-3.3" />
+    <path d="M9.2 4.8H6.6v2.6" />
+    <text
+      x="12.5"
+      y="17.8"
+      fill="currentColor"
+      stroke="none"
+      font-size="5.2"
+      font-family="monospace"
+      font-weight="700"
+      text-anchor="middle"
+    >90°</text>
+  </svg>
+{:else if name === 'rotate-fine-ccw'}
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+    data-action-icon="rotate-fine-ccw"
+  >
+    <circle cx="12" cy="12" r="7" stroke-dasharray="1 3" />
+    <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none" />
+    <path d="M12 12 8.7 8.7" />
+    <path d="M8.8 5.4 6.2 8l2.6 2.6" />
+    <text
+      x="16.5"
+      y="18.2"
+      fill="currentColor"
+      stroke="none"
+      font-size="5.4"
+      font-family="monospace"
+      font-weight="700"
+      text-anchor="middle"
+    >-°</text>
+  </svg>
+{:else if name === 'rotate-fine-cw'}
+  <svg
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    stroke-width="1.7"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+    aria-hidden="true"
+    data-action-icon="rotate-fine-cw"
+  >
+    <circle cx="12" cy="12" r="7" stroke-dasharray="1 3" />
+    <circle cx="12" cy="12" r="2.2" fill="currentColor" stroke="none" />
+    <path d="M12 12 15.3 8.7" />
+    <path d="M15.2 5.4 17.8 8l-2.6 2.6" />
+    <text
+      x="16.5"
+      y="18.2"
+      fill="currentColor"
+      stroke="none"
+      font-size="5.4"
+      font-family="monospace"
+      font-weight="700"
+      text-anchor="middle"
+    >+°</text>
+  </svg>
 {:else if name === 'search'}
   <Search {size} aria-hidden="true" />
 {:else if name === 'search-x'}

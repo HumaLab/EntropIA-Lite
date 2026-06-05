@@ -441,6 +441,12 @@
       eraseTool: translate('item.toolbar.erase'),
       rotateLeft: translate('item.toolbar.rotateLeft'),
       rotateRight: translate('item.toolbar.rotateRight'),
+      fineRotateLeft: translate('item.toolbar.fineRotateLeft'),
+      fineRotateRight: translate('item.toolbar.fineRotateRight'),
+      fineRotationAngle: (degrees: number) =>
+        translate('item.toolbar.fineRotationAngle', {
+          degrees: `${degrees > 0 ? '+' : ''}${degrees}°`,
+        }),
       zoomOut: translate('item.toolbar.zoomOut'),
       zoomIn: translate('item.toolbar.zoomIn'),
       deleteSelected: translate('item.toolbar.deleteAnnotation'),

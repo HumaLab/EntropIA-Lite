@@ -23,6 +23,10 @@
     onDeleteSelected?: () => void
     onRotateLeft?: () => void
     onRotateRight?: () => void
+    fineRotationDegrees?: number | null
+    canFineRotateLeft?: boolean
+    canFineRotateRight?: boolean
+    onFineRotate?: (deltaDegrees: number) => void
     onUndo?: () => void
     zoomPercent?: number | null
     canZoomOut?: boolean
@@ -47,6 +51,9 @@
     eraseTool: string
     rotateLeft: string
     rotateRight: string
+    fineRotateLeft: string
+    fineRotateRight: string
+    fineRotationAngle: (degrees: number) => string
     zoomOut: string
     zoomIn: string
     deleteSelected: string
@@ -68,6 +75,9 @@
     eraseTool: 'Erase region (white fill)',
     rotateLeft: 'Rotate 90° left',
     rotateRight: 'Rotate 90° right',
+    fineRotateLeft: 'Fine rotation left, degree by degree',
+    fineRotateRight: 'Fine rotation right, degree by degree',
+    fineRotationAngle: (degrees: number) => `Fine rotation ${formatSignedDegrees(degrees)}`,
     zoomOut: 'Zoom out',
     zoomIn: 'Zoom in',
     deleteSelected: 'Delete selected annotation',
@@ -89,6 +99,10 @@
     onDeleteSelected = () => {},
     onRotateLeft = () => {},
     onRotateRight = () => {},
+    fineRotationDegrees = null,
+    canFineRotateLeft = true,
+    canFineRotateRight = true,
+    onFineRotate = () => {},
     onUndo = () => {},
     zoomPercent = null,
     canZoomOut = false,
@@ -101,6 +115,33 @@
   const labels = $derived({ ...defaultLabels, ...labelsProp })
 
   let collapsed = $state(false)
+  let toolbarEl: HTMLDivElement | undefined = $state()
+  let toolbarAvailableHeight = $state(720)
+  let fineRotationDrag = $state<{
+    pointerId: number
+    direction: -1 | 1
+    startClientX: number
+    startClientY: number
+    lastSteps: number
+    applied: boolean
+  } | null>(null)
+  let suppressFineRotationClick = false
+
+  const TOOLBAR_BASE_CONTROL_SIZE = 30
+  const TOOLBAR_BASE_PADDING = 6
+  const TOOLBAR_BASE_GAP = 4
+  const TOOLBAR_SAFE_INSET = 12
+  const TOOLBAR_MIN_SINGLE_COLUMN_SCALE = 0.78
+  const TOOLBAR_MIN_SCALE = 0.64
+  const FINE_ROTATION_DRAG_PX_PER_DEGREE = 12
+
+  function toolbarHeightForRows(rows: number) {
+    return (
+      rows * TOOLBAR_BASE_CONTROL_SIZE +
+      Math.max(0, rows - 1) * TOOLBAR_BASE_GAP +
+      TOOLBAR_BASE_PADDING * 2
+    )
+  }
 
   const toolOptions = $derived.by(
     (): Array<{
@@ -124,6 +165,50 @@
     ]
   )
 
+  const visibleToolbarItemCount = $derived(
+    2 +
+      toolOptions.length +
+      editToolOptions.length +
+      2 +
+      (fineRotationDegrees !== null ? 3 : 0) +
+      (zoomPercent !== null ? 3 : 0) +
+      colors.length +
+      2
+  )
+  const singleColumnNaturalHeight = $derived(toolbarHeightForRows(visibleToolbarItemCount))
+  const toolbarColumns = $derived(
+    singleColumnNaturalHeight * TOOLBAR_MIN_SINGLE_COLUMN_SCALE <= toolbarAvailableHeight ? 1 : 2
+  )
+  const toolbarRows = $derived(Math.ceil(visibleToolbarItemCount / toolbarColumns))
+  const toolbarNaturalHeight = $derived(toolbarHeightForRows(toolbarRows))
+  const toolbarMinScale = $derived(
+    toolbarColumns === 1 ? TOOLBAR_MIN_SINGLE_COLUMN_SCALE : TOOLBAR_MIN_SCALE
+  )
+  const toolbarScale = $derived(
+    Math.max(
+      toolbarMinScale,
+      Math.min(1, toolbarAvailableHeight / Math.max(toolbarNaturalHeight, 1))
+    )
+  )
+
+  $effect(() => {
+    if (!toolbarEl) return
+    const container = toolbarEl.closest('.document-viewer--image') ?? toolbarEl.parentElement
+    if (!container) return
+
+    function updateAvailableHeight() {
+      const nextHeight = container.getBoundingClientRect().height
+      if (nextHeight <= 0) return
+      toolbarAvailableHeight = Math.max(0, nextHeight - TOOLBAR_SAFE_INSET)
+    }
+
+    updateAvailableHeight()
+    const observer = new ResizeObserver(updateAvailableHeight)
+    observer.observe(container)
+
+    return () => observer.disconnect()
+  })
+
   function handleToolClick(option: (typeof toolOptions)[number]) {
     if (tool === option.value) {
       onToolChange('select')
@@ -138,6 +223,88 @@
     } else {
       onEditToolChange(option.value)
     }
+  }
+
+  function formatSignedDegrees(degrees: number) {
+    if (degrees > 0) return `+${degrees}°`
+    return `${degrees}°`
+  }
+
+  function canApplyFineRotation(direction: -1 | 1) {
+    return direction === -1 ? canFineRotateLeft : canFineRotateRight
+  }
+
+  function applyFineRotation(direction: -1 | 1, steps = 1) {
+    if (!canApplyFineRotation(direction)) return
+    onFineRotate(direction * steps)
+  }
+
+  function startFineRotationDrag(direction: -1 | 1, event: PointerEvent) {
+    if (!canApplyFineRotation(direction)) return
+    event.preventDefault()
+    ;(event.currentTarget as HTMLButtonElement).setPointerCapture?.(event.pointerId)
+    fineRotationDrag = {
+      pointerId: event.pointerId,
+      direction,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      lastSteps: 0,
+      applied: false,
+    }
+  }
+
+  function handleFineRotationPointerMove(event: PointerEvent) {
+    if (!fineRotationDrag || fineRotationDrag.pointerId !== event.pointerId) return
+    event.preventDefault()
+
+    const distance = Math.hypot(
+      event.clientX - fineRotationDrag.startClientX,
+      event.clientY - fineRotationDrag.startClientY
+    )
+    const nextSteps = Math.floor(distance / FINE_ROTATION_DRAG_PX_PER_DEGREE)
+    const deltaSteps = nextSteps - fineRotationDrag.lastSteps
+
+    if (deltaSteps <= 0) return
+
+    applyFineRotation(fineRotationDrag.direction, deltaSteps)
+    fineRotationDrag.lastSteps = nextSteps
+    fineRotationDrag.applied = true
+  }
+
+  function finishFineRotationDrag(event: PointerEvent, applyOnRelease = true) {
+    if (!fineRotationDrag || fineRotationDrag.pointerId !== event.pointerId) return
+
+    const target = event.currentTarget as HTMLButtonElement
+    if (target.hasPointerCapture?.(event.pointerId)) {
+      target.releasePointerCapture?.(event.pointerId)
+    }
+
+    if (applyOnRelease && !fineRotationDrag.applied) {
+      applyFineRotation(fineRotationDrag.direction, 1)
+    }
+
+    fineRotationDrag = null
+    suppressFineRotationClick = true
+    setTimeout(() => {
+      suppressFineRotationClick = false
+    }, 0)
+  }
+
+  function handleFineRotationClick(direction: -1 | 1) {
+    if (suppressFineRotationClick) {
+      suppressFineRotationClick = false
+      return
+    }
+
+    applyFineRotation(direction, 1)
+  }
+
+  function handleFineRotationWheel(direction: -1 | 1, event: WheelEvent) {
+    if (!canApplyFineRotation(direction)) return
+    event.preventDefault()
+    const wheelDistance = Math.max(Math.abs(event.deltaY), Math.abs(event.deltaX))
+    const steps = Math.max(1, Math.round(wheelDistance / 100))
+    applyFineRotation(direction, steps)
   }
 
 </script>
@@ -155,11 +322,14 @@
   </button>
 {:else}
   <div
+    bind:this={toolbarEl}
     class="annotation-toolbar"
+    class:annotation-toolbar--multi-column={toolbarColumns > 1}
     data-testid="annotation-toolbar"
     role="toolbar"
     aria-orientation="vertical"
     aria-label={labels.toolbarAriaLabel}
+    style={`--annotation-toolbar-scale:${toolbarScale};grid-template-rows:repeat(${toolbarRows},max-content);grid-template-columns:repeat(${toolbarColumns},max-content);`}
   >
       <button
         type="button"
@@ -215,7 +385,7 @@
         title={labels.rotateLeft}
         onclick={onRotateLeft}
       >
-        <ActionIcon name="rotate-ccw" size={18} />
+        <ActionIcon name="rotate-90-ccw" size={18} />
       </button>
 
       <button
@@ -225,8 +395,51 @@
         title={labels.rotateRight}
         onclick={onRotateRight}
       >
-        <ActionIcon name="rotate-cw" size={18} />
+        <ActionIcon name="rotate-90-cw" size={18} />
       </button>
+
+      {#if fineRotationDegrees !== null}
+        <button
+          type="button"
+          class="annotation-toolbar__button"
+          class:annotation-toolbar__button--active={fineRotationDrag?.direction === -1}
+          aria-label={labels.fineRotateLeft}
+          title={`${labels.fineRotateLeft} · ${labels.fineRotationAngle(fineRotationDegrees)}`}
+          disabled={!canFineRotateLeft}
+          onclick={() => handleFineRotationClick(-1)}
+          onpointerdown={(event) => startFineRotationDrag(-1, event)}
+          onpointermove={handleFineRotationPointerMove}
+          onpointerup={(event) => finishFineRotationDrag(event)}
+          onpointercancel={(event) => finishFineRotationDrag(event, false)}
+          onwheel={(event) => handleFineRotationWheel(-1, event)}
+        >
+          <ActionIcon name="rotate-fine-ccw" size={18} />
+        </button>
+
+        <span
+          class="annotation-toolbar__rotation"
+          data-testid="toolbar-fine-rotation-info"
+          title={labels.fineRotationAngle(fineRotationDegrees)}
+          >{formatSignedDegrees(fineRotationDegrees)}</span
+        >
+
+        <button
+          type="button"
+          class="annotation-toolbar__button"
+          class:annotation-toolbar__button--active={fineRotationDrag?.direction === 1}
+          aria-label={labels.fineRotateRight}
+          title={`${labels.fineRotateRight} · ${labels.fineRotationAngle(fineRotationDegrees)}`}
+          disabled={!canFineRotateRight}
+          onclick={() => handleFineRotationClick(1)}
+          onpointerdown={(event) => startFineRotationDrag(1, event)}
+          onpointermove={handleFineRotationPointerMove}
+          onpointerup={(event) => finishFineRotationDrag(event)}
+          onpointercancel={(event) => finishFineRotationDrag(event, false)}
+          onwheel={(event) => handleFineRotationWheel(1, event)}
+        >
+          <ActionIcon name="rotate-fine-cw" size={18} />
+        </button>
+      {/if}
 
       {#if zoomPercent !== null}
         <button
@@ -353,10 +566,10 @@
   }
 
   .annotation-toolbar {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-auto-flow: column;
     align-items: center;
-    flex-wrap: nowrap;
+    justify-items: center;
     gap: var(--annotation-toolbar-gap);
     width: max-content;
     max-width: max-content;
@@ -369,6 +582,10 @@
     box-shadow: var(--shadow-md);
     backdrop-filter: blur(10px);
     pointer-events: auto;
+  }
+
+  .annotation-toolbar--multi-column {
+    column-gap: calc(var(--annotation-toolbar-gap) * 1.35);
   }
 
   @media (max-height: 760px) {
@@ -391,14 +608,8 @@
       --annotation-toolbar-scale: 0.78;
     }
 
-    .annotation-toolbar {
-      display: grid;
-      grid-auto-flow: column;
-      grid-template-rows: repeat(9, max-content);
-      align-items: center;
-      justify-items: center;
+    .annotation-toolbar--multi-column {
       column-gap: calc(var(--annotation-toolbar-gap) * 1.25);
-      row-gap: var(--annotation-toolbar-gap);
     }
   }
 
@@ -443,7 +654,8 @@
     color: var(--color-text-primary);
   }
 
-  .annotation-toolbar__zoom {
+  .annotation-toolbar__zoom,
+  .annotation-toolbar__rotation {
     min-width: calc(var(--annotation-toolbar-control-size) + 2px);
     max-width: calc(var(--annotation-toolbar-control-size) + 8px);
     padding-inline: 1px;
