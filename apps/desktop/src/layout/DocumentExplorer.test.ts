@@ -378,4 +378,51 @@ describe('DocumentExplorer', () => {
     expect(imageAssetButton.querySelector('svg')).not.toBeNull()
     expect(screen.getByText('image')).toBeInTheDocument()
   })
+
+  it('refreshes cached collection items and counts when the collection changes', async () => {
+    render(DocumentExplorer)
+
+    await screen.findByText('Acta 2')
+    expect(screen.getByText('2')).toBeInTheDocument()
+
+    state.store.items.findByCollection.mockImplementation(async (collectionId: string) => {
+      if (collectionId === 'col-1') {
+        return [
+          {
+            id: 'item-4',
+            title: 'Acta 4',
+            collectionId: 'col-1',
+            metadata: null,
+            createdAt: 1,
+            updatedAt: 4,
+          },
+        ]
+      }
+
+      return [
+        {
+          id: 'item-3',
+          title: 'Acta 3',
+          collectionId: 'col-2',
+          metadata: null,
+          createdAt: 1,
+          updatedAt: 3,
+        },
+      ]
+    })
+    state.store.collections.countItems.mockImplementation(async (id: string) =>
+      id === 'col-1' ? 1 : 1
+    )
+
+    window.dispatchEvent(
+      new CustomEvent('entropia:document-explorer-collection-changed', {
+        detail: { collectionId: 'col-1', itemId: 'item-1' },
+      })
+    )
+
+    expect(await screen.findByText('Acta 4')).toBeInTheDocument()
+    expect(screen.queryByText('Acta 1')).not.toBeInTheDocument()
+    expect(screen.queryByText('Acta 2')).not.toBeInTheDocument()
+    expect(screen.queryByText('2')).not.toBeInTheDocument()
+  })
 })

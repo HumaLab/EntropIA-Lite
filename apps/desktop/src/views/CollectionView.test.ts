@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import CollectionView from './CollectionView.svelte'
 import { locale } from '$lib/i18n'
+import { DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT } from '$lib/document-explorer'
 
 const { storeRef, navigationRef, fileImportRef, dragDropRef } = vi.hoisted(() => ({
   storeRef: {
@@ -323,6 +324,11 @@ describe('CollectionView import flow', () => {
 
   it('imports picker-selected paths through the shared item/asset workflow', async () => {
     const sourcePath = 'C:\\tmp\\photo.png'
+    const explorerRefreshes: CustomEvent[] = []
+    const handleExplorerRefresh = (event: Event) => {
+      explorerRefreshes.push(event as CustomEvent)
+    }
+    window.addEventListener(DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT, handleExplorerRefresh)
     fileImportRef.pickFiles.mockResolvedValue([sourcePath])
     mockImageImport(sourcePath)
 
@@ -352,7 +358,10 @@ describe('CollectionView import flow', () => {
         itemId: 'item-new',
         itemTitle: 'photo',
       })
+      expect(explorerRefreshes.at(-1)?.detail).toEqual({ collectionId: 'col-1' })
     })
+
+    window.removeEventListener(DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT, handleExplorerRefresh)
 
     expect(screen.getByRole('region', { name: 'Resumen de importación' })).toBeInTheDocument()
     expect(screen.getByText('Abrimos el último documento importado: photo.')).toBeInTheDocument()
@@ -510,6 +519,11 @@ describe('CollectionView asset deletion', () => {
 
   it('deletes entire item when last asset is removed — card disappears from grid', async () => {
     const { deleteAssetFile } = await import('$lib/file-import')
+    const explorerRefreshes: CustomEvent[] = []
+    const handleExplorerRefresh = (event: Event) => {
+      explorerRefreshes.push(event as CustomEvent)
+    }
+    window.addEventListener(DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT, handleExplorerRefresh)
 
     await renderAndWaitForItems()
 
@@ -527,7 +541,10 @@ describe('CollectionView asset deletion', () => {
       expect(deleteAssetFile).toHaveBeenCalledWith(sampleAsset.path)
       // Last asset → entire item is deleted, not just the asset
       expect(storeRef.current.items.deleteWithCascade).toHaveBeenCalledWith('item-1')
+      expect(explorerRefreshes.at(-1)?.detail).toEqual({ collectionId: 'col-1', itemId: 'item-1' })
     })
+
+    window.removeEventListener(DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT, handleExplorerRefresh)
 
     // Card should be removed from the grid (no ghost card)
     await waitFor(() => {

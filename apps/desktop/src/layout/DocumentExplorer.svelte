@@ -5,9 +5,11 @@
   import { navigation, type View } from '$lib/navigation'
   import { ActionIcon, type ActionIconName } from '@entropia/ui'
   import {
+    DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT,
     DOCUMENT_EXPLORER_ASSET_SELECTED_EVENT,
     DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT,
     type DocumentExplorerAssetDetail,
+    type DocumentExplorerCollectionChangedDetail,
   } from '$lib/document-explorer'
   import type { Asset, Collection, Item } from '@entropia/store'
 
@@ -245,6 +247,45 @@
     await request
   }
 
+  async function refreshCollection(collectionId: string, itemId?: string) {
+    const pending = pendingItemLoads.get(collectionId)
+    if (pending) await pending
+
+    loadingCollections = uniqueIds([...loadingCollections, collectionId])
+    loadError = null
+
+    try {
+      const store = getStore()
+      const [items, count] = await Promise.all([
+        store.items.findByCollection(collectionId),
+        store.collections.countItems(collectionId),
+      ])
+      const itemIds = new Set(items.map((item) => item.id))
+      const previousItemIds = itemsByCollection[collectionId]?.map((item) => item.id) ?? []
+      const nextAssetsByItem = { ...assetsByItem }
+
+      for (const previousItemId of previousItemIds) {
+        if (previousItemId === itemId || !itemIds.has(previousItemId)) {
+          delete nextAssetsByItem[previousItemId]
+        }
+      }
+
+      itemsByCollection = {
+        ...itemsByCollection,
+        [collectionId]: items,
+      }
+      itemCounts = {
+        ...itemCounts,
+        [collectionId]: count,
+      }
+      assetsByItem = nextAssetsByItem
+    } catch (error) {
+      loadError = error instanceof Error ? error.message : translateExplorer('explorer.loadError')
+    } finally {
+      loadingCollections = loadingCollections.filter((entry) => entry !== collectionId)
+    }
+  }
+
   async function ensureItemAssetsLoaded(itemId: string) {
     if (assetsByItem[itemId]) return
     const pending = pendingAssetLoads.get(itemId)
@@ -460,10 +501,21 @@
       }
     }
 
+    const handleCollectionChanged = (event: Event) => {
+      const detail = (event as CustomEvent<DocumentExplorerCollectionChangedDetail>).detail
+      if (!detail?.collectionId) return
+      void refreshCollection(detail.collectionId, detail.itemId)
+    }
+
     window.addEventListener(DOCUMENT_EXPLORER_ASSET_SELECTED_EVENT, handleAssetSelected)
+    window.addEventListener(DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT, handleCollectionChanged)
 
     return () => {
       window.removeEventListener(DOCUMENT_EXPLORER_ASSET_SELECTED_EVENT, handleAssetSelected)
+      window.removeEventListener(
+        DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT,
+        handleCollectionChanged
+      )
     }
   })
 </script>

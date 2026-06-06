@@ -18,6 +18,10 @@
   import { appDataDir, join } from '@tauri-apps/api/path'
   import { stat } from '@tauri-apps/plugin-fs'
   import { exportCollectionById } from '$lib/export'
+  import {
+    DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT,
+    type DocumentExplorerCollectionChangedDetail,
+  } from '$lib/document-explorer'
   import { ConfirmDialog, ItemCard, SearchBar, Button } from '@entropia/ui'
   import { onMount, onDestroy } from 'svelte'
   import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
@@ -183,6 +187,17 @@
     await loadItems()
   }
 
+  function notifyExplorerCollectionChanged(itemId?: string) {
+    window.dispatchEvent(
+      new CustomEvent<DocumentExplorerCollectionChangedDetail>(
+        DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT,
+        {
+          detail: { collectionId, itemId },
+        }
+      )
+    )
+  }
+
   async function finalizeImportedItem(itemId: string, imported: ImportedFile) {
     const store = getStore()
 
@@ -341,6 +356,7 @@
     }
 
     await loadItems()
+    notifyExplorerCollectionChanged()
 
     // Navigate to the last created item
     if (createdItemIds.length > 0) {
@@ -515,6 +531,7 @@
 
     if (dbCleanupFailed) {
       await loadItems()
+      notifyExplorerCollectionChanged(pendingDeleteItemId)
       deleting = false
       return
     }
@@ -528,6 +545,8 @@
     } else {
       await loadItemAssets([pendingDeleteItemId])
     }
+
+    notifyExplorerCollectionChanged(pendingDeleteItemId)
 
     // Step 4: Close only on full success.
     handleDeleteCancel()
