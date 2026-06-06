@@ -1,6 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { resolveDictationExtension, transcribeAudio, transcribeDictation } from './transcription'
+import {
+  resolveDictationExtension,
+  TranscriptionStore,
+  transcribeAudio,
+  transcribeDictation,
+} from './transcription'
 
 const { invoke } = await import('@tauri-apps/api/core')
 const { appDataDir, join } = await import('@tauri-apps/api/path')
@@ -70,5 +75,61 @@ describe('transcription helpers', () => {
     expect(resolveDictationExtension('audio/webm;codecs=opus')).toBe('webm')
     expect(resolveDictationExtension('audio/mp4')).toBe('m4a')
     expect(resolveDictationExtension('application/octet-stream')).toBe('webm')
+  })
+})
+
+describe('TranscriptionStore', () => {
+  it('stores the rich completion payload emitted by the backend', async () => {
+    const callbacks = new Map<string, (e: { payload: unknown }) => void>()
+    const store = new TranscriptionStore()
+
+    await store.startListening(async (event, callback) => {
+      callbacks.set(event, callback)
+      return vi.fn()
+    })
+
+    callbacks.get('transcription:complete')?.({
+      payload: {
+        asset_id: 'asset-1',
+        text: 'transcribed text',
+        language: 'es',
+        duration_ms: 1234,
+        segments_count: 2,
+      },
+    })
+
+    expect(store.getState('asset-1')).toMatchObject({
+      status: 'done',
+      progress: 100,
+      text: 'transcribed text',
+      language: 'es',
+      durationMs: 1234,
+      segmentsCount: 2,
+    })
+  })
+
+  it('accepts the legacy text_content completion payload', async () => {
+    const callbacks = new Map<string, (e: { payload: unknown }) => void>()
+    const store = new TranscriptionStore()
+
+    await store.startListening(async (event, callback) => {
+      callbacks.set(event, callback)
+      return vi.fn()
+    })
+
+    callbacks.get('transcription:complete')?.({
+      payload: {
+        asset_id: 'asset-legacy',
+        text_content: 'legacy text',
+      },
+    })
+
+    expect(store.getState('asset-legacy')).toMatchObject({
+      status: 'done',
+      progress: 100,
+      text: 'legacy text',
+      durationMs: 0,
+      segmentsCount: 0,
+    })
   })
 })

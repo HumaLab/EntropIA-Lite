@@ -37,18 +37,30 @@
   let audioEl: HTMLAudioElement | undefined = $state()
   let blobUrl = $state<string | null>(null)
   let loadError = $state(false)
+  let activeBlobUrl: string | null = null
+  let lastSrc: string | null = null
+  let fallbackAttempt = 0
 
   $effect(() => {
-    if (blobUrl) {
-      URL.revokeObjectURL(blobUrl)
-      blobUrl = null
+    if (src === lastSrc) return
+
+    lastSrc = src
+    fallbackAttempt += 1
+    playing = false
+    currentTime = 0
+    duration = 0
+    loadError = false
+    clearBlobUrl()
+
+    if (audioEl) {
+      audioEl.pause()
+      audioEl.currentTime = 0
+      audioEl.load()
     }
   })
 
   onDestroy(() => {
-    if (blobUrl) {
-      URL.revokeObjectURL(blobUrl)
-    }
+    clearBlobUrl()
   })
 
   const progress = $derived(duration > 0 ? currentTime / duration : 0)
@@ -57,6 +69,8 @@
   const formattedDuration = $derived(formatTime(duration))
 
   function formatTime(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds <= 0) return '0:00'
+
     const s = Math.floor(seconds)
     const m = Math.floor(s / 60)
     const sec = s % 60
@@ -78,7 +92,7 @@
   }
 
   function seek(e: MouseEvent) {
-    if (!audioEl || duration === 0) return
+    if (!audioEl || duration <= 0) return
     const target = e.currentTarget as HTMLElement
     const rect = target.getBoundingClientRect()
     const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
@@ -99,12 +113,12 @@
 
   function handleTimeUpdate() {
     if (!audioEl) return
-    currentTime = audioEl.currentTime
+    currentTime = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0
   }
 
   function handleLoadedMetadata() {
     if (!audioEl) return
-    duration = audioEl.duration
+    duration = Number.isFinite(audioEl.duration) && audioEl.duration > 0 ? audioEl.duration : 0
   }
 
   function handlePlay() {
@@ -126,21 +140,77 @@
   }
 
   function handleError() {
-    if (!src || blobUrl || !audioEl) return
-    fetch(src)
+    if (!src || !audioEl) return
+
+    if (blobUrl) {
+      loadError = true
+      return
+    }
+
+    const attemptedSrc = src
+    const attempt = ++fallbackAttempt
+    fetch(attemptedSrc)
       .then((response) => {
         if (!response.ok) throw new Error(`HTTP ${response.status}`)
         return response.blob()
       })
       .then((blob) => {
-        blobUrl = URL.createObjectURL(blob)
-        audioEl!.src = blobUrl
-        void audioEl!.play()
+        if (attempt !== fallbackAttempt || attemptedSrc !== src || !audioEl) return
+
+        const typedBlob = ensureAudioBlobType(blob, attemptedSrc)
+        const nextBlobUrl = URL.createObjectURL(typedBlob)
+        replaceBlobUrl(nextBlobUrl)
+        audioEl.src = nextBlobUrl
+        audioEl.load()
       })
       .catch((err) => {
+        if (attempt !== fallbackAttempt) return
         console.error('[AudioPlayer] Fallback load failed:', err)
         loadError = true
       })
+  }
+
+  function replaceBlobUrl(nextBlobUrl: string) {
+    if (activeBlobUrl) {
+      URL.revokeObjectURL(activeBlobUrl)
+    }
+    activeBlobUrl = nextBlobUrl
+    blobUrl = nextBlobUrl
+  }
+
+  function clearBlobUrl() {
+    if (activeBlobUrl) {
+      URL.revokeObjectURL(activeBlobUrl)
+      activeBlobUrl = null
+    }
+    blobUrl = null
+  }
+
+  function ensureAudioBlobType(blob: Blob, source: string): Blob {
+    if (blob.type && blob.type !== 'application/octet-stream') return blob
+
+    const mimeType = audioMimeTypeFromSource(source)
+    return mimeType ? new Blob([blob], { type: mimeType }) : blob
+  }
+
+  function audioMimeTypeFromSource(source: string): string | null {
+    const extension = source.split(/[?#]/, 1)[0]?.split('.').pop()?.toLowerCase()
+    switch (extension) {
+      case 'wav':
+        return 'audio/wav'
+      case 'mp3':
+        return 'audio/mpeg'
+      case 'flac':
+        return 'audio/flac'
+      case 'm4a':
+        return 'audio/mp4'
+      case 'aac':
+        return 'audio/aac'
+      case 'ogg':
+        return 'audio/ogg'
+      default:
+        return null
+    }
   }
 </script>
 

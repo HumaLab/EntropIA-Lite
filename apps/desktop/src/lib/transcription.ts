@@ -91,10 +91,11 @@ interface ProgressPayload {
 
 interface CompletePayload {
   asset_id: string
-  text: string
-  language: string
-  duration_ms: number
-  segments_count: number
+  text?: string
+  text_content?: string
+  language?: string
+  duration_ms?: number
+  segments_count?: number
 }
 
 interface ErrorPayload {
@@ -145,10 +146,10 @@ export class TranscriptionStore {
         status: 'done',
         progress: 100,
         stage: 'done',
-        text: p.text,
+        text: p.text ?? p.text_content ?? '',
         language: p.language,
-        durationMs: p.duration_ms,
-        segmentsCount: p.segments_count,
+        durationMs: p.duration_ms ?? 0,
+        segmentsCount: p.segments_count ?? 0,
       })
       // Notify caller (e.g., to trigger FTS indexing after transcription completes)
       this.onComplete?.(p.asset_id)

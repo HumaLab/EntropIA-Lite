@@ -22,8 +22,10 @@ pub struct TranscriptionProgressPayload {
 #[derive(Clone, Serialize)]
 pub struct TranscriptionCompletePayload {
     pub asset_id: String,
-    pub text_length: usize,
-    pub text_content: String,
+    pub text: String,
+    pub language: String,
+    pub duration_ms: u64,
+    pub segments_count: usize,
 }
 
 #[derive(Clone, Serialize)]
@@ -295,21 +297,24 @@ fn emit_progress(app_handle: &AppHandle, asset_id: &str, pct: u8, stage: &str) {
 
 fn emit_complete(app_handle: &AppHandle, asset_id: String, result: TranscriptionResult) {
     let text_content = result.text.trim().to_string();
+    let text_length = text_content.len();
     crate::app_logs::info(
         app_handle,
         "transcription",
         format!(
             "Transcripción completada: asset_id={} chars={}",
             asset_id,
-            text_content.len()
+            text_length
         ),
     );
     let _ = app_handle.emit(
         "transcription:complete",
         TranscriptionCompletePayload {
             asset_id,
-            text_length: text_content.len(),
-            text_content,
+            text: text_content,
+            language: result.language,
+            duration_ms: result.duration_ms,
+            segments_count: result.segments.len(),
         },
     );
 }
