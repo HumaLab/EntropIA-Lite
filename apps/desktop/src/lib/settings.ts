@@ -64,6 +64,7 @@ export const SETTINGS_KEYS = {
   EMBEDDING_PROVIDER: 'embedding_provider',
   LOCAL_EMBEDDING_MODEL_DIR: 'local_embedding_model_dir',
   ASSEMBLYAI_API_KEY: 'assemblyai_api_key',
+  ASSEMBLYAI_SPEAKER_LABELS: 'assemblyai_role_speaker_identification',
   STT_MODE: 'stt_mode',
   GLM_OCR_API_KEY: 'glm_ocr_api_key',
   OCRH_MODE: 'ocrh_mode',

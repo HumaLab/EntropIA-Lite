@@ -24,24 +24,6 @@ struct CreateTranscriptRequest {
     temperature: u8,
     #[serde(skip_serializing_if = "Option::is_none")]
     speaker_labels: Option<bool>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    speech_understanding: Option<SpeechUnderstandingConfig>,
-}
-
-#[derive(Serialize)]
-struct SpeechUnderstandingConfig {
-    request: SpeechUnderstandingRequest,
-}
-
-#[derive(Serialize)]
-struct SpeechUnderstandingRequest {
-    speaker_identification: SpeakerIdentificationRequest,
-}
-
-#[derive(Serialize)]
-struct SpeakerIdentificationRequest {
-    speaker_type: &'static str,
-    known_values: [&'static str; 2],
 }
 
 #[derive(Deserialize)]
@@ -114,7 +96,7 @@ impl AssemblyAiClient {
     pub async fn transcribe_file<F>(
         &self,
         audio_path: &Path,
-        enable_role_speaker_identification: bool,
+        enable_speaker_labels: bool,
         mut on_progress: F,
     ) -> Result<TranscriptionResult, String>
     where
@@ -153,17 +135,7 @@ impl AssemblyAiClient {
                 speech_models: DEFAULT_SPEECH_MODELS,
                 language_detection: true,
                 temperature: 0,
-                speaker_labels: enable_role_speaker_identification.then_some(true),
-                speech_understanding: enable_role_speaker_identification.then_some(
-                    SpeechUnderstandingConfig {
-                        request: SpeechUnderstandingRequest {
-                            speaker_identification: SpeakerIdentificationRequest {
-                                speaker_type: "role",
-                                known_values: ["Entrevistador", "Entrevistado"],
-                            },
-                        },
-                    },
-                ),
+                speaker_labels: enable_speaker_labels.then_some(true),
             })
             .send()
             .await
@@ -266,71 +238,126 @@ fn format_transcript_text(
         .and_then(|response| response.speaker_identification)
         .and_then(|speaker_identification| speaker_identification.mapping);
 
-    if let (Some(utterances), Some(mapping)) = (utterances, speaker_mapping.as_ref()) {
-        let formatted = utterances
-            .into_iter()
-            .filter_map(|utterance| {
-                let speaker_key = utterance.speaker.or(utterance.speaker_label)?;
-                let label = mapping
-                    .get(&speaker_key)
-                    .map(|value| display_speaker_role(value))
-                    .unwrap_or_else(|| speaker_key.trim().to_string());
-                let text = utterance.text.trim();
-                if text.is_empty() {
-                    None
-                } else {
-                    Some(format!("{label}: {text}"))
-                }
-            })
-            .collect::<Vec<_>>()
-            .join("\n");
+    if let Some(utterances) = utterances {
+        let formatted = format_utterances_with_speaker_labels(utterances);
 
         if !formatted.is_empty() {
             return formatted;
         }
     }
 
-    if let Some(mapping) = speaker_mapping.as_ref() {
-        let remapped = remap_speaker_prefixes(&fallback_text, mapping);
-        if !remapped.is_empty() {
-            return remapped;
-        }
+    let remapped = remap_speaker_prefixes(&fallback_text, speaker_mapping.as_ref());
+    if !remapped.is_empty() {
+        return remapped;
     }
 
     fallback_text.trim().to_string()
 }
 
-fn remap_speaker_prefixes(text: &str, mapping: &HashMap<String, String>) -> String {
-    text.lines()
+fn format_utterances_with_speaker_labels(utterances: Vec<TranscriptUtterance>) -> String {
+    let mut speaker_numbers = HashMap::<String, usize>::new();
+    let mut next_speaker_number = 1_usize;
+
+    utterances
+        .into_iter()
+        .filter_map(|utterance| {
+            let speaker_key = utterance.speaker.or(utterance.speaker_label)?;
+            let text = utterance.text.trim();
+            if text.is_empty() {
+                return None;
+            }
+
+            let label = speaker_label_for_key(
+                &speaker_key,
+                &mut speaker_numbers,
+                &mut next_speaker_number,
+            )?;
+            Some(format!("{label}: {text}"))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn remap_speaker_prefixes(text: &str, mapping: Option<&HashMap<String, String>>) -> String {
+    let mut speaker_numbers = HashMap::<String, usize>::new();
+    let mut next_speaker_number = 1_usize;
+    let mut remapped_any_line = false;
+
+    let remapped = text
+        .lines()
         .map(|line| {
             let trimmed = line.trim();
             let Some((speaker_key, content)) = trimmed.split_once(':') else {
                 return trimmed.to_string();
             };
 
-            let Some(mapped_speaker) = mapping.get(speaker_key.trim()) else {
+            let canonical_speaker_key = mapping
+                .and_then(|mapping| mapping.get(speaker_key.trim()))
+                .map(String::as_str)
+                .unwrap_or_else(|| speaker_key.trim());
+
+            if mapping.is_none() && !looks_like_speaker_key(canonical_speaker_key) {
+                return trimmed.to_string();
+            }
+
+            let content = content.trim();
+            let Some(label) = speaker_label_for_key(
+                canonical_speaker_key,
+                &mut speaker_numbers,
+                &mut next_speaker_number,
+            ) else {
                 return trimmed.to_string();
             };
 
-            let content = content.trim();
+            remapped_any_line = true;
             if content.is_empty() {
-                display_speaker_role(mapped_speaker)
+                label
             } else {
-                format!("{}: {}", display_speaker_role(mapped_speaker), content)
+                format!("{label}: {content}")
             }
         })
         .collect::<Vec<_>>()
-        .join("\n")
-        .trim()
-        .to_string()
+        .join("\n");
+
+    if !remapped_any_line {
+        return String::new();
+    }
+
+    remapped.trim().to_string()
 }
 
-fn display_speaker_role(role: &str) -> String {
-    match role.trim() {
-        "Entrevistador" => "Entrevistador/a".to_string(),
-        "Entrevistado" => "Entrevistado/a".to_string(),
-        other => other.to_string(),
+fn speaker_label_for_key(
+    speaker_key: &str,
+    speaker_numbers: &mut HashMap<String, usize>,
+    next_speaker_number: &mut usize,
+) -> Option<String> {
+    let normalized = speaker_key.trim();
+    if normalized.is_empty() {
+        return None;
     }
+
+    let index = *speaker_numbers
+        .entry(normalized.to_string())
+        .or_insert_with(|| {
+            let index = *next_speaker_number;
+            *next_speaker_number += 1;
+            index
+        });
+    Some(format!("Hablante {index}"))
+}
+
+fn looks_like_speaker_key(value: &str) -> bool {
+    let trimmed = value.trim();
+    if trimmed.len() == 1 && trimmed.chars().all(|ch| ch.is_ascii_alphabetic()) {
+        return true;
+    }
+
+    let lower = trimmed.to_ascii_lowercase();
+    lower.starts_with("speaker ")
+        || lower.starts_with("speaker_")
+        || lower.starts_with("speaker-")
+        || lower.starts_with("spk_")
+        || lower.starts_with("spk-")
 }
 
 #[cfg(test)]
@@ -360,7 +387,6 @@ mod tests {
             language_detection: true,
             temperature: 0,
             speaker_labels: None,
-            speech_understanding: None,
         })
         .expect("request serializes");
 
@@ -374,21 +400,13 @@ mod tests {
     }
 
     #[test]
-    fn transcript_request_includes_role_speaker_identification_when_enabled() {
+    fn transcript_request_includes_speaker_labels_when_enabled() {
         let payload = serde_json::to_value(CreateTranscriptRequest {
             audio_url: "https://example.test/audio.mp3".to_string(),
             speech_models: DEFAULT_SPEECH_MODELS,
             language_detection: true,
             temperature: 0,
             speaker_labels: Some(true),
-            speech_understanding: Some(SpeechUnderstandingConfig {
-                request: SpeechUnderstandingRequest {
-                    speaker_identification: SpeakerIdentificationRequest {
-                        speaker_type: "role",
-                        known_values: ["Entrevistador", "Entrevistado"],
-                    },
-                },
-            }),
         })
         .expect("request serializes");
 
@@ -399,23 +417,15 @@ mod tests {
                 "speech_models": ["universal-3-pro", "universal-2"],
                 "language_detection": true,
                 "temperature": 0,
-                "speaker_labels": true,
-                "speech_understanding": {
-                    "request": {
-                        "speaker_identification": {
-                            "speaker_type": "role",
-                            "known_values": ["Entrevistador", "Entrevistado"]
-                        }
-                    }
-                }
+                "speaker_labels": true
             })
         );
     }
 
     #[test]
-    fn formats_utterances_using_interview_roles() {
+    fn formats_utterances_using_numbered_speaker_labels() {
         let formatted = format_transcript_text(
-            "A: Hola\nB: Buen día".to_string(),
+            "A: Hola\nB: Buen día\nC: ¿Cómo están?".to_string(),
             Some(vec![
                 TranscriptUtterance {
                     speaker: Some("A".to_string()),
@@ -427,24 +437,42 @@ mod tests {
                     speaker_label: None,
                     text: "Buen día".to_string(),
                 },
+                TranscriptUtterance {
+                    speaker: Some("C".to_string()),
+                    speaker_label: None,
+                    text: "¿Cómo están?".to_string(),
+                },
+                TranscriptUtterance {
+                    speaker: Some("A".to_string()),
+                    speaker_label: None,
+                    text: "Bien".to_string(),
+                },
             ]),
-            Some(SpeechUnderstandingStatus {
-                response: Some(SpeechUnderstandingResponse {
-                    speaker_identification: Some(SpeakerIdentificationResponse {
-                        mapping: Some(HashMap::from([
-                            ("A".to_string(), "Entrevistador".to_string()),
-                            ("B".to_string(), "Entrevistado".to_string()),
-                        ])),
-                    }),
-                }),
-            }),
+            None,
         );
 
-        assert_eq!(formatted, "Entrevistador/a: Hola\nEntrevistado/a: Buen día");
+        assert_eq!(
+            formatted,
+            "Hablante 1: Hola\nHablante 2: Buen día\nHablante 3: ¿Cómo están?\nHablante 1: Bien"
+        );
     }
 
     #[test]
-    fn remaps_existing_speaker_prefixes_when_only_text_is_available() {
+    fn remaps_existing_speaker_prefixes_to_numbered_labels() {
+        let formatted = format_transcript_text(
+            "A: Hola\nB: Buen día\nC: Tercera voz".to_string(),
+            None,
+            None,
+        );
+
+        assert_eq!(
+            formatted,
+            "Hablante 1: Hola\nHablante 2: Buen día\nHablante 3: Tercera voz"
+        );
+    }
+
+    #[test]
+    fn remaps_speech_understanding_roles_to_numbered_labels_for_legacy_responses() {
         let formatted = format_transcript_text(
             "A: Hola\nB: Buen día".to_string(),
             None,
@@ -452,14 +480,14 @@ mod tests {
                 response: Some(SpeechUnderstandingResponse {
                     speaker_identification: Some(SpeakerIdentificationResponse {
                         mapping: Some(HashMap::from([
-                            ("A".to_string(), "Entrevistador".to_string()),
-                            ("B".to_string(), "Entrevistado".to_string()),
+                            ("A".to_string(), "role-one".to_string()),
+                            ("B".to_string(), "role-two".to_string()),
                         ])),
                     }),
                 }),
             }),
         );
 
-        assert_eq!(formatted, "Entrevistador/a: Hola\nEntrevistado/a: Buen día");
+        assert_eq!(formatted, "Hablante 1: Hola\nHablante 2: Buen día");
     }
 }

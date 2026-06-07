@@ -96,6 +96,11 @@ const es = {
   'settings.assemblyAiApiKeyPlaceholder': 'aai-...',
   'settings.enterAssemblyAiApiKey': 'Ingresá una API key de AssemblyAI antes de probar la conexión.',
   'settings.assemblyAiConnectionReady': 'Conexión lista · AssemblyAI validó tu cuenta.',
+  'settings.assemblyAiSpeakerLabels': 'Identificación de hablantes',
+  'settings.assemblyAiSpeakerLabelsHint':
+    'Activada por defecto para pedir speaker_labels y etiquetar la transcripción como Hablante 1, Hablante 2, Hablante 3…',
+  'settings.optionEnabled': 'Activado',
+  'settings.optionDisabled': 'Desactivado',
   'dbBrowser.eyebrow': 'Base de datos',
   'dbBrowser.title': 'Consulta DB',
   'dbBrowser.subtitle':
@@ -684,6 +689,11 @@ const en: Record<keyof typeof es | ExtraI18nKey, string> = {
   'settings.assemblyAiApiKeyPlaceholder': 'aai-...',
   'settings.enterAssemblyAiApiKey': 'Enter an AssemblyAI API key before testing the connection.',
   'settings.assemblyAiConnectionReady': 'Connection ready · AssemblyAI validated your account.',
+  'settings.assemblyAiSpeakerLabels': 'Speaker identification',
+  'settings.assemblyAiSpeakerLabelsHint':
+    'Enabled by default to request speaker_labels and label the transcription as Speaker 1, Speaker 2, Speaker 3…',
+  'settings.optionEnabled': 'Enabled',
+  'settings.optionDisabled': 'Disabled',
   'dbBrowser.eyebrow': 'Database',
   'dbBrowser.title': 'DB Browser',
   'dbBrowser.subtitle':

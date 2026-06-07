@@ -113,6 +113,9 @@ describe('settings', () => {
       expect(SETTINGS_KEYS.OPENROUTER_MODEL).toBe('openrouter_model')
       expect(SETTINGS_KEYS.LLM_MODE).toBe('llm_mode')
       expect(SETTINGS_KEYS.ASSEMBLYAI_API_KEY).toBe('assemblyai_api_key')
+      expect(SETTINGS_KEYS.ASSEMBLYAI_SPEAKER_LABELS).toBe(
+        'assemblyai_role_speaker_identification'
+      )
       expect(SETTINGS_KEYS.STT_MODE).toBe('stt_mode')
       expect(SETTINGS_KEYS.GLM_OCR_API_KEY).toBe('glm_ocr_api_key')
       expect(SETTINGS_KEYS.OCRH_MODE).toBe('ocrh_mode')

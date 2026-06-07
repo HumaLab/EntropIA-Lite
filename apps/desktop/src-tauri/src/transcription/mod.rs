@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use tokio::sync::mpsc;
 
 const ASSEMBLYAI_API_KEY_SETTING: &str = "assemblyai_api_key";
-const ASSEMBLYAI_ROLE_SPEAKER_SETTING: &str = "assemblyai_role_speaker_identification";
+const ASSEMBLYAI_SPEAKER_LABELS_SETTING: &str = "assemblyai_role_speaker_identification";
 
 #[derive(Clone, Serialize)]
 pub struct TranscriptionProgressPayload {
@@ -132,10 +132,9 @@ pub fn transcribe_with_selected_provider(
         return Err("EntropIA Lite requiere AssemblyAI para transcripción.".to_string());
     }
 
-    let enable_role_speaker_identification =
-        crate::settings::get_setting(conn, ASSEMBLYAI_ROLE_SPEAKER_SETTING)
-            .map(|value| matches!(value.trim(), "1" | "true" | "yes" | "on"))
-            .unwrap_or(false);
+    let enable_speaker_labels = parse_enabled_by_default(
+        crate::settings::get_setting(conn, ASSEMBLYAI_SPEAKER_LABELS_SETTING).as_deref(),
+    );
 
     let mut emit_provider_progress = |pct: u8, stage: &str| {
         if let Some(asset_id) = asset_id {
@@ -146,7 +145,7 @@ pub fn transcribe_with_selected_provider(
     let transcription = transcribe_with_assemblyai_provider(
         audio_path,
         &assemblyai_api_key,
-        enable_role_speaker_identification,
+        enable_speaker_labels,
         &mut emit_provider_progress,
     )?;
 
@@ -166,7 +165,7 @@ pub fn transcribe_with_selected_provider(
 fn transcribe_with_assemblyai_provider<F>(
     audio_path: &str,
     api_key: &str,
-    enable_role_speaker_identification: bool,
+    enable_speaker_labels: bool,
     on_progress: F,
 ) -> Result<TranscriptionResult, String>
 where
@@ -174,13 +173,20 @@ where
 {
     tauri::async_runtime::block_on(async move {
         assemblyai::AssemblyAiClient::new(api_key.to_string())
-            .transcribe_file(
-                Path::new(audio_path),
-                enable_role_speaker_identification,
-                on_progress,
-            )
+            .transcribe_file(Path::new(audio_path), enable_speaker_labels, on_progress)
             .await
     })
+}
+
+fn parse_enabled_by_default(value: Option<&str>) -> bool {
+    let Some(value) = value.map(str::trim).filter(|value| !value.is_empty()) else {
+        return true;
+    };
+
+    !matches!(
+        value.to_ascii_lowercase().as_str(),
+        "0" | "false" | "no" | "off"
+    )
 }
 
 pub fn cleanup_temp_audio_file(audio_path: &str) -> Result<(), String> {
@@ -303,8 +309,7 @@ fn emit_complete(app_handle: &AppHandle, asset_id: String, result: Transcription
         "transcription",
         format!(
             "Transcripción completada: asset_id={} chars={}",
-            asset_id,
-            text_length
+            asset_id, text_length
         ),
     );
     let _ = app_handle.emit(
@@ -329,4 +334,27 @@ fn emit_error(app_handle: &AppHandle, asset_id: String, error: String) {
         "transcription:error",
         TranscriptionErrorPayload { asset_id, error },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_enabled_by_default;
+
+    #[test]
+    fn speaker_labels_setting_defaults_enabled_when_missing_or_blank() {
+        assert!(parse_enabled_by_default(None));
+        assert!(parse_enabled_by_default(Some("")));
+        assert!(parse_enabled_by_default(Some("   ")));
+    }
+
+    #[test]
+    fn speaker_labels_setting_disables_only_explicit_false_values() {
+        for value in ["false", "False", "0", "no", "off"] {
+            assert!(!parse_enabled_by_default(Some(value)));
+        }
+
+        for value in ["true", "1", "yes", "on", "anything-else"] {
+            assert!(parse_enabled_by_default(Some(value)));
+        }
+    }
 }

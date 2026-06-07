@@ -27,6 +27,7 @@
   let assemblyAiApiKey = $state('')
   let maskedAssemblyAiApiKey = $state('')
   let showAssemblyAiApiKey = $state(false)
+  let assemblyAiSpeakerLabels = $state(true)
   let glmOcrApiKey = $state('')
   let maskedGlmOcrApiKey = $state('')
   let showGlmOcrApiKey = $state(false)
@@ -71,12 +72,14 @@
         storedModel,
         storedEmbeddingModel,
         storedAssemblyAiKey,
+        storedAssemblyAiSpeakerLabels,
         storedGlmOcrKey,
       ] = await Promise.all([
         settingsGet(SETTINGS_KEYS.OPENROUTER_API_KEY),
         settingsGet(SETTINGS_KEYS.OPENROUTER_MODEL),
         settingsGet(SETTINGS_KEYS.OPENROUTER_EMBEDDING_MODEL),
         settingsGet(SETTINGS_KEYS.ASSEMBLYAI_API_KEY),
+        settingsGet(SETTINGS_KEYS.ASSEMBLYAI_SPEAKER_LABELS),
         settingsGet(SETTINGS_KEYS.GLM_OCR_API_KEY),
       ])
 
@@ -96,6 +99,7 @@
         assemblyAiApiKey = storedAssemblyAiKey
         maskedAssemblyAiApiKey = maskKey(storedAssemblyAiKey, 5)
       }
+      assemblyAiSpeakerLabels = parseEnabledByDefault(storedAssemblyAiSpeakerLabels)
       if (storedGlmOcrKey?.startsWith(SECRET_REF_PREFIX)) {
         glmOcrApiKey = ''
         maskedGlmOcrApiKey = 'Clave guardada en Windows Credential Manager'
@@ -113,6 +117,12 @@
     if (!trimmed) return ''
     if (trimmed.length <= prefixLength + 4) return '*'.repeat(trimmed.length)
     return `${trimmed.slice(0, prefixLength)}****...****${trimmed.slice(-4)}`
+  }
+
+  function parseEnabledByDefault(value: string | null): boolean {
+    const normalized = value?.trim().toLowerCase()
+    if (!normalized) return true
+    return !['0', 'false', 'no', 'off'].includes(normalized)
   }
 
   async function handleTestConnection() {
@@ -197,6 +207,10 @@
         settingsSet(SETTINGS_KEYS.OPENROUTER_EMBEDDING_MODEL, embeddingModel.trim() || DEFAULT_OPENROUTER_EMBEDDING_MODEL),
         settingsSet(SETTINGS_KEYS.LLM_MODE, 'openrouter'),
         settingsSet(SETTINGS_KEYS.STT_MODE, 'assemblyai'),
+        settingsSet(
+          SETTINGS_KEYS.ASSEMBLYAI_SPEAKER_LABELS,
+          assemblyAiSpeakerLabels ? 'true' : 'false'
+        ),
         settingsSet(SETTINGS_KEYS.OCRH_MODE, 'glm_ocr'),
       ]
       if (apiKey.trim()) writes.push(settingsSet(SETTINGS_KEYS.OPENROUTER_API_KEY, apiKey.trim()))
@@ -454,6 +468,21 @@
             </p>
           {/if}
         </div>
+
+        <div class="settings__field settings__field--stacked">
+          <label class="settings__label" for="assemblyai-speaker-labels">
+            {t('settings.assemblyAiSpeakerLabels')}
+          </label>
+          <select
+            id="assemblyai-speaker-labels"
+            class="settings__input settings__input--select"
+            bind:value={assemblyAiSpeakerLabels}
+          >
+            <option value={true}>{t('settings.optionEnabled')}</option>
+            <option value={false}>{t('settings.optionDisabled')}</option>
+          </select>
+          <p class="settings__hint">{t('settings.assemblyAiSpeakerLabelsHint')}</p>
+        </div>
       </section>
     </Card>
 
@@ -648,6 +677,11 @@
     border-color: var(--color-accent);
     box-shadow: var(--focus-ring);
     background: color-mix(in srgb, var(--color-surface-glass) 88%, transparent);
+  }
+
+  .settings__input--select {
+    max-width: 240px;
+    font-family: var(--font-sans);
   }
 
   .settings__icon-btn {

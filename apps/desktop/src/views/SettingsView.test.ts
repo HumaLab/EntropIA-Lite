@@ -53,6 +53,7 @@ describe('SettingsView', () => {
       if (key === 'llm_mode') return 'openrouter'
       if (key === 'assemblyai_api_key') return 'aai-orig-test-1234'
       if (key === 'stt_mode') return 'assemblyai'
+      if (key === 'assemblyai_role_speaker_identification') return null
       if (key === 'language') return 'es'
       return null
     })
@@ -149,7 +150,48 @@ describe('SettingsView', () => {
     expect(settingsSetMock).toHaveBeenCalledWith('openrouter_embedding_model', 'baai/bge-m3')
     expect(settingsSetMock).toHaveBeenCalledWith('llm_mode', 'openrouter')
     expect(settingsSetMock).toHaveBeenCalledWith('stt_mode', 'assemblyai')
+    expect(settingsSetMock).toHaveBeenCalledWith(
+      'assemblyai_role_speaker_identification',
+      'true'
+    )
     expect(settingsSetMock).toHaveBeenCalledWith('ocrh_mode', 'glm_ocr')
+  })
+
+  it('loads AssemblyAI speaker labels enabled by default and saves it', async () => {
+    render(SettingsView)
+
+    const speakerSelect = await screen.findByLabelText('Identificación de hablantes')
+    expect(speakerSelect).toHaveValue('true')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(settingsSetMock).toHaveBeenCalledWith(
+      'assemblyai_role_speaker_identification',
+      'true'
+    )
+  })
+
+  it('respects a saved false value for AssemblyAI speaker labels', async () => {
+    settingsGetMock.mockImplementation(async (key: string) => {
+      if (key === 'openrouter_api_key') return 'sk-or-v1-test-key'
+      if (key === 'openrouter_model') return 'anthropic/claude-3.7-sonnet'
+      if (key === 'openrouter_embedding_model') return 'baai/bge-m3'
+      if (key === 'assemblyai_api_key') return 'aai-orig-test-1234'
+      if (key === 'assemblyai_role_speaker_identification') return 'false'
+      return null
+    })
+
+    render(SettingsView)
+
+    const speakerSelect = await screen.findByLabelText('Identificación de hablantes')
+    expect(speakerSelect).toHaveValue('false')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(settingsSetMock).toHaveBeenCalledWith(
+      'assemblyai_role_speaker_identification',
+      'false'
+    )
   })
 
   it('enables connection tests for saved keyring credentials without retyping secrets', async () => {
