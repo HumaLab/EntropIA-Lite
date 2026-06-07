@@ -9,6 +9,7 @@ const {
   extractEntitiesForAssetMock,
   indexFtsMock,
   extractTriplesMock,
+  llmCorrectOcrMock,
   llmSummarizeAssetMock,
   llmCorrectOcrAssetMock,
   llmExtractTriplesMock,
@@ -26,6 +27,7 @@ const {
   extractEntitiesForAssetMock: vi.fn<(_: string, __: string) => Promise<void>>(),
   indexFtsMock: vi.fn<(_: string) => Promise<void>>(),
   extractTriplesMock: vi.fn<(_: string) => Promise<void>>(),
+  llmCorrectOcrMock: vi.fn<(_: string) => Promise<void>>(),
   llmSummarizeAssetMock: vi.fn<(_: string) => Promise<void>>(),
   llmCorrectOcrAssetMock: vi.fn<(_: string) => Promise<void>>(),
   llmExtractTriplesMock: vi.fn<(_: string) => Promise<void>>(),
@@ -320,7 +322,7 @@ vi.mock('$lib/llm', async () => {
     llmGetResult: vi.fn().mockResolvedValue(null),
     llmGetResults: vi.fn().mockResolvedValue([]),
     llmSummarize: vi.fn().mockResolvedValue(undefined),
-    llmCorrectOcr: vi.fn().mockResolvedValue(undefined),
+    llmCorrectOcr: llmCorrectOcrMock,
     llmExtractTriples: llmExtractTriplesMock,
     llmSummarizeAsset: llmSummarizeAssetMock,
     llmCorrectOcrAsset: llmCorrectOcrAssetMock,
@@ -431,6 +433,7 @@ beforeEach(() => {
   })
   clipboardWriteTextMock.mockReset().mockResolvedValue(undefined)
   llmIsAvailableMock.mockReset().mockResolvedValue(true)
+  llmCorrectOcrMock.mockReset().mockResolvedValue(undefined)
   emitMock.mockReset().mockResolvedValue(undefined)
   extractEntitiesForAssetMock.mockReset().mockResolvedValue(undefined)
   indexFtsMock.mockReset().mockResolvedValue(undefined)
@@ -472,6 +475,7 @@ describe('ItemView multi-asset navigation', () => {
     nlpEventHandlers.clear()
     embedAssetMock.mockReset().mockResolvedValue(undefined)
     similarAssetsMock.mockReset().mockResolvedValue([])
+    llmCorrectOcrMock.mockReset().mockResolvedValue(undefined)
     llmSummarizeAssetMock.mockReset().mockResolvedValue(undefined)
     llmCorrectOcrAssetMock.mockReset().mockResolvedValue(undefined)
     llmExtractTriplesAssetMock.mockReset().mockResolvedValue(undefined)
@@ -540,6 +544,38 @@ describe('ItemView multi-asset navigation', () => {
     } finally {
       window.removeEventListener('entropia:document-explorer-asset-selected', handleSelected)
     }
+  })
+
+  it('runs OCRC only for the currently selected asset in a multi-page item', async () => {
+    navigation.resetToPath([
+      { name: 'collections' },
+      { name: 'collection', id: 'col-1', collectionName: 'Colección 1' },
+      {
+        name: 'item',
+        collectionId: 'col-1',
+        collectionName: 'Colección 1',
+        itemId: 'item-1',
+        itemTitle: 'Acta histórica',
+        assetId: 'asset-page-2',
+        assetLabel: '757-70_page_2.png',
+      },
+    ])
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    expect(await screen.findByText(/2\s*\/\s*3/)).toBeInTheDocument()
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Texto' }))
+    nlpEventHandlers.get('ocr:complete')?.({
+      payload: { asset_id: 'asset-page-2', method: 'paddle_vl', text_content: 'Texto OCR página 2' },
+    })
+
+    const correctButton = await screen.findByRole('button', { name: 'OCRC' })
+    await waitFor(() => expect(correctButton).toBeEnabled())
+    await fireEvent.click(correctButton)
+
+    expect(llmCorrectOcrAssetMock).toHaveBeenCalledWith('asset-page-2')
+    expect(llmCorrectOcrAssetMock).not.toHaveBeenCalledWith('asset-page-1')
+    expect(llmCorrectOcrMock).not.toHaveBeenCalled()
   })
 })
 

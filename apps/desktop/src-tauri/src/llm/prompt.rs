@@ -27,6 +27,28 @@ Texto OCR:
     )
 }
 
+pub fn raw_ocr_correction_with_image(text: &str) -> String {
+    format!(
+        r#"Usa la imagen adjunta como referencia principal y el OCR como borrador inicial. Corrige errores, verifica coincidencia con la imagen y completa texto omitido si es claramente visible. Conserva idioma y estructura. No inventes contenido no visible. Devuelve sólo el texto final corregido.
+
+Reglas obligatorias:
+1. Contrastá cada fragmento del OCR contra la imagen del mismo asset.
+2. Corregí sustituciones de caracteres, palabras mal leídas, espacios faltantes y cortes de línea cuando la imagen lo confirme.
+3. Recuperá palabras, números, nombres, fechas o líneas omitidas sólo si son claramente legibles en la imagen.
+4. Conservá idioma, ortografía histórica, nombres propios, puntuación significativa y estructura de párrafos/listas/tablas cuando sean visibles.
+5. Si una zona es ilegible o ambigua, no la inventes: dejá el mejor texto verificable desde OCR/imagen o mantené el fragmento dudoso sin expandirlo.
+6. No resumas, no modernices, no expliques y no agregues contenido fuera del documento.
+
+Salida:
+- Devolvé SOLO el texto final corregido.
+- No agregues títulos, comentarios, markdown, comillas, bloques de código ni JSON.
+- No repitas la consigna.
+
+OCR borrador:
+{text}"#
+    )
+}
+
 pub fn raw_extract_entities(text: &str) -> String {
     format!(
         r#"Extraé entidades nombradas de este texto de documento histórico. Devolvé un array JSON donde cada elemento tiene: "value" (el texto de la entidad), "type" (uno de: person, place, date, organization, institution, misc), "confidence" (0.0 a 1.0).

@@ -7,7 +7,28 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize)]
 struct ChatMessage {
     role: String,
-    content: String,
+    content: ChatMessageContent,
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ChatMessageContent {
+    Text(String),
+    Parts(Vec<ChatContentPart>),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type")]
+enum ChatContentPart {
+    #[serde(rename = "text")]
+    Text { text: String },
+    #[serde(rename = "image_url")]
+    ImageUrl { image_url: ImageUrlContent },
+}
+
+#[derive(Serialize)]
+struct ImageUrlContent {
+    url: String,
 }
 
 #[derive(Serialize)]
@@ -90,12 +111,45 @@ impl OpenRouterClient {
             model: self.model.clone(),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
-                content: prompt.to_string(),
+                content: ChatMessageContent::Text(prompt.to_string()),
             }],
             max_tokens,
             temperature: 0.3,
         };
 
+        self.send_chat_completion(request).await
+    }
+
+    /// Generate a completion from one user message containing text and one image.
+    pub async fn generate_with_image(
+        &self,
+        prompt: &str,
+        image_data_url: &str,
+        max_tokens: i32,
+    ) -> Result<String, String> {
+        let request = ChatCompletionRequest {
+            model: self.model.clone(),
+            messages: vec![ChatMessage {
+                role: "user".to_string(),
+                content: ChatMessageContent::Parts(vec![
+                    ChatContentPart::Text {
+                        text: prompt.to_string(),
+                    },
+                    ChatContentPart::ImageUrl {
+                        image_url: ImageUrlContent {
+                            url: image_data_url.to_string(),
+                        },
+                    },
+                ]),
+            }],
+            max_tokens,
+            temperature: 0.2,
+        };
+
+        self.send_chat_completion(request).await
+    }
+
+    async fn send_chat_completion(&self, request: ChatCompletionRequest) -> Result<String, String> {
         let response = self
             .client
             .post("https://openrouter.ai/api/v1/chat/completions")

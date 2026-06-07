@@ -93,7 +93,6 @@
   import {
     LlmStore,
     llmSummarize,
-    llmCorrectOcr,
     llmExtractTriples,
     llmSummarizeAsset,
     llmCorrectOcrAsset,
@@ -608,13 +607,13 @@
 
   async function handleLlmCorrectOcr() {
     error = null
+    const asset = selectedAsset
+    if (!asset) {
+      error = translate('item.error.correctOcr')
+      return
+    }
     try {
-      await runScopedLlmAction({
-        itemId,
-        selectedAssetId: selectedAsset?.id ?? null,
-        runAsset: llmCorrectOcrAsset,
-        runItem: llmCorrectOcr,
-      })
+      await llmCorrectOcrAsset(asset.id)
     } catch (e) {
       console.error('[LLM] correct OCR failed:', e)
       error = translate('item.error.correctOcr')

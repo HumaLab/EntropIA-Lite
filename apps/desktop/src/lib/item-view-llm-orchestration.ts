@@ -56,7 +56,7 @@ export function selectOcrCorrectionAssetId<TAsset extends { id: string }>({
   completedTargetId,
   selectedAssetId,
   assets,
-  hasOcrText,
+  hasOcrText: _hasOcrText,
 }: {
   completedTargetId: string
   selectedAssetId: string | null | undefined
@@ -67,7 +67,11 @@ export function selectOcrCorrectionAssetId<TAsset extends { id: string }>({
     return completedTargetId
   }
 
-  return assets.find((asset) => hasOcrText(asset.id))?.id ?? null
+  if (assets.some((asset) => asset.id === completedTargetId)) {
+    return completedTargetId
+  }
+
+  return null
 }
 
 export function getErrorMessage(error: unknown, fallback = 'Failed') {

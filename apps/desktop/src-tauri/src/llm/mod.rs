@@ -3,11 +3,12 @@ pub mod openrouter;
 pub mod prompt;
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use once_cell::sync::Lazy;
 use regex::Regex;
 use rusqlite::params;
@@ -987,8 +988,7 @@ impl LlmQueue {
                 eprintln!("{job_log_prefix} Running job '{job_name}' for {id} via remote API");
                 let client = OpenRouterClient::new(api_key, remote_model);
                 let result = match prepare_remote_job_request(&conn, &job, client.n_ctx()) {
-                    Ok(request) => match client.generate(&request.prompt, request.max_tokens).await
-                    {
+                    Ok(request) => match generate_remote_job(&client, &request).await {
                         Ok(output) if request.truncate_to_sentence_boundary => {
                             Ok(truncate_to_sentence_boundary(&output))
                         }
@@ -1222,10 +1222,101 @@ fn gather_collection_context(
 
     Ok(context)
 }
+#[derive(Debug)]
 struct RemoteJobRequest {
     prompt: String,
+    image_data_url: Option<String>,
     max_tokens: i32,
     truncate_to_sentence_boundary: bool,
+}
+
+impl RemoteJobRequest {
+    fn text(prompt: String, max_tokens: i32, truncate_to_sentence_boundary: bool) -> Self {
+        Self {
+            prompt,
+            image_data_url: None,
+            max_tokens,
+            truncate_to_sentence_boundary,
+        }
+    }
+
+    fn multimodal_ocr(prompt: String, image_data_url: String, max_tokens: i32) -> Self {
+        Self {
+            prompt,
+            image_data_url: Some(image_data_url),
+            max_tokens,
+            truncate_to_sentence_boundary: false,
+        }
+    }
+}
+
+async fn generate_remote_job(
+    client: &OpenRouterClient,
+    request: &RemoteJobRequest,
+) -> Result<String, String> {
+    match request.image_data_url.as_deref() {
+        Some(image_data_url) => {
+            client
+                .generate_with_image(&request.prompt, image_data_url, request.max_tokens)
+                .await
+        }
+        None => client.generate(&request.prompt, request.max_tokens).await,
+    }
+}
+
+fn resolve_asset_source_image_data_url(
+    conn: &rusqlite::Connection,
+    asset_id: &str,
+) -> Result<String, String> {
+    let (path, asset_type): (String, String) = conn
+        .query_row(
+            "SELECT path, type FROM assets WHERE id = ?1 LIMIT 1",
+            params![asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .map_err(|e| format!("No se pudo resolver la imagen del asset activo {asset_id}: {e}"))?;
+
+    let mime = image_mime_from_path(&path).ok_or_else(|| {
+        format!(
+            "El asset activo {asset_id} no tiene una imagen compatible para corrección OCR multimodal (tipo: {asset_type}, ruta: {path})."
+        )
+    })?;
+
+    let image_path = Path::new(&path);
+    if !image_path.is_file() {
+        return Err(format!(
+            "La imagen asociada al asset activo no existe o no es un archivo: {path}"
+        ));
+    }
+
+    let bytes = std::fs::read(image_path)
+        .map_err(|e| format!("No se pudo leer la imagen del asset activo {asset_id}: {e}"))?;
+    if bytes.is_empty() {
+        return Err(format!(
+            "La imagen asociada al asset activo está vacía: {path}"
+        ));
+    }
+
+    Ok(format!(
+        "data:{mime};base64,{}",
+        BASE64_STANDARD.encode(bytes)
+    ))
+}
+
+fn image_mime_from_path(path: &str) -> Option<&'static str> {
+    match Path::new(path)
+        .extension()
+        .and_then(|extension| extension.to_str())
+        .map(|extension| extension.to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("jpg" | "jpeg") => Some("image/jpeg"),
+        Some("png") => Some("image/png"),
+        Some("webp") => Some("image/webp"),
+        Some("gif") => Some("image/gif"),
+        Some("bmp") => Some("image/bmp"),
+        _ => None,
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -1247,11 +1338,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for OCR correction".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_ocr_correction(&truncated),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_ocr_correction(&truncated),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         LlmJob::ExtractEntities { item_id } => {
@@ -1260,11 +1351,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for entity extraction".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_extract_entities(&truncated),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_extract_entities(&truncated),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         LlmJob::ConsolidateEntities {
@@ -1276,11 +1367,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for entity consolidation".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_consolidate_entities(&truncated, candidate_entities_json),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_consolidate_entities(&truncated, candidate_entities_json),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         LlmJob::ExtractTriples { item_id } => {
@@ -1289,11 +1380,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for triple extraction".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_extract_triples(&truncated),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_extract_triples(&truncated),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         LlmJob::Summarize { item_id } => {
@@ -1302,11 +1393,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for summarization".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_summarize(&truncated),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_summarize(&truncated),
                 max_tokens,
-                truncate_to_sentence_boundary: true,
-            })
+                true,
+            ))
         }
 
         LlmJob::Classify {
@@ -1318,11 +1409,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for classification".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_classify(&truncated, categories),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_classify(&truncated, categories),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         LlmJob::Ask {
@@ -1334,11 +1425,11 @@ fn prepare_remote_job_request(
                 return Err("No relevant documents found for this question".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &context);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_question_answer(question, &truncated),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_question_answer(question, &truncated),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         // Asset-level variants
@@ -1348,11 +1439,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for OCR correction on this asset".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_ocr_correction(&truncated),
+            Ok(RemoteJobRequest::multimodal_ocr(
+                prompt::raw_ocr_correction_with_image(&truncated),
+                resolve_asset_source_image_data_url(conn, asset_id)?,
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+            ))
         }
 
         LlmJob::ExtractEntitiesAsset { asset_id } => {
@@ -1361,11 +1452,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for entity extraction on this asset".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_extract_entities(&truncated),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_extract_entities(&truncated),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         LlmJob::ConsolidateEntitiesAsset {
@@ -1377,11 +1468,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for entity consolidation on this asset".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_consolidate_entities(&truncated, candidate_entities_json),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_consolidate_entities(&truncated, candidate_entities_json),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         LlmJob::ExtractTriplesAsset { asset_id } => {
@@ -1390,11 +1481,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for triple extraction on this asset".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_extract_triples(&truncated),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_extract_triples(&truncated),
                 max_tokens,
-                truncate_to_sentence_boundary: false,
-            })
+                false,
+            ))
         }
 
         LlmJob::SummarizeAsset { asset_id } => {
@@ -1403,11 +1494,11 @@ fn prepare_remote_job_request(
                 return Err("No text available for summarization on this asset".to_string());
             }
             let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
-            Ok(RemoteJobRequest {
-                prompt: prompt::raw_summarize(&truncated),
+            Ok(RemoteJobRequest::text(
+                prompt::raw_summarize(&truncated),
                 max_tokens,
-                truncate_to_sentence_boundary: true,
-            })
+                true,
+            ))
         }
     }
 }
@@ -1423,6 +1514,101 @@ mod tests {
              CREATE TABLE assets (id TEXT PRIMARY KEY, item_id TEXT NOT NULL, path TEXT NOT NULL, type TEXT NOT NULL, created_at INTEGER NOT NULL);",
         )
         .unwrap();
+    }
+
+    #[test]
+    fn correct_ocr_asset_prepares_text_and_image_from_same_asset() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        setup_llm_schema_fixture(&conn);
+        conn.execute_batch(
+            "CREATE TABLE extractions (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, text_content TEXT, created_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+
+        let temp_dir = tempfile::tempdir().unwrap();
+        let image_1 = temp_dir.path().join("page-1.png");
+        let image_2 = temp_dir.path().join("page-2.png");
+        std::fs::write(&image_1, b"first-image").unwrap();
+        std::fs::write(&image_2, b"second-image").unwrap();
+
+        conn.execute(
+            "INSERT INTO collections (id, name, description, created_at, updated_at) VALUES ('col-1', 'Collection', NULL, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO items (id, title, collection_id, metadata, created_at, updated_at) VALUES ('item-1', 'Item', 'col-1', NULL, 1, 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO assets (id, item_id, path, type, created_at) VALUES (?1, 'item-1', ?2, 'image', 1)",
+            params!["asset-1", image_1.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO assets (id, item_id, path, type, created_at) VALUES (?1, 'item-1', ?2, 'image', 2)",
+            params!["asset-2", image_2.to_string_lossy().as_ref()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO extractions (id, asset_id, text_content, created_at) VALUES ('ext-1', 'asset-1', 'OCR página 1', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO extractions (id, asset_id, text_content, created_at) VALUES ('ext-2', 'asset-2', 'OCR página 2', 2)",
+            [],
+        )
+        .unwrap();
+
+        let request = prepare_remote_job_request(
+            &conn,
+            &LlmJob::CorrectOcrAsset {
+                asset_id: "asset-2".to_string(),
+            },
+            8192,
+        )
+        .unwrap();
+
+        assert!(request.prompt.contains("OCR página 2"));
+        assert!(!request.prompt.contains("OCR página 1"));
+        let image_data_url = request.image_data_url.expect("asset image is attached");
+        assert!(image_data_url.starts_with("data:image/png;base64,"));
+        assert!(image_data_url.contains(&BASE64_STANDARD.encode(b"second-image")));
+        assert!(!image_data_url.contains(&BASE64_STANDARD.encode(b"first-image")));
+    }
+
+    #[test]
+    fn correct_ocr_asset_fails_when_active_asset_image_is_missing() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        setup_llm_schema_fixture(&conn);
+        conn.execute_batch(
+            "CREATE TABLE extractions (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, text_content TEXT, created_at INTEGER NOT NULL);",
+        )
+        .unwrap();
+
+        conn.execute(
+            "INSERT INTO assets (id, item_id, path, type, created_at) VALUES ('asset-1', 'item-1', 'missing-page.png', 'image', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO extractions (id, asset_id, text_content, created_at) VALUES ('ext-1', 'asset-1', 'Texto OCR', 1)",
+            [],
+        )
+        .unwrap();
+
+        let error = prepare_remote_job_request(
+            &conn,
+            &LlmJob::CorrectOcrAsset {
+                asset_id: "asset-1".to_string(),
+            },
+            8192,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("La imagen asociada al asset activo no existe"));
     }
 
     #[test]

@@ -72,7 +72,18 @@ describe('item view LLM orchestration helpers', () => {
     ).toBe('asset-2')
   })
 
-  it('falls back to the first asset with OCR text for legacy item-level correction', () => {
+  it('selects the completed asset target even if the user changed assets before completion', () => {
+    expect(
+      selectOcrCorrectionAssetId({
+        completedTargetId: 'asset-2',
+        selectedAssetId: 'asset-3',
+        assets: [{ id: 'asset-1' }, { id: 'asset-2' }, { id: 'asset-3' }],
+        hasOcrText: () => false,
+      })
+    ).toBe('asset-2')
+  })
+
+  it('does not fall back to the first asset with OCR text for item-level correction', () => {
     expect(
       selectOcrCorrectionAssetId({
         completedTargetId: 'item-1',
@@ -80,7 +91,7 @@ describe('item view LLM orchestration helpers', () => {
         assets: [{ id: 'asset-1' }, { id: 'asset-2' }],
         hasOcrText: (assetId) => assetId === 'asset-2',
       })
-    ).toBe('asset-2')
+    ).toBeNull()
   })
 
   it('returns null when no OCR correction target can be resolved', () => {
