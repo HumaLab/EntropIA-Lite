@@ -680,22 +680,22 @@
           </div>
 
           <div class="settings__prompt-grid">
-            <div class="settings__field settings__field--stacked">
+            <div class="settings__field settings__field--stacked settings__prompt-card">
               <label class="settings__label" for="ocr-correction-prompt">OCR correction prompt</label>
               <textarea id="ocr-correction-prompt" class="settings__textarea" rows="12" bind:value={ocrCorrectionPrompt}></textarea>
               <Button variant="secondary" size="sm" onclick={() => resetPrompt('ocrCorrectionPrompt')}>Restaurar default</Button>
             </div>
-            <div class="settings__field settings__field--stacked">
+            <div class="settings__field settings__field--stacked settings__prompt-card">
               <label class="settings__label" for="summary-prompt">Summary prompt</label>
               <textarea id="summary-prompt" class="settings__textarea" rows="10" bind:value={summaryPrompt}></textarea>
               <Button variant="secondary" size="sm" onclick={() => resetPrompt('summaryPrompt')}>Restaurar default</Button>
             </div>
-            <div class="settings__field settings__field--stacked">
+            <div class="settings__field settings__field--stacked settings__prompt-card">
               <label class="settings__label" for="ner-prompt">NER prompt</label>
               <textarea id="ner-prompt" class="settings__textarea" rows="8" bind:value={nerPrompt}></textarea>
               <Button variant="secondary" size="sm" onclick={() => resetPrompt('nerPrompt')}>Restaurar default</Button>
             </div>
-            <div class="settings__field settings__field--stacked">
+            <div class="settings__field settings__field--stacked settings__prompt-card">
               <label class="settings__label" for="triplets-prompt">Triplets prompt</label>
               <textarea id="triplets-prompt" class="settings__textarea" rows="10" bind:value={tripletsPrompt}></textarea>
               <Button variant="secondary" size="sm" onclick={() => resetPrompt('tripletsPrompt')}>Restaurar default</Button>
@@ -849,8 +849,35 @@
   .settings__prompt-grid,
   .settings__params-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
     gap: var(--space-4);
+  }
+
+  .settings__prompt-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
+  .settings__params-grid {
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  }
+
+  .settings__prompt-card {
+    min-height: 430px;
+    margin-bottom: 0;
+    padding: var(--space-4);
+    border: 1px solid color-mix(in srgb, var(--color-hairline) 72%, transparent);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--color-surface-glass) 70%, transparent);
+  }
+
+  .settings__prompt-card .settings__textarea {
+    flex: 1;
+    min-height: 300px;
+  }
+
+  .settings__prompt-card :global(.btn) {
+    align-self: flex-start;
+    margin-top: auto;
   }
 
   .settings__textarea {
@@ -865,6 +892,12 @@
     font-size: var(--font-size-sm);
     line-height: 1.5;
     resize: vertical;
+  }
+
+  @media (max-width: 760px) {
+    .settings__prompt-grid {
+      grid-template-columns: 1fr;
+    }
   }
 
   .settings__label {
