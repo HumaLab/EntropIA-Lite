@@ -166,10 +166,17 @@
     const detail = (event as CustomEvent<DocumentExplorerAssetDetail>).detail
     if (detail.itemId !== itemId || !detail.assetId) return
 
-    const nextIndex = assets.findIndex((asset) => asset.id === detail.assetId)
-    if (nextIndex >= 0) {
+    selectAssetById(detail.assetId)
+  }
+
+  function selectAssetById(assetId: string | null | undefined) {
+    if (!assetId) return false
+    const nextIndex = assets.findIndex((asset) => asset.id === assetId)
+    if (nextIndex < 0) return false
+    if (selectedAssetIndex !== nextIndex) {
       selectedAssetIndex = nextIndex
     }
+    return true
   }
 
   function getSelectedAssetBreadcrumbLabel(asset: Asset) {
@@ -233,6 +240,7 @@
     return (key: I18nKey, params?: I18nParams) => t(key, params)
   })
   let selectedAssetIndex = $state(0)
+  let lastHandledNavigationAssetId: string | null = null
   let savingMetadata = $state(false)
   let annotations = $state<ViewerAnnotation[]>([])
   let selectedAnnotationId = $state<string | null>(null)
@@ -1651,6 +1659,7 @@
       loading = true
       error = null
       selectedAssetIndex = 0 // Reset page selection on item change
+      lastHandledNavigationAssetId = null
       const store = getStore()
       const [loadedItem, loadedAssets, loadedCollection] = await Promise.all([
         store.items.findById(itemId),
@@ -1660,6 +1669,9 @@
       item = loadedItem
       assets = loadedAssets
       collection = loadedCollection
+      if (navigation.current.name === 'item' && navigation.current.itemId === itemId) {
+        selectAssetById(navigation.current.assetId)
+      }
       // Asset-scoped data (notes, entities, triples, similar assets) will be loaded by the selectedAsset effect
       void loadTopics()
       void loadTopicSuggestions()
@@ -1771,6 +1783,20 @@
   })
 
   $effect(() => {
+    const current = $navigation.current
+    assets
+
+    if (current.name !== 'item' || current.itemId !== itemId) return
+    const navigationAssetId = current.assetId ?? null
+    if (!navigationAssetId || navigationAssetId === lastHandledNavigationAssetId) return
+    if (selectAssetById(navigationAssetId)) {
+      lastHandledNavigationAssetId = navigationAssetId
+    }
+  })
+
+  $effect(() => {
+    if (loading) return
+
     const asset = selectedAsset
     const assetLabel = asset ? getSelectedAssetBreadcrumbLabel(asset) : null
 

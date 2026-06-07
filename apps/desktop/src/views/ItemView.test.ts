@@ -1,6 +1,7 @@
 import { render, screen, fireEvent, waitFor, within } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ItemView from './ItemView.svelte'
+import { navigation } from '$lib/navigation'
 
 const {
   nlpEventHandlers,
@@ -423,6 +424,7 @@ vi.mock('@entropia/ui', async () => {
 })
 
 beforeEach(() => {
+  navigation.resetToPath([{ name: 'collections' }])
   Object.defineProperty(globalThis.navigator, 'clipboard', {
     configurable: true,
     value: { writeText: clipboardWriteTextMock },
@@ -438,6 +440,106 @@ beforeEach(() => {
     if (command === 'llm_is_available') return true
     if (command === 'db_select') return []
     return null
+  })
+})
+
+describe('ItemView multi-asset navigation', () => {
+  const multiPageAssets = [
+    {
+      id: 'asset-page-1',
+      itemId: 'item-1',
+      path: 'docs/757-70_page_1.png',
+      type: 'image' as const,
+      createdAt: 1,
+    },
+    {
+      id: 'asset-page-2',
+      itemId: 'item-1',
+      path: 'docs/757-70_page_2.png',
+      type: 'image' as const,
+      createdAt: 2,
+    },
+    {
+      id: 'asset-page-3',
+      itemId: 'item-1',
+      path: 'docs/757-70_page_3.png',
+      type: 'image' as const,
+      createdAt: 3,
+    },
+  ]
+
+  beforeEach(() => {
+    nlpEventHandlers.clear()
+    embedAssetMock.mockReset().mockResolvedValue(undefined)
+    similarAssetsMock.mockReset().mockResolvedValue([])
+    llmSummarizeAssetMock.mockReset().mockResolvedValue(undefined)
+    llmCorrectOcrAssetMock.mockReset().mockResolvedValue(undefined)
+    llmExtractTriplesAssetMock.mockReset().mockResolvedValue(undefined)
+    storeRef.current = createStore({ assetsRows: multiPageAssets })
+  })
+
+  it('opens the asset requested by navigation instead of pinning the first sibling', async () => {
+    navigation.resetToPath([
+      { name: 'collections' },
+      { name: 'collection', id: 'col-1', collectionName: 'Colección 1' },
+      {
+        name: 'item',
+        collectionId: 'col-1',
+        collectionName: 'Colección 1',
+        itemId: 'item-1',
+        itemTitle: 'Acta histórica',
+        assetId: 'asset-page-2',
+        assetLabel: '757-70_page_2.png',
+      },
+    ])
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    expect(await screen.findByText(/2\s*\/\s*3/)).toBeInTheDocument()
+    expect(screen.getAllByText(/757-70_page_2\.png/).length).toBeGreaterThan(0)
+  })
+
+  it('keeps navigation and explorer selection events synced when using the asset paginator', async () => {
+    const selectedEvents: Array<{ itemId: string; assetId: string | null }> = []
+    const handleSelected = (event: Event) => {
+      const detail = (event as CustomEvent<{ itemId: string; assetId: string | null }>).detail
+      selectedEvents.push({ itemId: detail.itemId, assetId: detail.assetId })
+    }
+    window.addEventListener('entropia:document-explorer-asset-selected', handleSelected)
+
+    try {
+      navigation.resetToPath([
+        { name: 'collections' },
+        { name: 'collection', id: 'col-1', collectionName: 'Colección 1' },
+        {
+          name: 'item',
+          collectionId: 'col-1',
+          collectionName: 'Colección 1',
+          itemId: 'item-1',
+          itemTitle: 'Acta histórica',
+        },
+      ])
+
+      render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+      expect(await screen.findByText(/1\s*\/\s*3/)).toBeInTheDocument()
+
+      await fireEvent.click(screen.getByRole('button', { name: /Página siguiente|Next page/i }))
+
+      expect(await screen.findByText(/2\s*\/\s*3/)).toBeInTheDocument()
+      expect(screen.getAllByText(/757-70_page_2\.png/).length).toBeGreaterThan(0)
+      await waitFor(() => {
+        expect(navigation.current).toMatchObject({
+          name: 'item',
+          itemId: 'item-1',
+          assetId: 'asset-page-2',
+          assetLabel: '757-70_page_2.png',
+        })
+        expect(selectedEvents.at(-1)).toEqual({ itemId: 'item-1', assetId: 'asset-page-2' })
+      })
+    } finally {
+      window.removeEventListener('entropia:document-explorer-asset-selected', handleSelected)
+    }
   })
 })
 

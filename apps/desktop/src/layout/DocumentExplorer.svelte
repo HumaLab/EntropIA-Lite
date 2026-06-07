@@ -468,6 +468,8 @@
 
     if (!nextActiveItemId) {
       activeAssetId = null
+    } else if (currentView.name === 'item' && currentView.assetId) {
+      activeAssetId = currentView.assetId
     }
 
     if (nextActiveCollectionId) {
