@@ -39,6 +39,14 @@
   let summaryPrompt = $state(DEFAULT_PROMPTS.summaryPrompt)
   let nerPrompt = $state(DEFAULT_PROMPTS.nerPrompt)
   let tripletsPrompt = $state(DEFAULT_PROMPTS.tripletsPrompt)
+  type PromptKey = keyof typeof DEFAULT_PROMPTS
+  type ValidationFeedback = { tone: 'success' | 'error'; text: string } | null
+  let promptValidationFeedback = $state<Record<PromptKey, ValidationFeedback>>({
+    ocrCorrectionPrompt: null,
+    summaryPrompt: null,
+    nerPrompt: null,
+    tripletsPrompt: null,
+  })
   type ModelParamFlow = 'ocrCorrection' | 'summary' | 'ner' | 'triplets'
   type EditableModelParams = {
     temperature: string
@@ -258,6 +266,62 @@
     return null
   }
 
+  function promptValue(key: PromptKey): string {
+    if (key === 'ocrCorrectionPrompt') return ocrCorrectionPrompt
+    if (key === 'summaryPrompt') return summaryPrompt
+    if (key === 'nerPrompt') return nerPrompt
+    return tripletsPrompt
+  }
+
+  function validatePromptContract(key: PromptKey, value = promptValue(key)): string | null {
+    const prompt = value.trim()
+    if (!prompt) return 'El prompt no puede estar vacío.'
+    if ((key === 'ocrCorrectionPrompt' || key === 'summaryPrompt') && !prompt.includes('{text}')) {
+      return 'Debe incluir el placeholder {text}.'
+    }
+    if (key === 'nerPrompt') {
+      if (!prompt.includes('{text}')) return 'NER debe incluir el placeholder {text}.'
+      const requiredLabels = ['PER', 'LOC', 'ORG', 'DATE', 'MISC']
+      const missing = requiredLabels.filter((label) => !prompt.includes(label))
+      if (missing.length > 0) return `NER debe conservar estas etiquetas: ${missing.join(', ')}.`
+    }
+    if (key === 'tripletsPrompt') {
+      if (!prompt.includes('{text}')) return 'Triplets debe incluir el placeholder {text}.'
+      const requiredKeys = ['subject', 'predicate', 'object']
+      const missing = requiredKeys.filter((label) => !prompt.includes(label))
+      if (missing.length > 0) return `Triplets debe conservar estas claves: ${missing.join(', ')}.`
+    }
+    return null
+  }
+
+  function validatePrompt(key: PromptKey): boolean {
+    const error = validatePromptContract(key)
+    promptValidationFeedback[key] = error
+      ? { tone: 'error', text: error }
+      : { tone: 'success', text: 'Prompt válido.' }
+    return !error
+  }
+
+  function validateAllPrompts(): string | null {
+    const keys: PromptKey[] = ['ocrCorrectionPrompt', 'summaryPrompt', 'nerPrompt', 'tripletsPrompt']
+    for (const key of keys) {
+      const error = validatePromptContract(key)
+      if (error) {
+        promptValidationFeedback[key] = { tone: 'error', text: error }
+        return `${promptLabel(key)}: ${error}`
+      }
+      promptValidationFeedback[key] = { tone: 'success', text: 'Prompt válido.' }
+    }
+    return null
+  }
+
+  function promptLabel(key: PromptKey): string {
+    if (key === 'ocrCorrectionPrompt') return 'OCR correction prompt'
+    if (key === 'summaryPrompt') return 'Summary prompt'
+    if (key === 'nerPrompt') return 'NER prompt'
+    return 'Triplets prompt'
+  }
+
   async function handleTestConnection() {
     if (!hasOpenRouterCredential) {
       testResult = { success: false, message: t('settings.enterApiKey') }
@@ -333,6 +397,13 @@
   async function handleSave() {
     saving = true
     saveFeedback = null
+    const promptError = validateAllPrompts()
+    if (promptError) {
+      saving = false
+      saveFeedback = { tone: 'error', text: promptError }
+      activeTab = 'prompts'
+      return
+    }
     modelParamsError = validateModelParams()
     if (modelParamsError) {
       saving = false
@@ -403,6 +474,7 @@
     if (key === 'summaryPrompt') summaryPrompt = value
     if (key === 'nerPrompt') nerPrompt = value
     if (key === 'tripletsPrompt') tripletsPrompt = value
+    promptValidationFeedback[key] = null
   }
 
   function resetModelParams(flow: ModelParamFlow) {
@@ -744,22 +816,46 @@
             <div class="settings__field settings__field--stacked settings__prompt-card">
               <label class="settings__label" for="ocr-correction-prompt">OCR correction prompt</label>
               <textarea id="ocr-correction-prompt" class="settings__textarea" rows="12" bind:value={ocrCorrectionPrompt}></textarea>
-              <Button variant="secondary" size="sm" onclick={() => resetPrompt('ocrCorrectionPrompt')}>Restaurar default</Button>
+              {#if promptValidationFeedback.ocrCorrectionPrompt}
+                <p class="settings__validation" class:settings__validation--error={promptValidationFeedback.ocrCorrectionPrompt.tone === 'error'}>{promptValidationFeedback.ocrCorrectionPrompt.text}</p>
+              {/if}
+              <div class="settings__button-row">
+                <Button variant="secondary" size="sm" onclick={() => validatePrompt('ocrCorrectionPrompt')}>Validar cambios</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetPrompt('ocrCorrectionPrompt')}>Restaurar default</Button>
+              </div>
             </div>
             <div class="settings__field settings__field--stacked settings__prompt-card">
               <label class="settings__label" for="summary-prompt">Summary prompt</label>
               <textarea id="summary-prompt" class="settings__textarea" rows="10" bind:value={summaryPrompt}></textarea>
-              <Button variant="secondary" size="sm" onclick={() => resetPrompt('summaryPrompt')}>Restaurar default</Button>
+              {#if promptValidationFeedback.summaryPrompt}
+                <p class="settings__validation" class:settings__validation--error={promptValidationFeedback.summaryPrompt.tone === 'error'}>{promptValidationFeedback.summaryPrompt.text}</p>
+              {/if}
+              <div class="settings__button-row">
+                <Button variant="secondary" size="sm" onclick={() => validatePrompt('summaryPrompt')}>Validar cambios</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetPrompt('summaryPrompt')}>Restaurar default</Button>
+              </div>
             </div>
             <div class="settings__field settings__field--stacked settings__prompt-card">
               <label class="settings__label" for="ner-prompt">NER prompt</label>
               <textarea id="ner-prompt" class="settings__textarea" rows="8" bind:value={nerPrompt}></textarea>
-              <Button variant="secondary" size="sm" onclick={() => resetPrompt('nerPrompt')}>Restaurar default</Button>
+              {#if promptValidationFeedback.nerPrompt}
+                <p class="settings__validation" class:settings__validation--error={promptValidationFeedback.nerPrompt.tone === 'error'}>{promptValidationFeedback.nerPrompt.text}</p>
+              {/if}
+              <div class="settings__button-row">
+                <Button variant="secondary" size="sm" onclick={() => validatePrompt('nerPrompt')}>Validar cambios</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetPrompt('nerPrompt')}>Restaurar default</Button>
+              </div>
             </div>
             <div class="settings__field settings__field--stacked settings__prompt-card">
               <label class="settings__label" for="triplets-prompt">Triplets prompt</label>
               <textarea id="triplets-prompt" class="settings__textarea" rows="10" bind:value={tripletsPrompt}></textarea>
-              <Button variant="secondary" size="sm" onclick={() => resetPrompt('tripletsPrompt')}>Restaurar default</Button>
+              {#if promptValidationFeedback.tripletsPrompt}
+                <p class="settings__validation" class:settings__validation--error={promptValidationFeedback.tripletsPrompt.tone === 'error'}>{promptValidationFeedback.tripletsPrompt.text}</p>
+              {/if}
+              <div class="settings__button-row">
+                <Button variant="secondary" size="sm" onclick={() => validatePrompt('tripletsPrompt')}>Validar cambios</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetPrompt('tripletsPrompt')}>Restaurar default</Button>
+              </div>
             </div>
           </div>
         </section>
@@ -948,9 +1044,27 @@
     min-height: 300px;
   }
 
-  .settings__prompt-card :global(.btn) {
-    align-self: flex-start;
+  .settings__button-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
     margin-top: auto;
+  }
+
+  .settings__prompt-card .settings__button-row :global(.btn) {
+    align-self: flex-start;
+    margin-top: 0;
+  }
+
+  .settings__validation {
+    margin: 0;
+    color: var(--color-success);
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+  }
+
+  .settings__validation--error {
+    color: var(--color-danger);
   }
 
   .settings__param-card {

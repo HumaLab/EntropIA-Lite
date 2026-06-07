@@ -103,6 +103,81 @@ describe('SettingsView', () => {
     expect(settingsSetMock).toHaveBeenCalledWith('llm_ocr_correction_max_tokens', '1234')
   })
 
+  it('blocks saving OCR and Summary prompts without the text placeholder', async () => {
+    render(SettingsView)
+
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Prompts' }))
+    await fireEvent.input(screen.getByLabelText('OCR correction prompt'), {
+      target: { value: 'Custom OCR without placeholder' },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByText('OCR correction prompt: Debe incluir el placeholder {text}.')).toBeInTheDocument()
+    expect(settingsSetMock).not.toHaveBeenCalled()
+
+    await fireEvent.input(screen.getByLabelText('OCR correction prompt'), {
+      target: { value: 'Custom OCR {text}' },
+    })
+    await fireEvent.input(screen.getByLabelText('Summary prompt'), {
+      target: { value: 'Summarize this document' },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByText('Summary prompt: Debe incluir el placeholder {text}.')).toBeInTheDocument()
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('blocks saving NER prompts missing required labels', async () => {
+    render(SettingsView)
+
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Prompts' }))
+    await fireEvent.input(screen.getByLabelText('NER prompt'), {
+      target: { value: 'Extract PER, LOC, ORG and DATE from {text}' },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByText('NER prompt: NER debe conservar estas etiquetas: MISC.')).toBeInTheDocument()
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('blocks saving Triplets prompts missing required JSON keys', async () => {
+    render(SettingsView)
+
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Prompts' }))
+    await fireEvent.input(screen.getByLabelText('Triplets prompt'), {
+      target: { value: 'Return subject and predicate for {text}' },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByText('Triplets prompt: Triplets debe conservar estas claves: object.')).toBeInTheDocument()
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('validates prompt edits without saving settings', async () => {
+    render(SettingsView)
+
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Prompts' }))
+    const ocrPrompt = screen.getByLabelText('OCR correction prompt')
+    const ocrPromptCard = ocrPrompt.closest('.settings__prompt-card')
+    expect(ocrPromptCard).not.toBeNull()
+
+    await fireEvent.input(ocrPrompt, { target: { value: 'Missing placeholder' } })
+    await fireEvent.click(within(ocrPromptCard as HTMLElement).getByRole('button', { name: 'Validar cambios' }))
+
+    expect(await within(ocrPromptCard as HTMLElement).findByText('Debe incluir el placeholder {text}.')).toBeInTheDocument()
+    expect(settingsSetMock).not.toHaveBeenCalled()
+
+    await fireEvent.input(ocrPrompt, { target: { value: 'Correct {text}' } })
+    await fireEvent.click(within(ocrPromptCard as HTMLElement).getByRole('button', { name: 'Validar cambios' }))
+
+    expect(await within(ocrPromptCard as HTMLElement).findByText('Prompt válido.')).toBeInTheDocument()
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
   it('groups OpenRouter generative and embedding models in one provider block', async () => {
     render(SettingsView)
 
