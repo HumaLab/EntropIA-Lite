@@ -168,11 +168,11 @@
   }
 
   function isCollectionExpanded(collectionId: string) {
-    return collectionId === activeCollectionId || openCollections.includes(collectionId)
+    return openCollections.includes(collectionId)
   }
 
   function isItemExpanded(itemId: string) {
-    return itemId === activeItemId || openItems.includes(itemId)
+    return openItems.includes(itemId)
   }
 
   function isCollectionLoading(collectionId: string) {
@@ -318,7 +318,7 @@
 
   async function toggleCollectionExpanded(collection: Collection) {
     const expanded = isCollectionExpanded(collection.id)
-    if (expanded && collection.id !== activeCollectionId) {
+    if (expanded) {
       const collectionItemIds = (itemsByCollection[collection.id] ?? []).map((item) => item.id)
       commitTreeState(
         openCollections.filter((entry) => entry !== collection.id),
@@ -333,9 +333,9 @@
 
   async function toggleItemExpanded(item: Item) {
     const expanded = isItemExpanded(item.id)
-    if (expanded && item.id !== activeItemId) {
+    if (expanded) {
       commitTreeState(
-        [...openCollections, item.collectionId],
+        openCollections,
         openItems.filter((entry) => entry !== item.id)
       )
       return
@@ -474,14 +474,8 @@
   $effect(() => {
     itemsByCollection
     openCollections
-    activeCollectionId
 
-    const expandedCollectionIds = uniqueIds([
-      ...openCollections,
-      ...(activeCollectionId ? [activeCollectionId] : []),
-    ])
-
-    for (const collectionId of expandedCollectionIds) {
+    for (const collectionId of openCollections) {
       for (const item of itemsByCollection[collectionId] ?? []) {
         void ensureItemAssetsLoaded(item.id)
       }

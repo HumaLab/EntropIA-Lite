@@ -164,10 +164,40 @@ vi.mock('$lib/db', () => ({
   getStore: () => state.store,
 }))
 
+function persistOpenTree(collections: string[] = [], items: string[] = []) {
+  localStorage.setItem(
+    'entropia-document-explorer-tree',
+    JSON.stringify({
+      collections,
+      items,
+    })
+  )
+}
+
 describe('DocumentExplorer', () => {
   beforeEach(() => {
     locale.set('es')
     localStorage.clear()
+    state.snapshot.history = [
+      { name: 'collections' as const },
+      { name: 'collection' as const, id: 'col-1', collectionName: 'Colección 1' },
+      {
+        name: 'item' as const,
+        collectionId: 'col-1',
+        collectionName: 'Colección 1',
+        itemId: 'item-1',
+        itemTitle: 'Acta 1',
+      },
+    ]
+    state.snapshot.current = {
+      name: 'item' as const,
+      collectionId: 'col-1',
+      collectionName: 'Colección 1',
+      itemId: 'item-1',
+      itemTitle: 'Acta 1',
+    }
+    state.snapshot.canGoBack = true
+    state.snapshot.breadcrumb = ['Colecciones', 'Colección 1', 'Acta 1']
     state.navigate.mockReset()
     state.replace.mockReset()
     state.resetToPath.mockReset()
@@ -197,6 +227,7 @@ describe('DocumentExplorer', () => {
   })
 
   it('renders active hierarchy and replaces sibling item navigation', async () => {
+    persistOpenTree(['col-1'], ['item-1'])
     const assetSelectRequests: CustomEvent[] = []
     const handleAssetSelectRequest = (event: Event) => {
       assetSelectRequests.push(event as CustomEvent)
@@ -278,10 +309,12 @@ describe('DocumentExplorer', () => {
   })
 
   it('keeps multi-asset document nodes expandable and nested', async () => {
+    persistOpenTree(['col-1'])
+
     render(DocumentExplorer)
 
     const expandItem = await screen.findByRole('button', {
-      name: 'Colapsar documento Acta 1',
+      name: 'Expandir documento Acta 1',
     })
 
     await fireEvent.click(expandItem)
@@ -295,6 +328,8 @@ describe('DocumentExplorer', () => {
   })
 
   it('flattens single-asset items without rendering a nested duplicate asset row', async () => {
+    persistOpenTree(['col-1'])
+
     render(DocumentExplorer)
 
     await screen.findByText('Acta 2')
@@ -319,20 +354,130 @@ describe('DocumentExplorer', () => {
     expect(screen.queryByRole('button', { name: 'Abrir explorador de documentos' })).not.toBeInTheDocument()
   })
 
-  it('persists expanded nodes and restores them while auto-expanding the active path', async () => {
-    localStorage.setItem(
-      'entropia-document-explorer-tree',
-      JSON.stringify({
-        collections: ['col-2'],
-        items: ['item-3'],
-      })
-    )
+  it('allows manually collapsing the active collection', async () => {
+    persistOpenTree(['col-1'], ['item-1'])
 
     render(DocumentExplorer)
 
     expect(await screen.findByRole('treeitem', { name: 'Acta 1' })).toBeInTheDocument()
-    expect(await screen.findByRole('treeitem', { name: 'acta-1.pdf' })).toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Colapsar colección Colección 1' }))
+
+    expect(screen.getByRole('treeitem', { name: 'Colección 1' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(screen.getByRole('treeitem', { name: 'Colección 1' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.queryByRole('treeitem', { name: 'Acta 1' })).not.toBeInTheDocument()
+  })
+
+  it('allows manually collapsing the active item while keeping the selected asset', async () => {
+    persistOpenTree(['col-1'], ['item-1'])
+
+    render(DocumentExplorer)
+
+    const assetSelectRequests: CustomEvent[] = []
+    const handleAssetSelectRequest = (event: Event) => {
+      assetSelectRequests.push(event as CustomEvent)
+    }
+
+    window.addEventListener(
+      'entropia:document-explorer-asset-select-request',
+      handleAssetSelectRequest
+    )
+
+    const assetButton = (await screen.findByText('acta-1.pdf')).closest('button')
+
+    if (!assetButton) {
+      throw new Error('Expected asset button to be rendered')
+    }
+
+    await fireEvent.click(assetButton)
+    await fireEvent.click(screen.getByRole('button', { name: 'Colapsar documento Acta 1' }))
+
+    expect(assetSelectRequests.at(-1)?.detail).toEqual({ itemId: 'item-1', assetId: 'asset-1' })
+    expect(screen.getByRole('treeitem', { name: 'Acta 1' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(screen.queryByRole('treeitem', { name: 'acta-1.pdf' })).not.toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Expandir documento Acta 1' }))
+
+    expect(await screen.findByRole('treeitem', { name: 'acta-1.pdf' })).toHaveAttribute(
+      'aria-current',
+      'true'
+    )
+
+    window.removeEventListener(
+      'entropia:document-explorer-asset-select-request',
+      handleAssetSelectRequest
+    )
+  })
+
+  it('does not auto-expand a closed parent when navigation selects an item', async () => {
+    render(DocumentExplorer)
+
+    expect(await screen.findByRole('treeitem', { name: 'Colección 1' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(screen.queryByRole('treeitem', { name: 'Acta 1' })).not.toBeInTheDocument()
+
+    state.snapshot.current = {
+      name: 'item' as const,
+      collectionId: 'col-1',
+      collectionName: 'Colección 1',
+      itemId: 'item-2',
+      itemTitle: 'Acta 2',
+    }
+    state.snapshot.breadcrumb = ['Colecciones', 'Colección 1', 'Acta 2']
+    state.emit()
+
+    await waitFor(() => {
+      expect(state.store.items.findByCollection).toHaveBeenCalledWith('col-1')
+    })
+    expect(screen.getByRole('treeitem', { name: 'Colección 1' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(screen.queryByRole('treeitem', { name: 'Acta 2' })).not.toBeInTheDocument()
+  })
+
+  it('does not auto-expand a closed item when an asset becomes selected', async () => {
+    persistOpenTree(['col-1'])
+
+    render(DocumentExplorer)
+
+    expect(await screen.findByRole('treeitem', { name: 'Acta 1' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+
+    window.dispatchEvent(
+      new CustomEvent('entropia:document-explorer-asset-selected', {
+        detail: { itemId: 'item-1', assetId: 'asset-1' },
+      })
+    )
+
+    expect(screen.getByRole('treeitem', { name: 'Acta 1' })).toHaveAttribute(
+      'aria-expanded',
+      'false'
+    )
+    expect(screen.queryByRole('treeitem', { name: 'acta-1.pdf' })).not.toBeInTheDocument()
+  })
+
+  it('persists expanded nodes and restores them without auto-expanding the active path', async () => {
+    persistOpenTree(['col-2'], ['item-3'])
+
+    render(DocumentExplorer)
+
     expect(await screen.findByRole('treeitem', { name: 'Acta 3' })).toBeInTheDocument()
+    expect(screen.queryByRole('treeitem', { name: 'Acta 1' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('treeitem', { name: 'acta-1.pdf' })).not.toBeInTheDocument()
 
     await waitFor(() => {
       expect(state.store.items.findByCollection).toHaveBeenCalledWith('col-2')
@@ -341,6 +486,8 @@ describe('DocumentExplorer', () => {
   })
 
   it('renders centralized svg icons for explorer controls and nodes', async () => {
+    persistOpenTree(['col-1'], ['item-1'])
+
     const { container } = render(DocumentExplorer)
 
     await screen.findByText('Colección 1')
@@ -365,6 +512,8 @@ describe('DocumentExplorer', () => {
   })
 
   it('renders centralized svg icons for flattened image assets', async () => {
+    persistOpenTree(['col-1'])
+
     render(DocumentExplorer)
 
     await screen.findByText('Acta 2')
@@ -380,6 +529,8 @@ describe('DocumentExplorer', () => {
   })
 
   it('refreshes cached collection items and counts when the collection changes', async () => {
+    persistOpenTree(['col-1'])
+
     render(DocumentExplorer)
 
     await screen.findByText('Acta 2')
