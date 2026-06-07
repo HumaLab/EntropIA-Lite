@@ -37,11 +37,21 @@ Si no hay entidades, devolvé []. No inventes entidades ni uses categorías fuer
     )
 }
 
+fn render_ner_prompt(template: Option<&str>, text: &str) -> String {
+    match template.map(str::trim).filter(|value| !value.is_empty()) {
+        Some(template) if template.contains("{text}") => template.replace("{text}", text),
+        Some(template) => format!("{template}\n\nTexto:\n{text}"),
+        None => build_ner_prompt(text),
+    }
+}
+
 pub async fn extract_entities_with_openrouter(
     api_key: String,
     model_name: String,
     text: &str,
     protected_entities: &[Entity],
+    prompt_template: Option<String>,
+    params: Option<crate::llm::openrouter::GenerationParams>,
 ) -> Result<Vec<Entity>, String> {
     let api_key = api_key.trim().to_string();
     if api_key.is_empty() {
@@ -52,8 +62,24 @@ pub async fn extract_entities_with_openrouter(
 
     let model_name = normalize_model_name(&model_name);
     let client = crate::llm::openrouter::OpenRouterClient::new(api_key, model_name.clone());
+    let prompt = render_ner_prompt(prompt_template.as_deref(), text);
+    let params = params
+        .unwrap_or_else(|| crate::llm::openrouter::GenerationParams::with_defaults(1024, 0.3));
+    eprintln!(
+        "[nlp/ner] Runtime OpenRouter NER prompt source={}, params: temperature={}, max_tokens={}",
+        if prompt_template
+            .as_deref()
+            .is_some_and(|value| !value.trim().is_empty())
+        {
+            "user override"
+        } else {
+            "default"
+        },
+        params.temperature,
+        params.max_tokens,
+    );
     let raw = client
-        .generate(&build_ner_prompt(text), 1024)
+        .generate_with_params(&prompt, &params)
         .await
         .map_err(|error| openrouter_ner_unavailable(&error))?;
 

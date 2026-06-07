@@ -690,6 +690,8 @@ async fn run_openrouter_ner_input(
         input.model_name,
         &input.text,
         &input.protected_entities,
+        input.prompt_template,
+        input.params,
     )
     .await
     .map_err(|error| format!("NER extraction failed: {error}"))
@@ -706,12 +708,14 @@ async fn run_configured_ner_input(
         return Ok(Vec::new());
     }
 
-    let (api_key, model_name) = fallback.openrouter?;
+    let (api_key, model_name, prompt_template, params) = fallback.openrouter?;
     run_openrouter_ner_input(ner::OpenRouterExtractionInput {
         text: input.text,
         protected_entities: input.protected_entities,
         api_key,
         model_name,
+        prompt_template,
+        params,
     })
     .await
 }
@@ -730,12 +734,27 @@ async fn run_configured_ner_batch(
 }
 
 struct NerFallbackConfig {
-    openrouter: Result<(String, String), String>,
+    openrouter: Result<
+        (
+            String,
+            String,
+            Option<String>,
+            Option<crate::llm::openrouter::GenerationParams>,
+        ),
+        String,
+    >,
 }
 
 fn ner_fallback_config(conn: &rusqlite::Connection) -> NerFallbackConfig {
     NerFallbackConfig {
-        openrouter: ner::openrouter_settings(conn),
+        openrouter: ner::openrouter_settings(conn).map(|(api_key, model_name)| {
+            (
+                api_key,
+                model_name,
+                crate::settings::get_setting(conn, "prompt_ner"),
+                ner::openrouter_generation_params(conn),
+            )
+        }),
     }
 }
 

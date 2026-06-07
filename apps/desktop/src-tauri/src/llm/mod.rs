@@ -19,12 +19,23 @@ use tokio::sync::mpsc;
 use crate::nlp::text_provider;
 use crate::settings;
 
-use self::openrouter::OpenRouterClient;
+use self::openrouter::{GenerationParams, OpenRouterClient};
 
 const LLM_CLOUD_PREFIX: &str = "[llm-cloud]";
 const LLM_TARGET_ASSET: &str = "asset";
 const LLM_TARGET_ITEM: &str = "item";
 const LLM_TARGET_COLLECTION: &str = "collection";
+const PROMPT_OCR_CORRECTION_KEY: &str = "prompt_ocr_correction";
+const PROMPT_SUMMARY_KEY: &str = "prompt_summary";
+const PROMPT_NER_KEY: &str = "prompt_ner";
+const PROMPT_TRIPLETS_KEY: &str = "prompt_triplets";
+const LLM_TEMPERATURE_KEY: &str = "llm_temperature";
+const LLM_MAX_TOKENS_KEY: &str = "llm_max_tokens";
+const LLM_TOP_P_KEY: &str = "llm_top_p";
+const LLM_TOP_K_KEY: &str = "llm_top_k";
+const LLM_PRESENCE_PENALTY_KEY: &str = "llm_presence_penalty";
+const LLM_FREQUENCY_PENALTY_KEY: &str = "llm_frequency_penalty";
+const LLM_STOP_SEQUENCES_KEY: &str = "llm_stop_sequences";
 
 /// Lite-compatible status for the legacy LLM model contract.
 #[derive(Clone, serde::Serialize)]
@@ -1226,25 +1237,25 @@ fn gather_collection_context(
 struct RemoteJobRequest {
     prompt: String,
     image_data_url: Option<String>,
-    max_tokens: i32,
+    params: GenerationParams,
     truncate_to_sentence_boundary: bool,
 }
 
 impl RemoteJobRequest {
-    fn text(prompt: String, max_tokens: i32, truncate_to_sentence_boundary: bool) -> Self {
+    fn text(prompt: String, params: GenerationParams, truncate_to_sentence_boundary: bool) -> Self {
         Self {
             prompt,
             image_data_url: None,
-            max_tokens,
+            params,
             truncate_to_sentence_boundary,
         }
     }
 
-    fn multimodal_ocr(prompt: String, image_data_url: String, max_tokens: i32) -> Self {
+    fn multimodal_ocr(prompt: String, image_data_url: String, params: GenerationParams) -> Self {
         Self {
             prompt,
             image_data_url: Some(image_data_url),
-            max_tokens,
+            params,
             truncate_to_sentence_boundary: false,
         }
     }
@@ -1257,10 +1268,14 @@ async fn generate_remote_job(
     match request.image_data_url.as_deref() {
         Some(image_data_url) => {
             client
-                .generate_with_image(&request.prompt, image_data_url, request.max_tokens)
+                .generate_with_image_params(&request.prompt, image_data_url, &request.params)
                 .await
         }
-        None => client.generate(&request.prompt, request.max_tokens).await,
+        None => {
+            client
+                .generate_with_params(&request.prompt, &request.params)
+                .await
+        }
     }
 }
 
@@ -1319,6 +1334,132 @@ fn image_mime_from_path(path: &str) -> Option<&'static str> {
     }
 }
 
+fn prompt_from_settings(
+    conn: &rusqlite::Connection,
+    key: &str,
+    default_prompt: String,
+    text: &str,
+    flow: &str,
+) -> String {
+    let override_template =
+        settings::get_setting(conn, key).filter(|value| !value.trim().is_empty());
+    let source = if override_template.is_some() {
+        "user override"
+    } else {
+        "default"
+    };
+    let template_chars = override_template
+        .as_deref()
+        .unwrap_or(default_prompt.as_str())
+        .chars()
+        .count();
+    eprintln!(
+        "{LLM_CLOUD_PREFIX} Runtime prompt for {flow}: source={source}, chars={}",
+        template_chars
+    );
+    match override_template {
+        Some(template) => prompt::render_user_prompt_template(&template, text),
+        None => default_prompt,
+    }
+}
+
+fn parse_setting_f32(
+    conn: &rusqlite::Connection,
+    key: &str,
+    default: f32,
+    min: f32,
+    max: f32,
+) -> (f32, &'static str) {
+    match settings::get_setting(conn, key)
+        .and_then(|value| value.trim().parse::<f32>().ok())
+        .filter(|value| value.is_finite() && *value >= min && *value <= max)
+    {
+        Some(value) => (value, "user override"),
+        None => (default, "default"),
+    }
+}
+
+fn parse_optional_setting_f32(
+    conn: &rusqlite::Connection,
+    key: &str,
+    min: f32,
+    max: f32,
+) -> (Option<f32>, &'static str) {
+    match settings::get_setting(conn, key) {
+        Some(raw) if !raw.trim().is_empty() => match raw.trim().parse::<f32>() {
+            Ok(value) if value.is_finite() && value >= min && value <= max => {
+                (Some(value), "user override")
+            }
+            _ => (None, "default"),
+        },
+        _ => (None, "default"),
+    }
+}
+
+fn parse_optional_setting_i32(
+    conn: &rusqlite::Connection,
+    key: &str,
+    min: i32,
+    max: i32,
+) -> (Option<i32>, &'static str) {
+    match settings::get_setting(conn, key) {
+        Some(raw) if !raw.trim().is_empty() => match raw.trim().parse::<i32>() {
+            Ok(value) if value >= min && value <= max => (Some(value), "user override"),
+            _ => (None, "default"),
+        },
+        _ => (None, "default"),
+    }
+}
+
+fn model_params_from_settings(
+    conn: &rusqlite::Connection,
+    default_max_tokens: i32,
+    flow: &str,
+) -> GenerationParams {
+    let (temperature, temperature_source) =
+        parse_setting_f32(conn, LLM_TEMPERATURE_KEY, 0.3, 0.0, 2.0);
+    let (max_tokens_override, max_tokens_source) =
+        parse_optional_setting_i32(conn, LLM_MAX_TOKENS_KEY, 1, 32_000);
+    let (top_p, top_p_source) = parse_optional_setting_f32(conn, LLM_TOP_P_KEY, 0.0, 1.0);
+    let (top_k, top_k_source) = parse_optional_setting_i32(conn, LLM_TOP_K_KEY, 1, 1000);
+    let (presence_penalty, presence_penalty_source) =
+        parse_optional_setting_f32(conn, LLM_PRESENCE_PENALTY_KEY, -2.0, 2.0);
+    let (frequency_penalty, frequency_penalty_source) =
+        parse_optional_setting_f32(conn, LLM_FREQUENCY_PENALTY_KEY, -2.0, 2.0);
+    let stop_sequences = settings::get_setting(conn, LLM_STOP_SEQUENCES_KEY)
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    let stop_source = if stop_sequences.is_empty() {
+        "default"
+    } else {
+        "user override"
+    };
+    let params = GenerationParams {
+        temperature,
+        max_tokens: max_tokens_override.unwrap_or(default_max_tokens),
+        top_p,
+        top_k,
+        presence_penalty,
+        frequency_penalty,
+        stop_sequences,
+    };
+    eprintln!(
+        "{LLM_CLOUD_PREFIX} Runtime model params for {flow}: temperature={} ({temperature_source}), max_tokens={} ({max_tokens_source}), top_p={:?} ({top_p_source}), top_k={:?} ({top_k_source}), presence_penalty={:?} ({presence_penalty_source}), frequency_penalty={:?} ({frequency_penalty_source}), stop_sequences={} ({stop_source})",
+        params.temperature,
+        params.max_tokens,
+        params.top_p,
+        params.top_k,
+        params.presence_penalty,
+        params.frequency_penalty,
+        params.stop_sequences.len(),
+    );
+    params
+}
+
 // ---------------------------------------------------------------------------
 // Remote job preparation (OpenRouter)
 // ---------------------------------------------------------------------------
@@ -1329,7 +1470,7 @@ fn prepare_remote_job_request(
     job: &LlmJob,
     n_ctx: u32,
 ) -> Result<RemoteJobRequest, String> {
-    let max_tokens = max_tokens_for(job);
+    let params = model_params_from_settings(conn, max_tokens_for(job), job.job_name());
 
     match job {
         LlmJob::CorrectOcr { item_id } => {
@@ -1337,10 +1478,16 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for OCR correction".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
-                prompt::raw_ocr_correction(&truncated),
-                max_tokens,
+                prompt_from_settings(
+                    conn,
+                    PROMPT_OCR_CORRECTION_KEY,
+                    prompt::raw_ocr_correction(&truncated),
+                    &truncated,
+                    "ocr_correction",
+                ),
+                params.clone(),
                 false,
             ))
         }
@@ -1350,10 +1497,16 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for entity extraction".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
-                prompt::raw_extract_entities(&truncated),
-                max_tokens,
+                prompt_from_settings(
+                    conn,
+                    PROMPT_NER_KEY,
+                    prompt::raw_extract_entities(&truncated),
+                    &truncated,
+                    "ner",
+                ),
+                params.clone(),
                 false,
             ))
         }
@@ -1366,10 +1519,10 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for entity consolidation".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
                 prompt::raw_consolidate_entities(&truncated, candidate_entities_json),
-                max_tokens,
+                params.clone(),
                 false,
             ))
         }
@@ -1379,10 +1532,16 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for triple extraction".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
-                prompt::raw_extract_triples(&truncated),
-                max_tokens,
+                prompt_from_settings(
+                    conn,
+                    PROMPT_TRIPLETS_KEY,
+                    prompt::raw_extract_triples(&truncated),
+                    &truncated,
+                    "triplets",
+                ),
+                params.clone(),
                 false,
             ))
         }
@@ -1392,10 +1551,16 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for summarization".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
-                prompt::raw_summarize(&truncated),
-                max_tokens,
+                prompt_from_settings(
+                    conn,
+                    PROMPT_SUMMARY_KEY,
+                    prompt::raw_summarize(&truncated),
+                    &truncated,
+                    "summary",
+                ),
+                params.clone(),
                 true,
             ))
         }
@@ -1408,10 +1573,10 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for classification".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
                 prompt::raw_classify(&truncated, categories),
-                max_tokens,
+                params.clone(),
                 false,
             ))
         }
@@ -1424,10 +1589,10 @@ fn prepare_remote_job_request(
             if context.is_empty() {
                 return Err("No relevant documents found for this question".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &context);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &context);
             Ok(RemoteJobRequest::text(
                 prompt::raw_question_answer(question, &truncated),
-                max_tokens,
+                params.clone(),
                 false,
             ))
         }
@@ -1438,11 +1603,17 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for OCR correction on this asset".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::multimodal_ocr(
-                prompt::raw_ocr_correction_with_image(&truncated),
+                prompt_from_settings(
+                    conn,
+                    PROMPT_OCR_CORRECTION_KEY,
+                    prompt::raw_ocr_correction_with_image(&truncated),
+                    &truncated,
+                    "ocr_correction",
+                ),
                 resolve_asset_source_image_data_url(conn, asset_id)?,
-                max_tokens,
+                params.clone(),
             ))
         }
 
@@ -1451,10 +1622,16 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for entity extraction on this asset".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
-                prompt::raw_extract_entities(&truncated),
-                max_tokens,
+                prompt_from_settings(
+                    conn,
+                    PROMPT_NER_KEY,
+                    prompt::raw_extract_entities(&truncated),
+                    &truncated,
+                    "ner",
+                ),
+                params.clone(),
                 false,
             ))
         }
@@ -1467,10 +1644,10 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for entity consolidation on this asset".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
                 prompt::raw_consolidate_entities(&truncated, candidate_entities_json),
-                max_tokens,
+                params.clone(),
                 false,
             ))
         }
@@ -1480,10 +1657,16 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for triple extraction on this asset".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
-                prompt::raw_extract_triples(&truncated),
-                max_tokens,
+                prompt_from_settings(
+                    conn,
+                    PROMPT_TRIPLETS_KEY,
+                    prompt::raw_extract_triples(&truncated),
+                    &truncated,
+                    "triplets",
+                ),
+                params.clone(),
                 false,
             ))
         }
@@ -1493,10 +1676,16 @@ fn prepare_remote_job_request(
             if text.is_empty() {
                 return Err("No text available for summarization on this asset".to_string());
             }
-            let truncated = truncate_text_for_context(n_ctx, max_tokens, &text);
+            let truncated = truncate_text_for_context(n_ctx, params.max_tokens, &text);
             Ok(RemoteJobRequest::text(
-                prompt::raw_summarize(&truncated),
-                max_tokens,
+                prompt_from_settings(
+                    conn,
+                    PROMPT_SUMMARY_KEY,
+                    prompt::raw_summarize(&truncated),
+                    &truncated,
+                    "summary",
+                ),
+                params.clone(),
                 true,
             ))
         }
@@ -1609,6 +1798,71 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("La imagen asociada al asset activo no existe"));
+    }
+
+    #[test]
+    fn summarize_asset_uses_custom_prompt_and_model_params_when_valid() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        setup_llm_schema_fixture(&conn);
+        conn.execute_batch(
+            "CREATE TABLE extractions (id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, text_content TEXT, created_at INTEGER NOT NULL);
+             CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO assets (id, item_id, path, type, created_at) VALUES ('asset-1', 'item-1', 'page.png', 'image', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO extractions (id, asset_id, text_content, created_at) VALUES ('ext-1', 'asset-1', 'Texto base', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('prompt_summary', 'CUSTOM SUMMARY: {text}')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('llm_max_tokens', '777')",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES ('llm_temperature', '0.7')",
+            [],
+        )
+        .unwrap();
+
+        let request = prepare_remote_job_request(
+            &conn,
+            &LlmJob::SummarizeAsset {
+                asset_id: "asset-1".to_string(),
+            },
+            8192,
+        )
+        .unwrap();
+
+        assert_eq!(request.prompt, "CUSTOM SUMMARY: Texto base");
+        assert_eq!(request.params.max_tokens, 777);
+        assert_eq!(request.params.temperature, 0.7);
+    }
+
+    #[test]
+    fn invalid_model_params_fall_back_to_safe_defaults() {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+             INSERT INTO app_settings (key, value) VALUES ('llm_temperature', 'nope');
+             INSERT INTO app_settings (key, value) VALUES ('llm_max_tokens', '-1');",
+        )
+        .unwrap();
+
+        let params = model_params_from_settings(&conn, 512, "summary");
+
+        assert_eq!(params.temperature, 0.3);
+        assert_eq!(params.max_tokens, 512);
     }
 
     #[test]

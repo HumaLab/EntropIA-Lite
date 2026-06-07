@@ -27,6 +27,8 @@ pub struct OpenRouterExtractionInput {
     pub protected_entities: Vec<Entity>,
     pub api_key: String,
     pub model_name: String,
+    pub prompt_template: Option<String>,
+    pub params: Option<crate::llm::openrouter::GenerationParams>,
 }
 
 pub fn prepare_ner_candidates_for_item(
@@ -85,6 +87,8 @@ pub fn prepare_openrouter_candidates_for_item(
         protected_entities,
         api_key,
         model_name,
+        prompt_template: crate::settings::get_setting(conn, "prompt_ner"),
+        params: openrouter_generation_params(conn),
     })
 }
 
@@ -103,6 +107,8 @@ pub fn prepare_openrouter_candidates_for_asset(
         protected_entities,
         api_key,
         model_name,
+        prompt_template: crate::settings::get_setting(conn, "prompt_ner"),
+        params: openrouter_generation_params(conn),
     })
 }
 
@@ -363,6 +369,48 @@ pub(crate) fn openrouter_settings(conn: &Connection) -> Result<(String, String),
             .unwrap_or_else(|| openrouter::DEFAULT_OPENROUTER_NER_MODEL.to_string());
 
     Ok((api_key, model_name))
+}
+
+pub(crate) fn openrouter_generation_params(
+    conn: &Connection,
+) -> Option<crate::llm::openrouter::GenerationParams> {
+    let temperature = crate::settings::get_setting(conn, "llm_temperature")
+        .and_then(|value| value.trim().parse::<f32>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0 && *value <= 2.0)
+        .unwrap_or(0.3);
+    let max_tokens = crate::settings::get_setting(conn, "llm_max_tokens")
+        .and_then(|value| value.trim().parse::<i32>().ok())
+        .filter(|value| *value >= 1 && *value <= 32_000)
+        .unwrap_or(1024);
+    let top_p = crate::settings::get_setting(conn, "llm_top_p")
+        .and_then(|value| value.trim().parse::<f32>().ok())
+        .filter(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0);
+    let top_k = crate::settings::get_setting(conn, "llm_top_k")
+        .and_then(|value| value.trim().parse::<i32>().ok())
+        .filter(|value| *value >= 1 && *value <= 1000);
+    let presence_penalty = crate::settings::get_setting(conn, "llm_presence_penalty")
+        .and_then(|value| value.trim().parse::<f32>().ok())
+        .filter(|value| value.is_finite() && *value >= -2.0 && *value <= 2.0);
+    let frequency_penalty = crate::settings::get_setting(conn, "llm_frequency_penalty")
+        .and_then(|value| value.trim().parse::<f32>().ok())
+        .filter(|value| value.is_finite() && *value >= -2.0 && *value <= 2.0);
+    let stop_sequences = crate::settings::get_setting(conn, "llm_stop_sequences")
+        .unwrap_or_default()
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .map(ToString::to_string)
+        .collect();
+
+    Some(crate::llm::openrouter::GenerationParams {
+        temperature,
+        max_tokens,
+        top_p,
+        top_k,
+        presence_penalty,
+        frequency_penalty,
+        stop_sequences,
+    })
 }
 
 #[allow(dead_code)] // Future: used by apply_llm_review (not yet wired)

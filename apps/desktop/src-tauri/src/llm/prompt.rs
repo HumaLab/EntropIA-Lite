@@ -49,6 +49,14 @@ OCR borrador:
     )
 }
 
+pub fn render_user_prompt_template(template: &str, text: &str) -> String {
+    if template.contains("{text}") {
+        template.replace("{text}", text)
+    } else {
+        format!("{}\n\nTexto:\n{}", template.trim(), text)
+    }
+}
+
 pub fn raw_extract_entities(text: &str) -> String {
     format!(
         r#"Extraé entidades nombradas de este texto de documento histórico. Devolvé un array JSON donde cada elemento tiene: "value" (el texto de la entidad), "type" (uno de: person, place, date, organization, institution, misc), "confidence" (0.0 a 1.0).

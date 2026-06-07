@@ -37,6 +37,16 @@ struct ChatCompletionRequest {
     messages: Vec<ChatMessage>,
     max_tokens: i32,
     temperature: f32,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_p: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    top_k: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    presence_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    frequency_penalty: Option<f32>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    stop: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -74,6 +84,31 @@ pub struct ModelInfo {
     pub context_length: u64,
 }
 
+#[derive(Clone, Debug)]
+pub struct GenerationParams {
+    pub temperature: f32,
+    pub max_tokens: i32,
+    pub top_p: Option<f32>,
+    pub top_k: Option<i32>,
+    pub presence_penalty: Option<f32>,
+    pub frequency_penalty: Option<f32>,
+    pub stop_sequences: Vec<String>,
+}
+
+impl GenerationParams {
+    pub fn with_defaults(max_tokens: i32, temperature: f32) -> Self {
+        Self {
+            temperature,
+            max_tokens,
+            top_p: None,
+            top_k: None,
+            presence_penalty: None,
+            frequency_penalty: None,
+            stop_sequences: Vec::new(),
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // OpenRouter client
 // ---------------------------------------------------------------------------
@@ -106,26 +141,56 @@ impl OpenRouterClient {
 
     /// Generate a completion from the prompt text.
     /// The prompt should be the raw instruction text (NOT wrapped in Gemma format).
+    #[allow(dead_code)]
     pub async fn generate(&self, prompt: &str, max_tokens: i32) -> Result<String, String> {
+        self.generate_with_params(prompt, &GenerationParams::with_defaults(max_tokens, 0.3))
+            .await
+    }
+
+    pub async fn generate_with_params(
+        &self,
+        prompt: &str,
+        params: &GenerationParams,
+    ) -> Result<String, String> {
         let request = ChatCompletionRequest {
             model: self.model.clone(),
             messages: vec![ChatMessage {
                 role: "user".to_string(),
                 content: ChatMessageContent::Text(prompt.to_string()),
             }],
-            max_tokens,
-            temperature: 0.3,
+            max_tokens: params.max_tokens,
+            temperature: params.temperature,
+            top_p: params.top_p,
+            top_k: params.top_k,
+            presence_penalty: params.presence_penalty,
+            frequency_penalty: params.frequency_penalty,
+            stop: params.stop_sequences.clone(),
         };
 
         self.send_chat_completion(request).await
     }
 
     /// Generate a completion from one user message containing text and one image.
+    #[allow(dead_code)]
     pub async fn generate_with_image(
         &self,
         prompt: &str,
         image_data_url: &str,
         max_tokens: i32,
+    ) -> Result<String, String> {
+        self.generate_with_image_params(
+            prompt,
+            image_data_url,
+            &GenerationParams::with_defaults(max_tokens, 0.2),
+        )
+        .await
+    }
+
+    pub async fn generate_with_image_params(
+        &self,
+        prompt: &str,
+        image_data_url: &str,
+        params: &GenerationParams,
     ) -> Result<String, String> {
         let request = ChatCompletionRequest {
             model: self.model.clone(),
@@ -142,8 +207,13 @@ impl OpenRouterClient {
                     },
                 ]),
             }],
-            max_tokens,
-            temperature: 0.2,
+            max_tokens: params.max_tokens,
+            temperature: params.temperature,
+            top_p: params.top_p,
+            top_k: params.top_k,
+            presence_penalty: params.presence_penalty,
+            frequency_penalty: params.frequency_penalty,
+            stop: params.stop_sequences.clone(),
         };
 
         self.send_chat_completion(request).await
