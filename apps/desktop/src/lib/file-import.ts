@@ -303,6 +303,17 @@ export async function generatePdfThumbnail(
   return convertFileSrc(nativePath)
 }
 
+export async function generateImageThumbnail(
+  assetPath: string,
+  assetId: string
+): Promise<string> {
+  const nativePath: string = await invoke('generate_image_thumbnail', {
+    assetPath,
+    assetId,
+  })
+  return convertFileSrc(nativePath)
+}
+
 export async function loadAudioPreviewBlob(assetPath: string): Promise<Blob> {
   try {
     const previewPath: string = await invoke('prepare_audio_preview', { assetPath })
@@ -322,6 +333,10 @@ export async function loadAudioPreviewBlob(assetPath: string): Promise<Blob> {
  */
 export async function deletePdfThumbnail(assetId: string): Promise<void> {
   await invoke('delete_pdf_thumbnail', { assetId })
+}
+
+export async function deleteImageThumbnail(assetId: string): Promise<void> {
+  await invoke('delete_image_thumbnail', { assetId })
 }
 
 // ---------------------------------------------------------------------------

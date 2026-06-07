@@ -12,7 +12,9 @@
   } from '$lib/file-import'
   import {
     getAssetUrl,
+    generateImageThumbnail,
     deleteAssetFile,
+    deleteImageThumbnail,
     deletePdfThumbnail,
   } from '$lib/file-import'
   import { appDataDir, join } from '@tauri-apps/api/path'
@@ -26,7 +28,7 @@
   import { onMount, onDestroy } from 'svelte'
   import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
   import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-  import type { Item, Asset } from '@entropia/store'
+  import type { Item, Asset, CollectionItemCardSummary } from '@entropia/store'
 
   let { collectionId }: { collectionId: string } = $props()
 
@@ -50,6 +52,15 @@
   const currentLocale = locale
   let itemsLoadRequestId = 0
   let itemAssetsLoadRequestId = 0
+  let imageThumbnailLoadRequestId = 0
+
+  type ItemAssetMeta = {
+    assetCount: number
+    thumbnailUrl: string | null
+    primaryAssetId: string | null
+    primaryAssetPath: string | null
+    primaryAssetType: string | null
+  }
 
   let visibleCountLabel = $derived.by(() => {
     $currentLocale
@@ -66,18 +77,7 @@
   })
 
   // Cache itemId → { assetCount, thumbnailUrl, primaryAssetId, primaryAssetPath, primaryAssetType }
-  let itemAssetMeta = $state<
-    Map<
-      string,
-      {
-        assetCount: number
-        thumbnailUrl: string | null
-        primaryAssetId: string | null
-        primaryAssetPath: string | null
-        primaryAssetType: string | null
-      }
-    >
-  >(new Map())
+  let itemAssetMeta = $state<Map<string, ItemAssetMeta>>(new Map())
 
   // Delete confirmation state
   let showDeleteConfirm = $state(false)
@@ -87,13 +87,7 @@
   let deleting = $state(false)
   let deleteError = $state<string | null>(null)
 
-  function getItemAssetMeta(itemId: string): {
-    assetCount: number
-    thumbnailUrl: string | null
-    primaryAssetId: string | null
-    primaryAssetPath: string | null
-    primaryAssetType: string | null
-  } {
+  function getItemAssetMeta(itemId: string): ItemAssetMeta {
     return (
       itemAssetMeta.get(itemId) ?? {
         assetCount: 0,
@@ -105,7 +99,59 @@
     )
   }
 
-  async function loadItemAssets(itemIds: string[]) {
+  function buildMetaFromSummary(summary: CollectionItemCardSummary): ItemAssetMeta {
+    return {
+      assetCount: summary.assetCount,
+      thumbnailUrl: null,
+      primaryAssetId: summary.primaryAssetId,
+      primaryAssetPath: summary.primaryAssetPath,
+      primaryAssetType: summary.primaryAssetType,
+    }
+  }
+
+  function applySummaries(summaries: CollectionItemCardSummary[]) {
+    items = summaries.map(
+      ({ assetCount, primaryAssetId, primaryAssetPath, primaryAssetType, ...item }) => item
+    )
+
+    const newMeta = new Map<string, ItemAssetMeta>()
+    for (const summary of summaries) {
+      newMeta.set(summary.id, buildMetaFromSummary(summary))
+    }
+    itemAssetMeta = newMeta
+  }
+
+  async function loadImageThumbnails(summaries: CollectionItemCardSummary[]) {
+    const requestId = ++imageThumbnailLoadRequestId
+    for (const summary of summaries) {
+      if (
+        summary.primaryAssetType !== 'image' ||
+        !summary.primaryAssetId ||
+        !summary.primaryAssetPath
+      ) {
+        continue
+      }
+
+      try {
+        const thumbnailUrl = await generateImageThumbnail(
+          summary.primaryAssetPath,
+          summary.primaryAssetId
+        )
+        if (requestId !== imageThumbnailLoadRequestId) return
+
+        const currentMeta = itemAssetMeta.get(summary.id)
+        if (!currentMeta || currentMeta.primaryAssetPath !== summary.primaryAssetPath) continue
+
+        const newMeta = new Map(itemAssetMeta)
+        newMeta.set(summary.id, { ...currentMeta, thumbnailUrl })
+        itemAssetMeta = newMeta
+      } catch (e) {
+        console.warn('[CollectionView] Failed to generate image thumbnail for item', summary.id, e)
+      }
+    }
+  }
+
+  async function refreshItemAssetMeta(itemIds: string[]) {
     const requestId = ++itemAssetsLoadRequestId
     if (itemIds.length === 0) return
     const store = getStore()
@@ -122,7 +168,7 @@
         let primaryAssetType: string | null = null
 
         if (imageAsset) {
-          thumbnailUrl = getAssetUrl(imageAsset.path)
+          thumbnailUrl = await generateImageThumbnail(imageAsset.path, imageAsset.id)
           primaryAssetType = imageAsset.type
         } else if (pdfAsset) {
           thumbnailUrl = null
@@ -160,13 +206,22 @@
       loading = true
       error = null
       const store = getStore()
-      const loadedItems = searchQuery
-        ? await store.items.searchByText(collectionId, searchQuery)
-        : await store.items.findByCollection(collectionId)
+      const loadedSummaries = store.items.findCardSummariesByCollection
+        ? await store.items.findCardSummariesByCollection(collectionId, searchQuery)
+        : null
+      const loadedItems = loadedSummaries
+        ? []
+        : searchQuery
+          ? await store.items.searchByText(collectionId, searchQuery)
+          : await store.items.findByCollection(collectionId)
       if (requestId !== itemsLoadRequestId) return
-      items = loadedItems
-      // Load asset metadata (count + thumbnail) for each item
-      await loadItemAssets(items.map((i) => i.id))
+      if (loadedSummaries) {
+        applySummaries(loadedSummaries)
+        void loadImageThumbnails(loadedSummaries)
+      } else {
+        items = loadedItems
+        await refreshItemAssetMeta(items.map((i) => i.id))
+      }
     } catch (e) {
       if (requestId !== itemsLoadRequestId) return
       error = e instanceof Error ? e.message : t('collection.error.load')
@@ -538,6 +593,14 @@
       }
     }
 
+    if (meta.primaryAssetType === 'image' && pendingDeleteAssetId) {
+      try {
+        await deleteImageThumbnail(pendingDeleteAssetId)
+      } catch (e) {
+        console.warn('[CollectionView] Failed to delete image thumbnail:', e)
+      }
+    }
+
     if (dbCleanupFailed) {
       await loadItems()
       notifyExplorerCollectionChanged(pendingDeleteItemId)
@@ -552,7 +615,7 @@
       newMeta.delete(pendingDeleteItemId)
       itemAssetMeta = newMeta
     } else {
-      await loadItemAssets([pendingDeleteItemId])
+      await refreshItemAssetMeta([pendingDeleteItemId])
     }
 
     notifyExplorerCollectionChanged(pendingDeleteItemId)
@@ -602,7 +665,7 @@
       // Invalidate the cached metadata for this item so the thumbnail
       // is regenerated with the new path (which includes a cache-busting
       // version number since edits create new files).
-      void loadItemAssets([updatedItemId])
+      void refreshItemAssetMeta([updatedItemId])
     })
       .then((unlisten) => {
         unlistenAssetUpdate = unlisten

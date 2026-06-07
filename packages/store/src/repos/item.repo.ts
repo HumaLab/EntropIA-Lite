@@ -6,6 +6,26 @@ import { FtsRepo, type FtsResult } from './fts.repo'
 export type Item = typeof items.$inferSelect
 export type NewItem = typeof items.$inferInsert
 
+export type CollectionItemCardSummary = Item & {
+  assetCount: number
+  primaryAssetId: string | null
+  primaryAssetPath: string | null
+  primaryAssetType: string | null
+}
+
+type CollectionItemCardSummaryRow = {
+  id: string
+  title: string
+  collection_id: string
+  metadata: string | null
+  created_at: number
+  updated_at: number
+  asset_count: number | null
+  primary_asset_id: string | null
+  primary_asset_path: string | null
+  primary_asset_type: string | null
+}
+
 export class ItemRepo {
   private ftsRepo: FtsRepo | null
   private rawClient?: DbClient
@@ -65,6 +85,85 @@ export class ItemRepo {
       .from(items)
       .where(eq(items.collectionId, collectionId))
       .orderBy(desc(items.updatedAt))
+  }
+
+  async findCardSummariesByCollection(
+    collectionId: string,
+    query = ''
+  ): Promise<CollectionItemCardSummary[]> {
+    if (!this.rawClient) {
+      const baseItems = query.trim()
+        ? await this.searchByText(collectionId, query)
+        : await this.findByCollection(collectionId)
+
+      return baseItems.map((item) => ({
+        ...item,
+        assetCount: 0,
+        primaryAssetId: null,
+        primaryAssetPath: null,
+        primaryAssetType: null,
+      }))
+    }
+
+    const trimmedQuery = query.trim()
+    const matchedIds = trimmedQuery
+      ? (await this.searchByText(collectionId, trimmedQuery)).map((item) => item.id)
+      : []
+    if (trimmedQuery && matchedIds.length === 0) return []
+
+    const params: unknown[] = trimmedQuery ? matchedIds : [collectionId]
+    const filterSql = trimmedQuery
+      ? `i.id IN (${matchedIds.map(() => '?').join(', ')})`
+      : 'i.collection_id = ?'
+
+    const rows = await this.rawClient.select<CollectionItemCardSummaryRow>(
+      `
+        SELECT
+          i.id,
+          i.title,
+          i.collection_id,
+          i.metadata,
+          i.created_at,
+          i.updated_at,
+          COUNT(a.id) AS asset_count,
+          pa.id AS primary_asset_id,
+          pa.path AS primary_asset_path,
+          pa.type AS primary_asset_type
+        FROM items i
+        LEFT JOIN assets a ON a.item_id = i.id
+        LEFT JOIN assets pa ON pa.id = (
+          SELECT p.id
+          FROM assets p
+          WHERE p.item_id = i.id
+          ORDER BY
+            CASE p.type
+              WHEN 'image' THEN 0
+              WHEN 'pdf' THEN 1
+              ELSE 2
+            END,
+            p.sort_index ASC,
+            p.created_at ASC
+          LIMIT 1
+        )
+        WHERE ${filterSql}
+        GROUP BY i.id
+        ORDER BY i.updated_at DESC
+      `,
+      params
+    )
+
+    return rows.map((row) => ({
+      id: row.id,
+      title: row.title,
+      collectionId: row.collection_id,
+      metadata: row.metadata,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      assetCount: Number(row.asset_count ?? 0),
+      primaryAssetId: row.primary_asset_id,
+      primaryAssetPath: row.primary_asset_path,
+      primaryAssetType: row.primary_asset_type,
+    }))
   }
 
   async findById(id: string): Promise<Item | null> {

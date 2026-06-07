@@ -33,6 +33,7 @@ const { storeRef, navigationRef, fileImportRef, dragDropRef } = vi.hoisted(() =>
     importSingleFile: vi.fn(),
     isScannedPdf: vi.fn(),
     renderPdfPages: vi.fn(),
+    generateImageThumbnail: vi.fn(),
   },
   dragDropRef: {
     onDragDropEvent: vi.fn(),
@@ -108,7 +109,9 @@ vi.mock('$lib/file-import', () => ({
     .fn()
     .mockResolvedValue({ imported: [], rejected: [], skippedDuplicatePaths: 0 }),
   getAssetUrl: vi.fn().mockImplementation((p: string) => `asset://localhost${p}`),
+  generateImageThumbnail: fileImportRef.generateImageThumbnail,
   deleteAssetFile: vi.fn().mockResolvedValue(undefined),
+  deleteImageThumbnail: vi.fn().mockResolvedValue(undefined),
   generatePdfThumbnail: vi.fn().mockResolvedValue('asset://localhost/thumbnails/asset-1.png'),
   deletePdfThumbnail: vi.fn().mockResolvedValue(undefined),
 }))
@@ -129,9 +132,11 @@ beforeEach(() => {
   fileImportRef.importSingleFile.mockReset()
   fileImportRef.isScannedPdf.mockReset()
   fileImportRef.renderPdfPages.mockReset()
+  fileImportRef.generateImageThumbnail.mockReset()
   fileImportRef.pickFiles.mockResolvedValue([])
   fileImportRef.classifyFiles.mockReturnValue({ classified: [], rejected: [] })
   fileImportRef.isScannedPdf.mockResolvedValue(false)
+  fileImportRef.generateImageThumbnail.mockResolvedValue('asset://localhost/thumbs/image-asset-1.png')
   dragDropRef.handler = undefined
   dragDropRef.onDragDropEvent.mockReset()
   dragDropRef.onDragDropEvent.mockImplementation((handler) => {
@@ -210,6 +215,61 @@ describe('CollectionView consumer compatibility', () => {
         'Todavía no hay documentos en esta colección. Importá archivos para empezar a trabajar.'
       )
     ).toBeInTheDocument()
+  })
+
+  it('uses card summaries without per-item asset lookups and renders cached image thumbnails', async () => {
+    const { generateImageThumbnail } = await import('$lib/file-import')
+    const originalAssetUrl = 'asset://localhost/app-data/assets/col-1/item-1/original.jpg'
+    const thumbnailUrl = 'asset://localhost/app-data/thumbnails/image-asset-1.png'
+    fileImportRef.generateImageThumbnail.mockResolvedValueOnce(thumbnailUrl)
+    storeRef.current = {
+      items: {
+        findCardSummariesByCollection: vi.fn().mockResolvedValue([
+          {
+            id: 'item-1',
+            title: 'Imagen grande',
+            createdAt: 1,
+            updatedAt: 2,
+            collectionId: 'col-1',
+            metadata: null,
+            assetCount: 1,
+            primaryAssetId: 'asset-1',
+            primaryAssetPath: '/app-data/assets/col-1/item-1/original.jpg',
+            primaryAssetType: 'image',
+          },
+        ]),
+        findByCollection: vi.fn(),
+        searchByText: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+        deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+      assets: {
+        create: vi.fn(),
+        findByItem: vi.fn(),
+        findById: vi.fn(),
+        deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+    }
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    expect(await screen.findByText('Imagen grande')).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(generateImageThumbnail).toHaveBeenCalledWith(
+        '/app-data/assets/col-1/item-1/original.jpg',
+        'asset-1'
+      )
+      expect(storeRef.current.items.findCardSummariesByCollection).toHaveBeenCalledWith('col-1', '')
+      expect(storeRef.current.items.findByCollection).not.toHaveBeenCalled()
+      expect(storeRef.current.assets.findByItem).not.toHaveBeenCalled()
+    })
+
+    const image = await screen.findByRole('img', { name: 'Imagen grande' })
+    expect(image).toHaveAttribute('src', thumbnailUrl)
+    expect(image).not.toHaveAttribute('src', originalAssetUrl)
   })
 
   it('updates translated collection copy when locale changes', async () => {
