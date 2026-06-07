@@ -172,6 +172,10 @@
     }
   }
 
+  function getSelectedAssetBreadcrumbLabel(asset: Asset) {
+    return getAssetPathLabel(asset.path)
+  }
+
   function onResizeHandlePointerDown(e: PointerEvent) {
     e.preventDefault()
     isDragging = true
@@ -1735,11 +1739,27 @@
   })
 
   $effect(() => {
+    const asset = selectedAsset
+    const assetLabel = asset ? getSelectedAssetBreadcrumbLabel(asset) : null
+
+    if (
+      navigation.current.name === 'item' &&
+      navigation.current.itemId === itemId &&
+      (navigation.current.assetId !== (asset?.id ?? null) || navigation.current.assetLabel !== assetLabel)
+    ) {
+      navigation.replace({
+        ...navigation.current,
+        assetId: asset?.id ?? null,
+        assetLabel,
+      })
+    }
+
     window.dispatchEvent(
       new CustomEvent<DocumentExplorerAssetDetail>(DOCUMENT_EXPLORER_ASSET_SELECTED_EVENT, {
         detail: {
           itemId,
-          assetId: selectedAsset?.id ?? null,
+          assetId: asset?.id ?? null,
+          assetLabel,
         },
       })
     )

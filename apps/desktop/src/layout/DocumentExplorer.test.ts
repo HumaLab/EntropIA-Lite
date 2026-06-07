@@ -174,6 +174,13 @@ function persistOpenTree(collections: string[] = [], items: string[] = []) {
   )
 }
 
+function setCurrentNavigationView(current: (typeof state.snapshot.history)[number]) {
+  state.snapshot.current = current as typeof state.snapshot.current
+  state.snapshot.history = [{ name: 'collections' as const }, current]
+  state.snapshot.canGoBack = true
+  state.emit()
+}
+
 describe('DocumentExplorer', () => {
   beforeEach(() => {
     locale.set('es')
@@ -281,6 +288,92 @@ describe('DocumentExplorer', () => {
     expect(state.navigate).not.toHaveBeenCalled()
   })
 
+  it('does not append the same folder when repeating file and folder clicks', async () => {
+    persistOpenTree(['col-1'])
+
+    render(DocumentExplorer)
+
+    const collectionButton = (await screen.findByText('Colección 1')).closest('button')
+
+    if (!collectionButton) {
+      throw new Error('Expected collection button to be rendered')
+    }
+
+    await screen.findByText('Acta 2')
+    await waitFor(() => {
+      expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-2')
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Acta 2' }))
+
+    expect(state.replace).toHaveBeenLastCalledWith({
+      name: 'item',
+      collectionId: 'col-1',
+      collectionName: 'Colección 1',
+      itemId: 'item-2',
+      itemTitle: 'Acta 2',
+    })
+
+    setCurrentNavigationView({
+      name: 'item',
+      collectionId: 'col-1',
+      collectionName: 'Colección 1',
+      itemId: 'item-2',
+      itemTitle: 'Acta 2',
+    })
+
+    state.navigate.mockClear()
+    state.replace.mockClear()
+    state.resetToPath.mockClear()
+
+    await fireEvent.click(collectionButton)
+
+    expect(state.replace).toHaveBeenLastCalledWith({
+      name: 'collection',
+      id: 'col-1',
+      collectionName: 'Colección 1',
+    })
+    expect(state.navigate).not.toHaveBeenCalled()
+    expect(state.resetToPath).not.toHaveBeenCalled()
+
+    setCurrentNavigationView({ name: 'collection', id: 'col-1', collectionName: 'Colección 1' })
+
+    state.navigate.mockClear()
+    state.replace.mockClear()
+    state.resetToPath.mockClear()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Acta 2' }))
+    expect(state.navigate).toHaveBeenLastCalledWith({
+      name: 'item',
+      collectionId: 'col-1',
+      collectionName: 'Colección 1',
+      itemId: 'item-2',
+      itemTitle: 'Acta 2',
+    })
+
+    setCurrentNavigationView({
+      name: 'item',
+      collectionId: 'col-1',
+      collectionName: 'Colección 1',
+      itemId: 'item-2',
+      itemTitle: 'Acta 2',
+    })
+
+    state.navigate.mockClear()
+    state.replace.mockClear()
+    state.resetToPath.mockClear()
+
+    await fireEvent.click(collectionButton)
+
+    expect(state.replace).toHaveBeenLastCalledWith({
+      name: 'collection',
+      id: 'col-1',
+      collectionName: 'Colección 1',
+    })
+    expect(state.navigate).not.toHaveBeenCalled()
+    expect(state.resetToPath).not.toHaveBeenCalled()
+  })
+
   it('rebuilds canonical path when clicking an item from another collection', async () => {
     render(DocumentExplorer)
 
@@ -325,6 +418,41 @@ describe('DocumentExplorer', () => {
     expect(screen.getByRole('treeitem', { name: 'Acta 1' })).toHaveAttribute('aria-expanded', 'true')
     expect(await screen.findByRole('treeitem', { name: 'acta-1.pdf' })).toBeInTheDocument()
     expect(await screen.findByRole('treeitem', { name: 'acta-1-audio.mp3' })).toBeInTheDocument()
+  })
+
+  it('replaces current item with selected multi-asset breadcrumb context without repeating selection', async () => {
+    persistOpenTree(['col-1'], ['item-1'])
+
+    render(DocumentExplorer)
+
+    const audioAssetButton = (await screen.findByText('acta-1-audio.mp3')).closest('button')
+
+    if (!audioAssetButton) {
+      throw new Error('Expected audio asset button to be rendered')
+    }
+
+    await fireEvent.click(audioAssetButton)
+
+    const selectedAssetView = {
+      name: 'item' as const,
+      collectionId: 'col-1',
+      collectionName: 'Colección 1',
+      itemId: 'item-1',
+      itemTitle: 'Acta 1',
+      assetId: 'asset-2',
+      assetLabel: 'acta-1-audio.mp3',
+    }
+
+    expect(state.replace).toHaveBeenLastCalledWith(selectedAssetView)
+
+    state.snapshot.current = selectedAssetView as typeof state.snapshot.current
+    state.snapshot.breadcrumb = ['Colecciones', 'Colección 1', 'Acta 1', 'acta-1-audio.mp3']
+    state.emit()
+    state.replace.mockClear()
+
+    await fireEvent.click(audioAssetButton)
+
+    expect(state.replace).not.toHaveBeenCalled()
   })
 
   it('flattens single-asset items without rendering a nested duplicate asset row', async () => {

@@ -7,6 +7,7 @@ export const DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT =
 export interface DocumentExplorerAssetDetail {
   itemId: string
   assetId: string | null
+  assetLabel?: string | null
 }
 
 export interface DocumentExplorerCollectionChangedDetail {

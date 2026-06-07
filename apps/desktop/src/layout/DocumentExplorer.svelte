@@ -380,7 +380,7 @@
     })
   }
 
-  function handleItemClick(item: Item) {
+  function handleItemClick(item: Item, asset?: { id: string; label: string }) {
     const current = $navigation.current
     const collection = collections.find((entry) => entry.id === item.collectionId)
     const collectionName = collection?.name ?? ''
@@ -390,9 +390,14 @@
       collectionName,
       itemId: item.id,
       itemTitle: item.title,
+      ...(asset ? { assetId: asset.id, assetLabel: asset.label } : {}),
     }
 
-    if (current.name === 'item' && current.itemId === item.id) return
+    if (current.name === 'item' && current.itemId === item.id) {
+      if (current.assetId === nextView.assetId && current.assetLabel === nextView.assetLabel) return
+      navigation.replace(nextView)
+      return
+    }
     if (current.name === 'item' && current.collectionId === item.collectionId) {
       navigation.replace(nextView)
       return
@@ -417,7 +422,16 @@
     navigation.navigate(nextView)
   }
 
-  function handleAssetClick(asset: Asset) {
+  function handleAssetClick(asset: Asset, index = 0) {
+    const item = Object.values(itemsByCollection)
+      .flat()
+      .find((entry) => entry.id === asset.itemId)
+    const assetLabel = getAssetLabel(asset, index)
+
+    if (item) {
+      handleItemClick(item, { id: asset.id, label: assetLabel })
+    }
+
     activeAssetId = asset.id
     window.dispatchEvent(
       new CustomEvent<DocumentExplorerAssetDetail>(DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT, {
@@ -431,7 +445,15 @@
 
   function handleSingleAssetItemClick(item: Item, asset: Asset) {
     handleItemClick(item)
-    handleAssetClick(asset)
+    activeAssetId = asset.id
+    window.dispatchEvent(
+      new CustomEvent<DocumentExplorerAssetDetail>(DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT, {
+        detail: {
+          itemId: asset.itemId,
+          assetId: asset.id,
+        },
+      })
+    )
   }
 
   const activeCollectionId = $derived(getActiveCollectionId($navigation.current))
@@ -714,7 +736,7 @@
                                           type="button"
                                           class="explorer__node explorer__node--asset"
                                           class:is-active={asset.id === activeAssetId}
-                                          onclick={() => handleAssetClick(asset)}
+                                          onclick={() => handleAssetClick(asset, index)}
                                         >
                                           <span
                                             class="explorer__node-icon explorer__node-icon--asset"
