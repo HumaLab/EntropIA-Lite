@@ -495,17 +495,6 @@
     }
   })
 
-  $effect(() => {
-    itemsByCollection
-    openCollections
-
-    for (const collectionId of openCollections) {
-      for (const item of itemsByCollection[collectionId] ?? []) {
-        void ensureItemAssetsLoaded(item.id)
-      }
-    }
-  })
-
   onMount(() => {
     explorerWidth = readPersistedWidth()
     const persistedTree = readPersistedTreeState()

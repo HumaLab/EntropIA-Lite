@@ -231,20 +231,11 @@ describe('DocumentExplorer', () => {
     })
 
     expect(await screen.findByRole('treeitem', { name: 'Acta 3' })).toBeInTheDocument()
+    expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-3')
   })
 
   it('renders active hierarchy and replaces sibling item navigation', async () => {
     persistOpenTree(['col-1'], ['item-1'])
-    const assetSelectRequests: CustomEvent[] = []
-    const handleAssetSelectRequest = (event: Event) => {
-      assetSelectRequests.push(event as CustomEvent)
-    }
-
-    window.addEventListener(
-      'entropia:document-explorer-asset-select-request',
-      handleAssetSelectRequest
-    )
-
     render(DocumentExplorer)
 
     await screen.findByText('Colección 1')
@@ -260,13 +251,7 @@ describe('DocumentExplorer', () => {
       itemId: 'item-2',
       itemTitle: 'Acta 2',
     })
-    expect(assetSelectRequests.at(-1)?.detail).toEqual({ itemId: 'item-2', assetId: 'asset-3' })
     expect(state.resetToPath).not.toHaveBeenCalled()
-
-    window.removeEventListener(
-      'entropia:document-explorer-asset-select-request',
-      handleAssetSelectRequest
-    )
   })
 
   it('rebuilds canonical path when clicking a collection from another collection', async () => {
@@ -300,9 +285,7 @@ describe('DocumentExplorer', () => {
     }
 
     await screen.findByText('Acta 2')
-    await waitFor(() => {
-      expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-2')
-    })
+    expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-2')
 
     await fireEvent.click(screen.getByRole('button', { name: 'Acta 2' }))
 
@@ -383,7 +366,12 @@ describe('DocumentExplorer', () => {
       })
     )
 
-    const targetItem = await screen.findByRole('button', { name: /Acta 3/ })
+    const targetItem = (await screen.findByText('Acta 3')).closest('button')
+
+    if (!targetItem) {
+      throw new Error('Expected item button to be rendered')
+    }
+
     await fireEvent.click(targetItem)
 
     expect(state.resetToPath).toHaveBeenCalledWith([
@@ -461,6 +449,9 @@ describe('DocumentExplorer', () => {
     render(DocumentExplorer)
 
     await screen.findByText('Acta 2')
+    expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-2')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Expandir documento Acta 2' }))
 
     await waitFor(() => {
       expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-2')
@@ -645,6 +636,10 @@ describe('DocumentExplorer', () => {
     render(DocumentExplorer)
 
     await screen.findByText('Acta 2')
+    await fireEvent.click(screen.getByRole('button', { name: 'Expandir documento Acta 2' }))
+    await waitFor(() => {
+      expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-2')
+    })
 
     const imageAssetButton = (await screen.findByText('Acta 2')).closest('button')
 

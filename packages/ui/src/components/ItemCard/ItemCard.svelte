@@ -31,7 +31,13 @@
           </span>
         </div>
       {:else if thumbnailPath}
-        <img src={thumbnailPath} alt={title} class="item-card__img" />
+        <img
+          src={thumbnailPath}
+          alt={title}
+          class="item-card__img"
+          loading="lazy"
+          decoding="async"
+        />
       {:else if isPdf}
         <div class="item-card__pdf-icon" data-testid="item-pdf-icon">
           <ActionIcon name="file-text" size={48} />
