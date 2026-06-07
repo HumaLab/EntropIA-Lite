@@ -73,8 +73,30 @@ describe('SettingsView', () => {
       screen.getByText('EntropIA Lite usa APIs remotas: OpenRouter, GLM-OCR y AssemblyAI.')
     ).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'APIs remotas' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Prompts' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'Model Params' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Dependencias de IA' })).not.toBeInTheDocument()
+  })
+
+  it('edits and saves prompt and model parameter settings', async () => {
+    render(SettingsView)
+
+    await fireEvent.click(await screen.findByRole('tab', { name: 'Prompts' }))
+    const ocrPrompt = screen.getByLabelText('OCR correction prompt')
+    await fireEvent.input(ocrPrompt, { target: { value: 'Custom OCR {text}' } })
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Model Params' }))
+    await fireEvent.input(screen.getByLabelText('temperature (0-2)'), { target: { value: '0.6' } })
+    await fireEvent.input(screen.getByLabelText('maxTokens (1-32000, vacío = por flujo)'), {
+      target: { value: '1234' },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(settingsSetMock).toHaveBeenCalledWith('prompt_ocr_correction', 'Custom OCR {text}')
+    expect(settingsSetMock).toHaveBeenCalledWith('llm_temperature', '0.6')
+    expect(settingsSetMock).toHaveBeenCalledWith('llm_max_tokens', '1234')
   })
 
   it('groups OpenRouter generative and embedding models in one provider block', async () => {

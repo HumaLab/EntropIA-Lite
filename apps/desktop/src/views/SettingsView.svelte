@@ -11,12 +11,14 @@
     SETTINGS_KEYS,
     DEFAULT_OPENROUTER_MODEL,
     DEFAULT_OPENROUTER_EMBEDDING_MODEL,
+    DEFAULT_PROMPTS,
+    DEFAULT_MODEL_PARAMS,
     type ModelInfo,
   } from '$lib/settings'
   import { ActionIcon, Button, Card, Input, TabButton, TabList } from '@entropia/ui'
   import LogsTab from './LogsTab.svelte'
 
-  let activeTab = $state<'api' | 'logs'>('api')
+  let activeTab = $state<'api' | 'prompts' | 'modelParams' | 'logs'>('api')
 
   // State
   let apiKey = $state('')
@@ -31,6 +33,18 @@
   let glmOcrApiKey = $state('')
   let maskedGlmOcrApiKey = $state('')
   let showGlmOcrApiKey = $state(false)
+  let ocrCorrectionPrompt = $state(DEFAULT_PROMPTS.ocrCorrectionPrompt)
+  let summaryPrompt = $state(DEFAULT_PROMPTS.summaryPrompt)
+  let nerPrompt = $state(DEFAULT_PROMPTS.nerPrompt)
+  let tripletsPrompt = $state(DEFAULT_PROMPTS.tripletsPrompt)
+  let temperature = $state(DEFAULT_MODEL_PARAMS.temperature)
+  let maxTokens = $state(DEFAULT_MODEL_PARAMS.maxTokens)
+  let topP = $state(DEFAULT_MODEL_PARAMS.topP)
+  let topK = $state(DEFAULT_MODEL_PARAMS.topK)
+  let presencePenalty = $state(DEFAULT_MODEL_PARAMS.presencePenalty)
+  let frequencyPenalty = $state(DEFAULT_MODEL_PARAMS.frequencyPenalty)
+  let stopSequences = $state(DEFAULT_MODEL_PARAMS.stopSequences)
+  let modelParamsError = $state<string | null>(null)
 
   // Test connection state
   let testing = $state(false)
@@ -74,6 +88,17 @@
         storedAssemblyAiKey,
         storedAssemblyAiSpeakerLabels,
         storedGlmOcrKey,
+        storedOcrCorrectionPrompt,
+        storedSummaryPrompt,
+        storedNerPrompt,
+        storedTripletsPrompt,
+        storedTemperature,
+        storedMaxTokens,
+        storedTopP,
+        storedTopK,
+        storedPresencePenalty,
+        storedFrequencyPenalty,
+        storedStopSequences,
       ] = await Promise.all([
         settingsGet(SETTINGS_KEYS.OPENROUTER_API_KEY),
         settingsGet(SETTINGS_KEYS.OPENROUTER_MODEL),
@@ -81,6 +106,17 @@
         settingsGet(SETTINGS_KEYS.ASSEMBLYAI_API_KEY),
         settingsGet(SETTINGS_KEYS.ASSEMBLYAI_SPEAKER_LABELS),
         settingsGet(SETTINGS_KEYS.GLM_OCR_API_KEY),
+        settingsGet(SETTINGS_KEYS.OCR_CORRECTION_PROMPT),
+        settingsGet(SETTINGS_KEYS.SUMMARY_PROMPT),
+        settingsGet(SETTINGS_KEYS.NER_PROMPT),
+        settingsGet(SETTINGS_KEYS.TRIPLETS_PROMPT),
+        settingsGet(SETTINGS_KEYS.LLM_TEMPERATURE),
+        settingsGet(SETTINGS_KEYS.LLM_MAX_TOKENS),
+        settingsGet(SETTINGS_KEYS.LLM_TOP_P),
+        settingsGet(SETTINGS_KEYS.LLM_TOP_K),
+        settingsGet(SETTINGS_KEYS.LLM_PRESENCE_PENALTY),
+        settingsGet(SETTINGS_KEYS.LLM_FREQUENCY_PENALTY),
+        settingsGet(SETTINGS_KEYS.LLM_STOP_SEQUENCES),
       ])
 
       if (storedKey?.startsWith(SECRET_REF_PREFIX)) {
@@ -107,6 +143,17 @@
         glmOcrApiKey = storedGlmOcrKey
         maskedGlmOcrApiKey = maskKey(storedGlmOcrKey, 0)
       }
+      ocrCorrectionPrompt = storedOcrCorrectionPrompt?.trim() || DEFAULT_PROMPTS.ocrCorrectionPrompt
+      summaryPrompt = storedSummaryPrompt?.trim() || DEFAULT_PROMPTS.summaryPrompt
+      nerPrompt = storedNerPrompt?.trim() || DEFAULT_PROMPTS.nerPrompt
+      tripletsPrompt = storedTripletsPrompt?.trim() || DEFAULT_PROMPTS.tripletsPrompt
+      temperature = validNumberText(storedTemperature, 0, 2) ?? DEFAULT_MODEL_PARAMS.temperature
+      maxTokens = validIntegerText(storedMaxTokens, 1, 32000) ?? DEFAULT_MODEL_PARAMS.maxTokens
+      topP = validNumberText(storedTopP, 0, 1) ?? DEFAULT_MODEL_PARAMS.topP
+      topK = validIntegerText(storedTopK, 1, 1000) ?? DEFAULT_MODEL_PARAMS.topK
+      presencePenalty = validNumberText(storedPresencePenalty, -2, 2) ?? DEFAULT_MODEL_PARAMS.presencePenalty
+      frequencyPenalty = validNumberText(storedFrequencyPenalty, -2, 2) ?? DEFAULT_MODEL_PARAMS.frequencyPenalty
+      stopSequences = storedStopSequences ?? DEFAULT_MODEL_PARAMS.stopSequences
     } catch (e) {
       loadSettingsError = e instanceof Error ? e.message : String(e)
     }
@@ -123,6 +170,31 @@
     const normalized = value?.trim().toLowerCase()
     if (!normalized) return true
     return !['0', 'false', 'no', 'off'].includes(normalized)
+  }
+
+  function validNumberText(value: string | null, min: number, max: number): string | null {
+    if (!value?.trim()) return null
+    const parsed = Number(value)
+    return Number.isFinite(parsed) && parsed >= min && parsed <= max ? value.trim() : null
+  }
+
+  function validIntegerText(value: string | null, min: number, max: number): string | null {
+    if (!value?.trim()) return null
+    const parsed = Number(value)
+    return Number.isInteger(parsed) && parsed >= min && parsed <= max ? value.trim() : null
+  }
+
+  function validateModelParams(): string | null {
+    const checks: Array<[string, string, (value: string) => boolean]> = [
+      ['temperature', temperature, (value) => !value.trim() || validNumberText(value, 0, 2) !== null],
+      ['maxTokens', maxTokens, (value) => !value.trim() || validIntegerText(value, 1, 32000) !== null],
+      ['topP', topP, (value) => !value.trim() || validNumberText(value, 0, 1) !== null],
+      ['topK', topK, (value) => !value.trim() || validIntegerText(value, 1, 1000) !== null],
+      ['presencePenalty', presencePenalty, (value) => !value.trim() || validNumberText(value, -2, 2) !== null],
+      ['frequencyPenalty', frequencyPenalty, (value) => !value.trim() || validNumberText(value, -2, 2) !== null],
+    ]
+    const invalid = checks.find(([_, value, isValid]) => !isValid(value))
+    return invalid ? `Parámetro inválido: ${invalid[0]}` : null
   }
 
   async function handleTestConnection() {
@@ -200,6 +272,12 @@
   async function handleSave() {
     saving = true
     saveFeedback = null
+    modelParamsError = validateModelParams()
+    if (modelParamsError) {
+      saving = false
+      saveFeedback = { tone: 'error', text: modelParamsError }
+      return
+    }
     try {
       const writes: Promise<void>[] = [
         settingsSet(SETTINGS_KEYS.OPENROUTER_MODEL, model),
@@ -212,6 +290,17 @@
           assemblyAiSpeakerLabels ? 'true' : 'false'
         ),
         settingsSet(SETTINGS_KEYS.OCRH_MODE, 'glm_ocr'),
+        settingsSet(SETTINGS_KEYS.OCR_CORRECTION_PROMPT, ocrCorrectionPrompt.trim() || DEFAULT_PROMPTS.ocrCorrectionPrompt),
+        settingsSet(SETTINGS_KEYS.SUMMARY_PROMPT, summaryPrompt.trim() || DEFAULT_PROMPTS.summaryPrompt),
+        settingsSet(SETTINGS_KEYS.NER_PROMPT, nerPrompt.trim() || DEFAULT_PROMPTS.nerPrompt),
+        settingsSet(SETTINGS_KEYS.TRIPLETS_PROMPT, tripletsPrompt.trim() || DEFAULT_PROMPTS.tripletsPrompt),
+        settingsSet(SETTINGS_KEYS.LLM_TEMPERATURE, temperature.trim() || DEFAULT_MODEL_PARAMS.temperature),
+        settingsSet(SETTINGS_KEYS.LLM_MAX_TOKENS, maxTokens.trim()),
+        settingsSet(SETTINGS_KEYS.LLM_TOP_P, topP.trim()),
+        settingsSet(SETTINGS_KEYS.LLM_TOP_K, topK.trim()),
+        settingsSet(SETTINGS_KEYS.LLM_PRESENCE_PENALTY, presencePenalty.trim()),
+        settingsSet(SETTINGS_KEYS.LLM_FREQUENCY_PENALTY, frequencyPenalty.trim()),
+        settingsSet(SETTINGS_KEYS.LLM_STOP_SEQUENCES, stopSequences),
       ]
       if (apiKey.trim()) writes.push(settingsSet(SETTINGS_KEYS.OPENROUTER_API_KEY, apiKey.trim()))
       if (assemblyAiApiKey.trim()) writes.push(settingsSet(SETTINGS_KEYS.ASSEMBLYAI_API_KEY, assemblyAiApiKey.trim()))
@@ -239,6 +328,25 @@
 
   function handleModelSelect(modelId: string) {
     model = modelId
+  }
+
+  async function resetPrompt(key: keyof typeof DEFAULT_PROMPTS) {
+    const value = DEFAULT_PROMPTS[key]
+    if (key === 'ocrCorrectionPrompt') ocrCorrectionPrompt = value
+    if (key === 'summaryPrompt') summaryPrompt = value
+    if (key === 'nerPrompt') nerPrompt = value
+    if (key === 'tripletsPrompt') tripletsPrompt = value
+  }
+
+  function resetModelParams() {
+    temperature = DEFAULT_MODEL_PARAMS.temperature
+    maxTokens = DEFAULT_MODEL_PARAMS.maxTokens
+    topP = DEFAULT_MODEL_PARAMS.topP
+    topK = DEFAULT_MODEL_PARAMS.topK
+    presencePenalty = DEFAULT_MODEL_PARAMS.presencePenalty
+    frequencyPenalty = DEFAULT_MODEL_PARAMS.frequencyPenalty
+    stopSequences = DEFAULT_MODEL_PARAMS.stopSequences
+    modelParamsError = null
   }
 
   async function openProviderLink(event: MouseEvent, url: string, providerName: string) {
@@ -270,6 +378,12 @@
     <TabList aria-label={t('settings.tabsAria')}>
       <TabButton active={activeTab === 'api'} onclick={() => (activeTab = 'api')}>
         {t('settings.remoteApisTab')}
+      </TabButton>
+      <TabButton active={activeTab === 'prompts'} onclick={() => (activeTab = 'prompts')}>
+        Prompts
+      </TabButton>
+      <TabButton active={activeTab === 'modelParams'} onclick={() => (activeTab = 'modelParams')}>
+        Model Params
       </TabButton>
       <TabButton active={activeTab === 'logs'} onclick={() => (activeTab = 'logs')}>
         {t('settings.logsTab')}
@@ -547,6 +661,87 @@
       </section>
     </Card>
 
+    {:else if activeTab === 'prompts'}
+      {#if saveFeedback}
+        <p
+          class="surface-message"
+          class:surface-message--error={saveFeedback.tone === 'error'}
+          class:surface-message--success={saveFeedback.tone === 'success'}
+        >
+          {saveFeedback.text}
+        </p>
+      {/if}
+
+      <Card>
+        <section class="settings-card-section settings-card-section--vertical">
+          <div class="settings-card-section__copy">
+            <h2>Prompts</h2>
+            <p>Estos templates son la fuente real usada en runtime. Usá <code>{'{text}'}</code> para insertar el texto activo.</p>
+          </div>
+
+          <div class="settings__prompt-grid">
+            <div class="settings__field settings__field--stacked">
+              <label class="settings__label" for="ocr-correction-prompt">OCR correction prompt</label>
+              <textarea id="ocr-correction-prompt" class="settings__textarea" rows="12" bind:value={ocrCorrectionPrompt}></textarea>
+              <Button variant="secondary" size="sm" onclick={() => resetPrompt('ocrCorrectionPrompt')}>Restaurar default</Button>
+            </div>
+            <div class="settings__field settings__field--stacked">
+              <label class="settings__label" for="summary-prompt">Summary prompt</label>
+              <textarea id="summary-prompt" class="settings__textarea" rows="10" bind:value={summaryPrompt}></textarea>
+              <Button variant="secondary" size="sm" onclick={() => resetPrompt('summaryPrompt')}>Restaurar default</Button>
+            </div>
+            <div class="settings__field settings__field--stacked">
+              <label class="settings__label" for="ner-prompt">NER prompt</label>
+              <textarea id="ner-prompt" class="settings__textarea" rows="8" bind:value={nerPrompt}></textarea>
+              <Button variant="secondary" size="sm" onclick={() => resetPrompt('nerPrompt')}>Restaurar default</Button>
+            </div>
+            <div class="settings__field settings__field--stacked">
+              <label class="settings__label" for="triplets-prompt">Triplets prompt</label>
+              <textarea id="triplets-prompt" class="settings__textarea" rows="10" bind:value={tripletsPrompt}></textarea>
+              <Button variant="secondary" size="sm" onclick={() => resetPrompt('tripletsPrompt')}>Restaurar default</Button>
+            </div>
+          </div>
+        </section>
+      </Card>
+
+    {:else if activeTab === 'modelParams'}
+      {#if saveFeedback}
+        <p
+          class="surface-message"
+          class:surface-message--error={saveFeedback.tone === 'error'}
+          class:surface-message--success={saveFeedback.tone === 'success'}
+        >
+          {saveFeedback.text}
+        </p>
+      {/if}
+
+      <Card>
+        <section class="settings-card-section settings-card-section--vertical">
+          <div class="settings-card-section__copy">
+            <h2>Model Params</h2>
+            <p><strong>Configuración avanzada.</strong> Valores vacíos usan defaults seguros. Estos parámetros se aplican a OCR correction, Summary, NER y Triplets.</p>
+          </div>
+
+          {#if modelParamsError}
+            <p class="surface-message surface-message--error">{modelParamsError}</p>
+          {/if}
+
+          <div class="settings__params-grid">
+            <Input label="temperature (0-2)" type="number" bind:value={temperature} />
+            <Input label="maxTokens (1-32000, vacío = por flujo)" type="number" bind:value={maxTokens} />
+            <Input label="topP (0-1, opcional)" type="number" bind:value={topP} />
+            <Input label="topK (1-1000, opcional)" type="number" bind:value={topK} />
+            <Input label="presencePenalty (-2 a 2)" type="number" bind:value={presencePenalty} />
+            <Input label="frequencyPenalty (-2 a 2)" type="number" bind:value={frequencyPenalty} />
+            <div class="settings__field settings__field--stacked settings__field--wide">
+              <label class="settings__label" for="stop-sequences">stopSequences</label>
+              <textarea id="stop-sequences" class="settings__textarea" rows="4" bind:value={stopSequences} placeholder="Una secuencia por línea"></textarea>
+            </div>
+          </div>
+          <Button variant="secondary" size="sm" onclick={resetModelParams}>Restaurar defaults</Button>
+        </section>
+      </Card>
+
     {:else if activeTab === 'logs'}
     <LogsTab />
     {/if}
@@ -597,6 +792,10 @@
     gap: var(--space-5);
   }
 
+  .settings-card-section--vertical {
+    align-items: stretch;
+  }
+
   .settings-card-section__copy {
     display: flex;
     flex-direction: column;
@@ -641,6 +840,31 @@
     display: flex;
     flex-direction: column;
     gap: var(--space-3);
+  }
+
+  .settings__field--wide {
+    grid-column: 1 / -1;
+  }
+
+  .settings__prompt-grid,
+  .settings__params-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: var(--space-4);
+  }
+
+  .settings__textarea {
+    width: 100%;
+    border: 1px solid color-mix(in srgb, var(--color-hairline) 78%, transparent);
+    border-radius: var(--radius-input);
+    background: color-mix(in srgb, var(--color-surface-glass) 78%, transparent);
+    color: var(--color-text-primary);
+    padding: var(--space-3);
+    font: inherit;
+    font-family: var(--font-mono, monospace);
+    font-size: var(--font-size-sm);
+    line-height: 1.5;
+    resize: vertical;
   }
 
   .settings__label {
