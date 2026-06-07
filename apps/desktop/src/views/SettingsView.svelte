@@ -4,6 +4,7 @@
   import { openExternalUrlFromClick } from '$lib/external-links'
   import {
     settingsGet,
+    settingsGetAll,
     settingsSet,
     testOpenrouterConnection,
     testAssemblyaiConnection,
@@ -13,6 +14,7 @@
     DEFAULT_OPENROUTER_EMBEDDING_MODEL,
     DEFAULT_PROMPTS,
     DEFAULT_MODEL_PARAMS,
+    DEFAULT_MODEL_PARAMS_BY_FLOW,
     type ModelInfo,
   } from '$lib/settings'
   import { ActionIcon, Button, Card, Input, TabButton, TabList } from '@entropia/ui'
@@ -37,13 +39,66 @@
   let summaryPrompt = $state(DEFAULT_PROMPTS.summaryPrompt)
   let nerPrompt = $state(DEFAULT_PROMPTS.nerPrompt)
   let tripletsPrompt = $state(DEFAULT_PROMPTS.tripletsPrompt)
-  let temperature = $state(DEFAULT_MODEL_PARAMS.temperature)
-  let maxTokens = $state(DEFAULT_MODEL_PARAMS.maxTokens)
-  let topP = $state(DEFAULT_MODEL_PARAMS.topP)
-  let topK = $state(DEFAULT_MODEL_PARAMS.topK)
-  let presencePenalty = $state(DEFAULT_MODEL_PARAMS.presencePenalty)
-  let frequencyPenalty = $state(DEFAULT_MODEL_PARAMS.frequencyPenalty)
-  let stopSequences = $state(DEFAULT_MODEL_PARAMS.stopSequences)
+  type ModelParamFlow = 'ocrCorrection' | 'summary' | 'ner' | 'triplets'
+  type EditableModelParams = {
+    temperature: string
+    maxTokens: string
+    topP: string
+    topK: string
+    presencePenalty: string
+    frequencyPenalty: string
+    stopSequences: string
+  }
+  const MODEL_PARAM_FLOWS: Array<{ id: ModelParamFlow; label: string }> = [
+    { id: 'ocrCorrection', label: 'OCR correction' },
+    { id: 'summary', label: 'Summary' },
+    { id: 'ner', label: 'NER' },
+    { id: 'triplets', label: 'Triplets' },
+  ]
+  const MODEL_PARAM_KEYS: Record<ModelParamFlow, Record<keyof EditableModelParams, string>> = {
+    ocrCorrection: {
+      temperature: SETTINGS_KEYS.LLM_OCR_CORRECTION_TEMPERATURE,
+      maxTokens: SETTINGS_KEYS.LLM_OCR_CORRECTION_MAX_TOKENS,
+      topP: SETTINGS_KEYS.LLM_OCR_CORRECTION_TOP_P,
+      topK: SETTINGS_KEYS.LLM_OCR_CORRECTION_TOP_K,
+      presencePenalty: SETTINGS_KEYS.LLM_OCR_CORRECTION_PRESENCE_PENALTY,
+      frequencyPenalty: SETTINGS_KEYS.LLM_OCR_CORRECTION_FREQUENCY_PENALTY,
+      stopSequences: SETTINGS_KEYS.LLM_OCR_CORRECTION_STOP_SEQUENCES,
+    },
+    summary: {
+      temperature: SETTINGS_KEYS.LLM_SUMMARY_TEMPERATURE,
+      maxTokens: SETTINGS_KEYS.LLM_SUMMARY_MAX_TOKENS,
+      topP: SETTINGS_KEYS.LLM_SUMMARY_TOP_P,
+      topK: SETTINGS_KEYS.LLM_SUMMARY_TOP_K,
+      presencePenalty: SETTINGS_KEYS.LLM_SUMMARY_PRESENCE_PENALTY,
+      frequencyPenalty: SETTINGS_KEYS.LLM_SUMMARY_FREQUENCY_PENALTY,
+      stopSequences: SETTINGS_KEYS.LLM_SUMMARY_STOP_SEQUENCES,
+    },
+    ner: {
+      temperature: SETTINGS_KEYS.LLM_NER_TEMPERATURE,
+      maxTokens: SETTINGS_KEYS.LLM_NER_MAX_TOKENS,
+      topP: SETTINGS_KEYS.LLM_NER_TOP_P,
+      topK: SETTINGS_KEYS.LLM_NER_TOP_K,
+      presencePenalty: SETTINGS_KEYS.LLM_NER_PRESENCE_PENALTY,
+      frequencyPenalty: SETTINGS_KEYS.LLM_NER_FREQUENCY_PENALTY,
+      stopSequences: SETTINGS_KEYS.LLM_NER_STOP_SEQUENCES,
+    },
+    triplets: {
+      temperature: SETTINGS_KEYS.LLM_TRIPLETS_TEMPERATURE,
+      maxTokens: SETTINGS_KEYS.LLM_TRIPLETS_MAX_TOKENS,
+      topP: SETTINGS_KEYS.LLM_TRIPLETS_TOP_P,
+      topK: SETTINGS_KEYS.LLM_TRIPLETS_TOP_K,
+      presencePenalty: SETTINGS_KEYS.LLM_TRIPLETS_PRESENCE_PENALTY,
+      frequencyPenalty: SETTINGS_KEYS.LLM_TRIPLETS_FREQUENCY_PENALTY,
+      stopSequences: SETTINGS_KEYS.LLM_TRIPLETS_STOP_SEQUENCES,
+    },
+  }
+  let modelParamsByFlow = $state<Record<ModelParamFlow, EditableModelParams>>({
+    ocrCorrection: { ...DEFAULT_MODEL_PARAMS_BY_FLOW.ocrCorrection },
+    summary: { ...DEFAULT_MODEL_PARAMS_BY_FLOW.summary },
+    ner: { ...DEFAULT_MODEL_PARAMS_BY_FLOW.ner },
+    triplets: { ...DEFAULT_MODEL_PARAMS_BY_FLOW.triplets },
+  })
   let modelParamsError = $state<string | null>(null)
 
   // Test connection state
@@ -92,13 +147,6 @@
         storedSummaryPrompt,
         storedNerPrompt,
         storedTripletsPrompt,
-        storedTemperature,
-        storedMaxTokens,
-        storedTopP,
-        storedTopK,
-        storedPresencePenalty,
-        storedFrequencyPenalty,
-        storedStopSequences,
       ] = await Promise.all([
         settingsGet(SETTINGS_KEYS.OPENROUTER_API_KEY),
         settingsGet(SETTINGS_KEYS.OPENROUTER_MODEL),
@@ -110,14 +158,8 @@
         settingsGet(SETTINGS_KEYS.SUMMARY_PROMPT),
         settingsGet(SETTINGS_KEYS.NER_PROMPT),
         settingsGet(SETTINGS_KEYS.TRIPLETS_PROMPT),
-        settingsGet(SETTINGS_KEYS.LLM_TEMPERATURE),
-        settingsGet(SETTINGS_KEYS.LLM_MAX_TOKENS),
-        settingsGet(SETTINGS_KEYS.LLM_TOP_P),
-        settingsGet(SETTINGS_KEYS.LLM_TOP_K),
-        settingsGet(SETTINGS_KEYS.LLM_PRESENCE_PENALTY),
-        settingsGet(SETTINGS_KEYS.LLM_FREQUENCY_PENALTY),
-        settingsGet(SETTINGS_KEYS.LLM_STOP_SEQUENCES),
       ])
+      const settingsMap = new Map((await settingsGetAll()).map((entry) => [entry.key, entry.value]))
 
       if (storedKey?.startsWith(SECRET_REF_PREFIX)) {
         apiKey = ''
@@ -147,13 +189,9 @@
       summaryPrompt = storedSummaryPrompt?.trim() || DEFAULT_PROMPTS.summaryPrompt
       nerPrompt = storedNerPrompt?.trim() || DEFAULT_PROMPTS.nerPrompt
       tripletsPrompt = storedTripletsPrompt?.trim() || DEFAULT_PROMPTS.tripletsPrompt
-      temperature = validNumberText(storedTemperature, 0, 2) ?? DEFAULT_MODEL_PARAMS.temperature
-      maxTokens = validIntegerText(storedMaxTokens, 1, 32000) ?? DEFAULT_MODEL_PARAMS.maxTokens
-      topP = validNumberText(storedTopP, 0, 1) ?? DEFAULT_MODEL_PARAMS.topP
-      topK = validIntegerText(storedTopK, 1, 1000) ?? DEFAULT_MODEL_PARAMS.topK
-      presencePenalty = validNumberText(storedPresencePenalty, -2, 2) ?? DEFAULT_MODEL_PARAMS.presencePenalty
-      frequencyPenalty = validNumberText(storedFrequencyPenalty, -2, 2) ?? DEFAULT_MODEL_PARAMS.frequencyPenalty
-      stopSequences = storedStopSequences ?? DEFAULT_MODEL_PARAMS.stopSequences
+      for (const flow of MODEL_PARAM_FLOWS) {
+        modelParamsByFlow[flow.id] = readModelParamsFromSettings(settingsMap, flow.id)
+      }
     } catch (e) {
       loadSettingsError = e instanceof Error ? e.message : String(e)
     }
@@ -184,17 +222,40 @@
     return Number.isInteger(parsed) && parsed >= min && parsed <= max ? value.trim() : null
   }
 
+  function readModelParamsFromSettings(
+    settingsMap: Map<string, string>,
+    flow: ModelParamFlow
+  ): EditableModelParams {
+    const keys = MODEL_PARAM_KEYS[flow]
+    return {
+      temperature:
+        validNumberText(settingsMap.get(keys.temperature) ?? null, 0, 2) ?? DEFAULT_MODEL_PARAMS.temperature,
+      maxTokens: validIntegerText(settingsMap.get(keys.maxTokens) ?? null, 1, 32000) ?? DEFAULT_MODEL_PARAMS.maxTokens,
+      topP: validNumberText(settingsMap.get(keys.topP) ?? null, 0, 1) ?? DEFAULT_MODEL_PARAMS.topP,
+      topK: validIntegerText(settingsMap.get(keys.topK) ?? null, 1, 1000) ?? DEFAULT_MODEL_PARAMS.topK,
+      presencePenalty:
+        validNumberText(settingsMap.get(keys.presencePenalty) ?? null, -2, 2) ?? DEFAULT_MODEL_PARAMS.presencePenalty,
+      frequencyPenalty:
+        validNumberText(settingsMap.get(keys.frequencyPenalty) ?? null, -2, 2) ?? DEFAULT_MODEL_PARAMS.frequencyPenalty,
+      stopSequences: settingsMap.get(keys.stopSequences) ?? DEFAULT_MODEL_PARAMS.stopSequences,
+    }
+  }
+
   function validateModelParams(): string | null {
-    const checks: Array<[string, string, (value: string) => boolean]> = [
-      ['temperature', temperature, (value) => !value.trim() || validNumberText(value, 0, 2) !== null],
-      ['maxTokens', maxTokens, (value) => !value.trim() || validIntegerText(value, 1, 32000) !== null],
-      ['topP', topP, (value) => !value.trim() || validNumberText(value, 0, 1) !== null],
-      ['topK', topK, (value) => !value.trim() || validIntegerText(value, 1, 1000) !== null],
-      ['presencePenalty', presencePenalty, (value) => !value.trim() || validNumberText(value, -2, 2) !== null],
-      ['frequencyPenalty', frequencyPenalty, (value) => !value.trim() || validNumberText(value, -2, 2) !== null],
-    ]
-    const invalid = checks.find(([_, value, isValid]) => !isValid(value))
-    return invalid ? `Parámetro inválido: ${invalid[0]}` : null
+    for (const flow of MODEL_PARAM_FLOWS) {
+      const params = modelParamsByFlow[flow.id]
+      const checks: Array<[string, string, (value: string) => boolean]> = [
+        ['temperature', params.temperature, (value) => !value.trim() || validNumberText(value, 0, 2) !== null],
+        ['maxTokens', params.maxTokens, (value) => !value.trim() || validIntegerText(value, 1, 32000) !== null],
+        ['topP', params.topP, (value) => !value.trim() || validNumberText(value, 0, 1) !== null],
+        ['topK', params.topK, (value) => !value.trim() || validIntegerText(value, 1, 1000) !== null],
+        ['presencePenalty', params.presencePenalty, (value) => !value.trim() || validNumberText(value, -2, 2) !== null],
+        ['frequencyPenalty', params.frequencyPenalty, (value) => !value.trim() || validNumberText(value, -2, 2) !== null],
+      ]
+      const invalid = checks.find(([_, value, isValid]) => !isValid(value))
+      if (invalid) return `Parámetro inválido en ${flow.label}: ${invalid[0]}`
+    }
+    return null
   }
 
   async function handleTestConnection() {
@@ -294,14 +355,20 @@
         settingsSet(SETTINGS_KEYS.SUMMARY_PROMPT, summaryPrompt.trim() || DEFAULT_PROMPTS.summaryPrompt),
         settingsSet(SETTINGS_KEYS.NER_PROMPT, nerPrompt.trim() || DEFAULT_PROMPTS.nerPrompt),
         settingsSet(SETTINGS_KEYS.TRIPLETS_PROMPT, tripletsPrompt.trim() || DEFAULT_PROMPTS.tripletsPrompt),
-        settingsSet(SETTINGS_KEYS.LLM_TEMPERATURE, temperature.trim() || DEFAULT_MODEL_PARAMS.temperature),
-        settingsSet(SETTINGS_KEYS.LLM_MAX_TOKENS, maxTokens.trim()),
-        settingsSet(SETTINGS_KEYS.LLM_TOP_P, topP.trim()),
-        settingsSet(SETTINGS_KEYS.LLM_TOP_K, topK.trim()),
-        settingsSet(SETTINGS_KEYS.LLM_PRESENCE_PENALTY, presencePenalty.trim()),
-        settingsSet(SETTINGS_KEYS.LLM_FREQUENCY_PENALTY, frequencyPenalty.trim()),
-        settingsSet(SETTINGS_KEYS.LLM_STOP_SEQUENCES, stopSequences),
       ]
+      for (const flow of MODEL_PARAM_FLOWS) {
+        const params = modelParamsByFlow[flow.id]
+        const keys = MODEL_PARAM_KEYS[flow.id]
+        writes.push(
+          settingsSet(keys.temperature, params.temperature.trim() || DEFAULT_MODEL_PARAMS.temperature),
+          settingsSet(keys.maxTokens, params.maxTokens.trim()),
+          settingsSet(keys.topP, params.topP.trim()),
+          settingsSet(keys.topK, params.topK.trim()),
+          settingsSet(keys.presencePenalty, params.presencePenalty.trim()),
+          settingsSet(keys.frequencyPenalty, params.frequencyPenalty.trim()),
+          settingsSet(keys.stopSequences, params.stopSequences)
+        )
+      }
       if (apiKey.trim()) writes.push(settingsSet(SETTINGS_KEYS.OPENROUTER_API_KEY, apiKey.trim()))
       if (assemblyAiApiKey.trim()) writes.push(settingsSet(SETTINGS_KEYS.ASSEMBLYAI_API_KEY, assemblyAiApiKey.trim()))
       if (glmOcrApiKey.trim()) writes.push(settingsSet(SETTINGS_KEYS.GLM_OCR_API_KEY, glmOcrApiKey.trim()))
@@ -338,14 +405,8 @@
     if (key === 'tripletsPrompt') tripletsPrompt = value
   }
 
-  function resetModelParams() {
-    temperature = DEFAULT_MODEL_PARAMS.temperature
-    maxTokens = DEFAULT_MODEL_PARAMS.maxTokens
-    topP = DEFAULT_MODEL_PARAMS.topP
-    topK = DEFAULT_MODEL_PARAMS.topK
-    presencePenalty = DEFAULT_MODEL_PARAMS.presencePenalty
-    frequencyPenalty = DEFAULT_MODEL_PARAMS.frequencyPenalty
-    stopSequences = DEFAULT_MODEL_PARAMS.stopSequences
+  function resetModelParams(flow: ModelParamFlow) {
+    modelParamsByFlow[flow] = { ...DEFAULT_MODEL_PARAMS_BY_FLOW[flow] }
     modelParamsError = null
   }
 
@@ -726,19 +787,26 @@
             <p class="surface-message surface-message--error">{modelParamsError}</p>
           {/if}
 
-          <div class="settings__params-grid">
-            <Input label="temperature (0-2)" type="number" bind:value={temperature} />
-            <Input label="maxTokens (1-32000, vacío = por flujo)" type="number" bind:value={maxTokens} />
-            <Input label="topP (0-1, opcional)" type="number" bind:value={topP} />
-            <Input label="topK (1-1000, opcional)" type="number" bind:value={topK} />
-            <Input label="presencePenalty (-2 a 2)" type="number" bind:value={presencePenalty} />
-            <Input label="frequencyPenalty (-2 a 2)" type="number" bind:value={frequencyPenalty} />
-            <div class="settings__field settings__field--stacked settings__field--wide">
-              <label class="settings__label" for="stop-sequences">stopSequences</label>
-              <textarea id="stop-sequences" class="settings__textarea" rows="4" bind:value={stopSequences} placeholder="Una secuencia por línea"></textarea>
-            </div>
+          <div class="settings__params-grid settings__params-grid--flows">
+            {#each MODEL_PARAM_FLOWS as flow (flow.id)}
+              <div class="settings__field settings__field--stacked settings__param-card">
+                <h3>{flow.label}</h3>
+                <div class="settings__param-card-grid">
+                  <Input label="temperature (0-2)" type="number" bind:value={modelParamsByFlow[flow.id].temperature} />
+                  <Input label="maxTokens (1-32000, vacío = default)" type="number" bind:value={modelParamsByFlow[flow.id].maxTokens} />
+                  <Input label="topP (0-1, opcional)" type="number" bind:value={modelParamsByFlow[flow.id].topP} />
+                  <Input label="topK (1-1000, opcional)" type="number" bind:value={modelParamsByFlow[flow.id].topK} />
+                  <Input label="presencePenalty (-2 a 2)" type="number" bind:value={modelParamsByFlow[flow.id].presencePenalty} />
+                  <Input label="frequencyPenalty (-2 a 2)" type="number" bind:value={modelParamsByFlow[flow.id].frequencyPenalty} />
+                  <div class="settings__field settings__field--stacked settings__field--wide">
+                    <label class="settings__label" for={`${flow.id}-stop-sequences`}>stopSequences</label>
+                    <textarea id={`${flow.id}-stop-sequences`} class="settings__textarea" rows="3" bind:value={modelParamsByFlow[flow.id].stopSequences} placeholder="Una secuencia por línea"></textarea>
+                  </div>
+                </div>
+                <Button variant="secondary" size="sm" onclick={() => resetModelParams(flow.id)}>Restaurar defaults</Button>
+              </div>
+            {/each}
           </div>
-          <Button variant="secondary" size="sm" onclick={resetModelParams}>Restaurar defaults</Button>
         </section>
       </Card>
 
@@ -861,6 +929,11 @@
     grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   }
 
+  .settings__params-grid--flows {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: stretch;
+  }
+
   .settings__prompt-card {
     min-height: 430px;
     margin-bottom: 0;
@@ -880,6 +953,32 @@
     margin-top: auto;
   }
 
+  .settings__param-card {
+    min-height: 520px;
+    margin-bottom: 0;
+    padding: var(--space-4);
+    border: 1px solid color-mix(in srgb, var(--color-hairline) 72%, transparent);
+    border-radius: var(--radius-lg);
+    background: color-mix(in srgb, var(--color-surface-glass) 70%, transparent);
+  }
+
+  .settings__param-card h3 {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    font-weight: var(--font-weight-semibold);
+  }
+
+  .settings__param-card-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+  }
+
+  .settings__param-card :global(.btn) {
+    align-self: flex-start;
+    margin-top: auto;
+  }
+
   .settings__textarea {
     width: 100%;
     border: 1px solid color-mix(in srgb, var(--color-hairline) 78%, transparent);
@@ -895,7 +994,12 @@
   }
 
   @media (max-width: 760px) {
-    .settings__prompt-grid {
+    .settings__prompt-grid,
+    .settings__params-grid--flows {
+      grid-template-columns: 1fr;
+    }
+
+    .settings__param-card-grid {
       grid-template-columns: 1fr;
     }
   }

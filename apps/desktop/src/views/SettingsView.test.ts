@@ -6,6 +6,7 @@ import { locale } from '$lib/i18n'
 const {
   invokeMock,
   settingsGetMock,
+  settingsGetAllMock,
   settingsSetMock,
   testOpenrouterConnectionMock,
   testAssemblyaiConnectionMock,
@@ -14,6 +15,7 @@ const {
   vi.hoisted(() => ({
     invokeMock: vi.fn(),
     settingsGetMock: vi.fn(),
+    settingsGetAllMock: vi.fn(),
     settingsSetMock: vi.fn(),
     testOpenrouterConnectionMock: vi.fn(),
     testAssemblyaiConnectionMock: vi.fn(),
@@ -29,6 +31,7 @@ vi.mock('$lib/settings', async () => {
   return {
     ...actual,
     settingsGet: settingsGetMock,
+    settingsGetAll: settingsGetAllMock,
     settingsSet: settingsSetMock,
     testOpenrouterConnection: testOpenrouterConnectionMock,
     testAssemblyaiConnection: testAssemblyaiConnectionMock,
@@ -41,6 +44,7 @@ describe('SettingsView', () => {
     locale.set('es')
     invokeMock.mockReset().mockResolvedValue(undefined)
     settingsGetMock.mockReset()
+    settingsGetAllMock.mockReset().mockResolvedValue([])
     settingsSetMock.mockReset().mockResolvedValue(undefined)
     testOpenrouterConnectionMock.mockReset()
     testAssemblyaiConnectionMock.mockReset().mockResolvedValue(undefined)
@@ -87,16 +91,16 @@ describe('SettingsView', () => {
     await fireEvent.input(ocrPrompt, { target: { value: 'Custom OCR {text}' } })
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Model Params' }))
-    await fireEvent.input(screen.getByLabelText('temperature (0-2)'), { target: { value: '0.6' } })
-    await fireEvent.input(screen.getByLabelText('maxTokens (1-32000, vacío = por flujo)'), {
+    await fireEvent.input(screen.getAllByLabelText('temperature (0-2)')[0], { target: { value: '0.6' } })
+    await fireEvent.input(screen.getAllByLabelText('maxTokens (1-32000, vacío = default)')[0], {
       target: { value: '1234' },
     })
 
     await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
 
     expect(settingsSetMock).toHaveBeenCalledWith('prompt_ocr_correction', 'Custom OCR {text}')
-    expect(settingsSetMock).toHaveBeenCalledWith('llm_temperature', '0.6')
-    expect(settingsSetMock).toHaveBeenCalledWith('llm_max_tokens', '1234')
+    expect(settingsSetMock).toHaveBeenCalledWith('llm_ocr_correction_temperature', '0.6')
+    expect(settingsSetMock).toHaveBeenCalledWith('llm_ocr_correction_max_tokens', '1234')
   })
 
   it('groups OpenRouter generative and embedding models in one provider block', async () => {
@@ -147,6 +151,7 @@ describe('SettingsView', () => {
     expect(assemblyaiTestButton).toBeDefined()
     expect(glmOcrTestButton).toBeDefined()
 
+    await waitFor(() => expect(openrouterTestButton!).toBeEnabled())
     await fireEvent.click(openrouterTestButton!)
 
     expect(await screen.findByText('Conexión lista · 2 modelos disponibles.')).toBeInTheDocument()
@@ -206,7 +211,7 @@ describe('SettingsView', () => {
     render(SettingsView)
 
     const speakerSelect = await screen.findByLabelText('Identificación de hablantes')
-    expect(speakerSelect).toHaveValue('false')
+    await waitFor(() => expect(speakerSelect).toHaveValue('false'))
 
     await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
 

@@ -80,6 +80,34 @@ export const SETTINGS_KEYS = {
   LLM_PRESENCE_PENALTY: 'llm_presence_penalty',
   LLM_FREQUENCY_PENALTY: 'llm_frequency_penalty',
   LLM_STOP_SEQUENCES: 'llm_stop_sequences',
+  LLM_OCR_CORRECTION_TEMPERATURE: 'llm_ocr_correction_temperature',
+  LLM_OCR_CORRECTION_MAX_TOKENS: 'llm_ocr_correction_max_tokens',
+  LLM_OCR_CORRECTION_TOP_P: 'llm_ocr_correction_top_p',
+  LLM_OCR_CORRECTION_TOP_K: 'llm_ocr_correction_top_k',
+  LLM_OCR_CORRECTION_PRESENCE_PENALTY: 'llm_ocr_correction_presence_penalty',
+  LLM_OCR_CORRECTION_FREQUENCY_PENALTY: 'llm_ocr_correction_frequency_penalty',
+  LLM_OCR_CORRECTION_STOP_SEQUENCES: 'llm_ocr_correction_stop_sequences',
+  LLM_SUMMARY_TEMPERATURE: 'llm_summary_temperature',
+  LLM_SUMMARY_MAX_TOKENS: 'llm_summary_max_tokens',
+  LLM_SUMMARY_TOP_P: 'llm_summary_top_p',
+  LLM_SUMMARY_TOP_K: 'llm_summary_top_k',
+  LLM_SUMMARY_PRESENCE_PENALTY: 'llm_summary_presence_penalty',
+  LLM_SUMMARY_FREQUENCY_PENALTY: 'llm_summary_frequency_penalty',
+  LLM_SUMMARY_STOP_SEQUENCES: 'llm_summary_stop_sequences',
+  LLM_NER_TEMPERATURE: 'llm_ner_temperature',
+  LLM_NER_MAX_TOKENS: 'llm_ner_max_tokens',
+  LLM_NER_TOP_P: 'llm_ner_top_p',
+  LLM_NER_TOP_K: 'llm_ner_top_k',
+  LLM_NER_PRESENCE_PENALTY: 'llm_ner_presence_penalty',
+  LLM_NER_FREQUENCY_PENALTY: 'llm_ner_frequency_penalty',
+  LLM_NER_STOP_SEQUENCES: 'llm_ner_stop_sequences',
+  LLM_TRIPLETS_TEMPERATURE: 'llm_triplets_temperature',
+  LLM_TRIPLETS_MAX_TOKENS: 'llm_triplets_max_tokens',
+  LLM_TRIPLETS_TOP_P: 'llm_triplets_top_p',
+  LLM_TRIPLETS_TOP_K: 'llm_triplets_top_k',
+  LLM_TRIPLETS_PRESENCE_PENALTY: 'llm_triplets_presence_penalty',
+  LLM_TRIPLETS_FREQUENCY_PENALTY: 'llm_triplets_frequency_penalty',
+  LLM_TRIPLETS_STOP_SEQUENCES: 'llm_triplets_stop_sequences',
 } as const
 
 export type LlmMode = 'openrouter'
@@ -150,4 +178,11 @@ export const DEFAULT_MODEL_PARAMS = {
   presencePenalty: '0',
   frequencyPenalty: '0',
   stopSequences: '',
+} as const
+
+export const DEFAULT_MODEL_PARAMS_BY_FLOW = {
+  ocrCorrection: { ...DEFAULT_MODEL_PARAMS, maxTokens: '' },
+  summary: { ...DEFAULT_MODEL_PARAMS, maxTokens: '' },
+  ner: { ...DEFAULT_MODEL_PARAMS, maxTokens: '' },
+  triplets: { ...DEFAULT_MODEL_PARAMS, maxTokens: '' },
 } as const

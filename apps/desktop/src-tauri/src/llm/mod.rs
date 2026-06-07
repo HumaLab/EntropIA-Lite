@@ -29,13 +29,6 @@ const PROMPT_OCR_CORRECTION_KEY: &str = "prompt_ocr_correction";
 const PROMPT_SUMMARY_KEY: &str = "prompt_summary";
 const PROMPT_NER_KEY: &str = "prompt_ner";
 const PROMPT_TRIPLETS_KEY: &str = "prompt_triplets";
-const LLM_TEMPERATURE_KEY: &str = "llm_temperature";
-const LLM_MAX_TOKENS_KEY: &str = "llm_max_tokens";
-const LLM_TOP_P_KEY: &str = "llm_top_p";
-const LLM_TOP_K_KEY: &str = "llm_top_k";
-const LLM_PRESENCE_PENALTY_KEY: &str = "llm_presence_penalty";
-const LLM_FREQUENCY_PENALTY_KEY: &str = "llm_frequency_penalty";
-const LLM_STOP_SEQUENCES_KEY: &str = "llm_stop_sequences";
 
 /// Lite-compatible status for the legacy LLM model contract.
 #[derive(Clone, serde::Serialize)]
@@ -1416,17 +1409,31 @@ fn model_params_from_settings(
     default_max_tokens: i32,
     flow: &str,
 ) -> GenerationParams {
+    let prefix = match flow {
+        "correct_ocr" | "ocr_correction" => "llm_ocr_correction",
+        "summarize" | "summary" => "llm_summary",
+        "extract_entities" | "ner" => "llm_ner",
+        "extract_triples" | "triplets" => "llm_triplets",
+        _ => "llm",
+    };
+    let temperature_key = format!("{prefix}_temperature");
+    let max_tokens_key = format!("{prefix}_max_tokens");
+    let top_p_key = format!("{prefix}_top_p");
+    let top_k_key = format!("{prefix}_top_k");
+    let presence_penalty_key = format!("{prefix}_presence_penalty");
+    let frequency_penalty_key = format!("{prefix}_frequency_penalty");
+    let stop_sequences_key = format!("{prefix}_stop_sequences");
     let (temperature, temperature_source) =
-        parse_setting_f32(conn, LLM_TEMPERATURE_KEY, 0.3, 0.0, 2.0);
+        parse_setting_f32(conn, &temperature_key, 0.3, 0.0, 2.0);
     let (max_tokens_override, max_tokens_source) =
-        parse_optional_setting_i32(conn, LLM_MAX_TOKENS_KEY, 1, 32_000);
-    let (top_p, top_p_source) = parse_optional_setting_f32(conn, LLM_TOP_P_KEY, 0.0, 1.0);
-    let (top_k, top_k_source) = parse_optional_setting_i32(conn, LLM_TOP_K_KEY, 1, 1000);
+        parse_optional_setting_i32(conn, &max_tokens_key, 1, 32_000);
+    let (top_p, top_p_source) = parse_optional_setting_f32(conn, &top_p_key, 0.0, 1.0);
+    let (top_k, top_k_source) = parse_optional_setting_i32(conn, &top_k_key, 1, 1000);
     let (presence_penalty, presence_penalty_source) =
-        parse_optional_setting_f32(conn, LLM_PRESENCE_PENALTY_KEY, -2.0, 2.0);
+        parse_optional_setting_f32(conn, &presence_penalty_key, -2.0, 2.0);
     let (frequency_penalty, frequency_penalty_source) =
-        parse_optional_setting_f32(conn, LLM_FREQUENCY_PENALTY_KEY, -2.0, 2.0);
-    let stop_sequences = settings::get_setting(conn, LLM_STOP_SEQUENCES_KEY)
+        parse_optional_setting_f32(conn, &frequency_penalty_key, -2.0, 2.0);
+    let stop_sequences = settings::get_setting(conn, &stop_sequences_key)
         .unwrap_or_default()
         .lines()
         .map(str::trim)
@@ -1825,12 +1832,12 @@ mod tests {
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO app_settings (key, value) VALUES ('llm_max_tokens', '777')",
+            "INSERT INTO app_settings (key, value) VALUES ('llm_summary_max_tokens', '777')",
             [],
         )
         .unwrap();
         conn.execute(
-            "INSERT INTO app_settings (key, value) VALUES ('llm_temperature', '0.7')",
+            "INSERT INTO app_settings (key, value) VALUES ('llm_summary_temperature', '0.7')",
             [],
         )
         .unwrap();
@@ -1854,8 +1861,8 @@ mod tests {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
         conn.execute_batch(
             "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
-             INSERT INTO app_settings (key, value) VALUES ('llm_temperature', 'nope');
-             INSERT INTO app_settings (key, value) VALUES ('llm_max_tokens', '-1');",
+             INSERT INTO app_settings (key, value) VALUES ('llm_summary_temperature', 'nope');
+             INSERT INTO app_settings (key, value) VALUES ('llm_summary_max_tokens', '-1');",
         )
         .unwrap();
 

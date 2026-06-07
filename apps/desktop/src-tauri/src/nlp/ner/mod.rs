@@ -374,27 +374,27 @@ pub(crate) fn openrouter_settings(conn: &Connection) -> Result<(String, String),
 pub(crate) fn openrouter_generation_params(
     conn: &Connection,
 ) -> Option<crate::llm::openrouter::GenerationParams> {
-    let temperature = crate::settings::get_setting(conn, "llm_temperature")
+    let temperature = crate::settings::get_setting(conn, "llm_ner_temperature")
         .and_then(|value| value.trim().parse::<f32>().ok())
         .filter(|value| value.is_finite() && *value >= 0.0 && *value <= 2.0)
         .unwrap_or(0.3);
-    let max_tokens = crate::settings::get_setting(conn, "llm_max_tokens")
+    let max_tokens = crate::settings::get_setting(conn, "llm_ner_max_tokens")
         .and_then(|value| value.trim().parse::<i32>().ok())
         .filter(|value| *value >= 1 && *value <= 32_000)
         .unwrap_or(1024);
-    let top_p = crate::settings::get_setting(conn, "llm_top_p")
+    let top_p = crate::settings::get_setting(conn, "llm_ner_top_p")
         .and_then(|value| value.trim().parse::<f32>().ok())
         .filter(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0);
-    let top_k = crate::settings::get_setting(conn, "llm_top_k")
+    let top_k = crate::settings::get_setting(conn, "llm_ner_top_k")
         .and_then(|value| value.trim().parse::<i32>().ok())
         .filter(|value| *value >= 1 && *value <= 1000);
-    let presence_penalty = crate::settings::get_setting(conn, "llm_presence_penalty")
+    let presence_penalty = crate::settings::get_setting(conn, "llm_ner_presence_penalty")
         .and_then(|value| value.trim().parse::<f32>().ok())
         .filter(|value| value.is_finite() && *value >= -2.0 && *value <= 2.0);
-    let frequency_penalty = crate::settings::get_setting(conn, "llm_frequency_penalty")
+    let frequency_penalty = crate::settings::get_setting(conn, "llm_ner_frequency_penalty")
         .and_then(|value| value.trim().parse::<f32>().ok())
         .filter(|value| value.is_finite() && *value >= -2.0 && *value <= 2.0);
-    let stop_sequences = crate::settings::get_setting(conn, "llm_stop_sequences")
+    let stop_sequences = crate::settings::get_setting(conn, "llm_ner_stop_sequences")
         .unwrap_or_default()
         .lines()
         .map(str::trim)
