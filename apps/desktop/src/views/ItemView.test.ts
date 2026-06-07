@@ -2495,6 +2495,24 @@ describe('ItemView processing labels by asset type', () => {
     expect(await screen.findByText('No se pudo corregir el texto con OCR.')).toBeInTheDocument()
   })
 
+  it('keeps the OCRC button available after OCR correction completes', async () => {
+    await renderTextTabForAsset('image')
+    nlpEventHandlers.get('ocr:complete')?.({
+      payload: { asset_id: 'asset-image-1', method: 'paddle_vl', text_content: 'Texto OCR' },
+    })
+
+    const correctButton = await screen.findByRole('button', { name: 'OCRC' })
+    await waitFor(() => expect(correctButton).toBeEnabled())
+    await fireEvent.click(correctButton)
+
+    nlpEventHandlers.get('llm:complete')?.({
+      payload: { id: 'asset-image-1', job: 'correct_ocr', result: 'Texto corregido' },
+    })
+
+    expect(await screen.findByRole('button', { name: 'OCRC' })).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'OCRC' })).toBeEnabled())
+  })
+
   it('uses PDF-specific labels and hides OCR wording for pdf assets', async () => {
     await renderTextTabForAsset('pdf')
 

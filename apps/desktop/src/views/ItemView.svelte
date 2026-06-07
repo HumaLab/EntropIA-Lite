@@ -542,7 +542,6 @@
         nlpTick++
       }
       if (isLlmCorrectOcrJob(job)) {
-        ocrCorrectedAssets.add(id)
         ocrTick++ // Force Svelte reactivity for the textarea
         const assetId = selectOcrCorrectionAssetId({
           completedTargetId: id,
@@ -557,10 +556,6 @@
         }
       }
     },
-    onCorrectOcr: (id, _result) => {
-      // Track that OCRC already ran for this asset (from persisted results or live)
-      ocrCorrectedAssets.add(id)
-    },
     onError: (id, job, error) => {
       // When LLM triples extraction fails, set NLP triples status to error
       if (isLlmTriplesJob(job)) {
@@ -570,10 +565,6 @@
     },
   })
   let llmTick = $state(0)
-
-  // OCRC tracking: once OCRC is done for an asset, hide the button and show
-  // only Embedding + Triple buttons in the LLM section.
-  let ocrCorrectedAssets = $state(new Set<string>()) // asset IDs that have been OCRC'd
 
   let llmAvailable = $state(false)
   let summaryTexts = $state(new Map<string, string>()) // assetId → summary text
@@ -2302,7 +2293,6 @@
             transcriptionEditedText={textPanelTranscriptionEditedText}
             llmState={textPanelLlmState}
             {llmAvailable}
-            ocrCorrected={selectedAsset ? ocrCorrectedAssets.has(selectedAsset.id) : false}
             currentSummary={textPanelCurrentSummary}
             isSummarizing={textPanelIsSummarizing}
             {translate}

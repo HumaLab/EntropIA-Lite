@@ -17,7 +17,6 @@
     transcriptionEditedText,
     llmState,
     llmAvailable,
-    ocrCorrected,
     currentSummary,
     isSummarizing,
     translate,
@@ -38,7 +37,6 @@
     transcriptionEditedText: string
     llmState: ItemLlmState
     llmAvailable: boolean
-    ocrCorrected: boolean
     currentSummary: string | null
     isSummarizing: boolean
     translate: (key: I18nKey, params?: I18nParams) => string
@@ -171,7 +169,7 @@
               {translate('item.ocrHighAction')}
             </button>
           {/if}
-          {#if llmAvailable && !ocrCorrected}
+          {#if llmAvailable}
             <button
               class="ocr-btn ocr-btn--correct"
               disabled={llmState.status === 'running' || ocrState.status !== 'done'}
