@@ -4,7 +4,8 @@
 //! browser cache invalidation and support undo. The previous file is
 //! kept on disk so undo can restore it by pointing the asset path back.
 
-use image::{DynamicImage, GenericImage, GenericImageView, Rgba};
+use image::{DynamicImage, GenericImage, GenericImageView, Rgba, RgbaImage};
+use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use std::path::Path;
 
 /// Result of an image edit operation. Returned to the frontend so it can
@@ -150,6 +151,54 @@ pub fn rotate_image(path: String, direction: String) -> Result<ImageEditResult, 
     })
 }
 
+/// Rotate an image by an arbitrary number of degrees.
+///
+/// Saves the result as a NEW PNG versioned file with an expanded transparent
+/// canvas so corners are not clipped by the rotation.
+#[tauri::command]
+pub fn rotate_image_degrees(path: String, degrees: f32) -> Result<ImageEditResult, String> {
+    if !degrees.is_finite() {
+        return Err("Rotation degrees must be finite".to_string());
+    }
+    if degrees.abs() < f32::EPSILON {
+        return Err("Rotation degrees must be non-zero".to_string());
+    }
+    if degrees.abs() > 360.0 {
+        return Err("Rotation degrees must be between -360 and 360".to_string());
+    }
+
+    let img = image::open(&path).map_err(|e| format!("Failed to open image: {e}"))?;
+    let source = img.to_rgba8();
+    let (orig_w, orig_h) = source.dimensions();
+    let radians = degrees.to_radians();
+    let sin = radians.sin().abs();
+    let cos = radians.cos().abs();
+    let expanded_w = ((orig_w as f32 * cos) + (orig_h as f32 * sin)).ceil() as u32;
+    let expanded_h = ((orig_w as f32 * sin) + (orig_h as f32 * cos)).ceil() as u32;
+    let transparent = Rgba([255, 255, 255, 0]);
+    let mut canvas = RgbaImage::from_pixel(expanded_w.max(1), expanded_h.max(1), transparent);
+    let offset_x = ((canvas.width() - orig_w) / 2) as i64;
+    let offset_y = ((canvas.height() - orig_h) / 2) as i64;
+    image::imageops::overlay(&mut canvas, &source, offset_x, offset_y);
+
+    let rotated = rotate_about_center(&canvas, radians, Interpolation::Bilinear, transparent);
+    let new_path = next_version_path(&path, Some("png"));
+    DynamicImage::ImageRgba8(rotated)
+        .save_with_format(&new_path, image::ImageFormat::Png)
+        .map_err(|e| format!("Failed to save fine-rotated image: {e}"))?;
+
+    Ok(ImageEditResult {
+        path: new_path,
+        width: canvas.width(),
+        height: canvas.height(),
+        format_changed: !Path::new(&path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|ext| ext.eq_ignore_ascii_case("png")),
+        previous_path: path,
+    })
+}
+
 /// Erase (fill) a rectangular region of an image with a solid or transparent color.
 ///
 /// Saves the result as a NEW versioned file (never in-place).
@@ -233,4 +282,37 @@ pub fn erase_region(
         format_changed: needs_conversion,
         previous_path: path,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::{ImageBuffer, ImageFormat};
+
+    #[test]
+    fn rotate_image_degrees_writes_versioned_png_with_expanded_bounds() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source_path = dir.path().join("sample.jpg");
+        let img = ImageBuffer::from_pixel(10, 4, Rgba([255, 0, 0, 255]));
+        DynamicImage::ImageRgba8(img)
+            .save_with_format(&source_path, ImageFormat::Jpeg)
+            .expect("save source");
+
+        let result = rotate_image_degrees(source_path.to_string_lossy().to_string(), 45.0)
+            .expect("fine rotate image");
+
+        assert_eq!(result.previous_path, source_path.to_string_lossy());
+        assert!(result.path.ends_with("sample_v2.png"));
+        assert!(Path::new(&result.path).exists());
+        assert!(result.format_changed);
+        assert!(result.width >= 10);
+        assert!(result.height > 4);
+    }
+
+    #[test]
+    fn rotate_image_degrees_rejects_invalid_degrees() {
+        assert!(rotate_image_degrees("missing.png".to_string(), 0.0).is_err());
+        assert!(rotate_image_degrees("missing.png".to_string(), f32::NAN).is_err());
+        assert!(rotate_image_degrees("missing.png".to_string(), 361.0).is_err());
+    }
 }

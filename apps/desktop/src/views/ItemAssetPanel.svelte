@@ -54,6 +54,7 @@
     onEditToolChange,
     onRotateLeft,
     onRotateRight,
+    onFineRotateCommit,
     onUndo,
     onPageChange,
     onDimensionsChange,
@@ -92,6 +93,7 @@
     onEditToolChange: (tool: EditTool) => void
     onRotateLeft: () => void | Promise<void>
     onRotateRight: () => void | Promise<void>
+    onFineRotateCommit: (degrees: number) => void | Promise<void>
     onUndo: () => void | Promise<void>
     onPageChange: (page: number, totalPages: number) => void
     onDimensionsChange: (dimensions: { width: number; height: number }) => void
@@ -172,6 +174,7 @@
         {onEditToolChange}
         {onRotateLeft}
         {onRotateRight}
+        {onFineRotateCommit}
         {onUndo}
         {onPageChange}
         {onDimensionsChange}

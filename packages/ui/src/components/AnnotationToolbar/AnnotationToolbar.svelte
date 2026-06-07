@@ -27,6 +27,7 @@
     canFineRotateLeft?: boolean
     canFineRotateRight?: boolean
     onFineRotate?: (deltaDegrees: number) => void
+    onFineRotateCommit?: () => void | Promise<void>
     onUndo?: () => void
     zoomPercent?: number | null
     canZoomOut?: boolean
@@ -103,6 +104,7 @@
     canFineRotateLeft = true,
     canFineRotateRight = true,
     onFineRotate = () => {},
+    onFineRotateCommit = () => {},
     onUndo = () => {},
     zoomPercent = null,
     canZoomOut = false,
@@ -239,6 +241,10 @@
     onFineRotate(direction * steps)
   }
 
+  function commitFineRotation() {
+    void onFineRotateCommit()
+  }
+
   function startFineRotationDrag(direction: -1 | 1, event: PointerEvent) {
     if (!canApplyFineRotation(direction)) return
     event.preventDefault()
@@ -283,6 +289,10 @@
       applyFineRotation(fineRotationDrag.direction, 1)
     }
 
+    if (applyOnRelease) {
+      commitFineRotation()
+    }
+
     fineRotationDrag = null
     suppressFineRotationClick = true
     setTimeout(() => {
@@ -297,6 +307,7 @@
     }
 
     applyFineRotation(direction, 1)
+    commitFineRotation()
   }
 
   function handleFineRotationWheel(direction: -1 | 1, event: WheelEvent) {
@@ -305,6 +316,7 @@
     const wheelDistance = Math.max(Math.abs(event.deltaY), Math.abs(event.deltaX))
     const steps = Math.max(1, Math.round(wheelDistance / 100))
     applyFineRotation(direction, steps)
+    commitFineRotation()
   }
 
 </script>

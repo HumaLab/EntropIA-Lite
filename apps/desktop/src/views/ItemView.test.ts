@@ -18,6 +18,7 @@ const {
   clipboardWriteTextMock,
   llmIsAvailableMock,
   invokeMock,
+  emitMock,
 } = vi.hoisted(() => ({
   nlpEventHandlers: new Map<string, (event: { payload: unknown }) => void>(),
   embedAssetMock: vi.fn<(_: string, __: string) => Promise<void>>(),
@@ -56,6 +57,7 @@ const {
     if (command === 'db_select') return []
     return null
   }),
+  emitMock: vi.fn<(_: string, __?: unknown) => Promise<void>>(),
 }))
 
 type TripleRow = { subject: string; predicate: string; object: string }
@@ -330,6 +332,7 @@ vi.mock('@tauri-apps/api/event', () => ({
     nlpEventHandlers.set(eventName, callback)
     return Promise.resolve(vi.fn())
   }),
+  emit: emitMock,
 }))
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -426,6 +429,7 @@ beforeEach(() => {
   })
   clipboardWriteTextMock.mockReset().mockResolvedValue(undefined)
   llmIsAvailableMock.mockReset().mockResolvedValue(true)
+  emitMock.mockReset().mockResolvedValue(undefined)
   extractEntitiesForAssetMock.mockReset().mockResolvedValue(undefined)
   indexFtsMock.mockReset().mockResolvedValue(undefined)
   invokeMock.mockReset().mockImplementation(async (command: string) => {
@@ -1499,6 +1503,55 @@ describe('ItemView image annotations', () => {
       expect(screen.getByTestId('viewer-type')).toHaveTextContent('pdf')
     })
     expect(storeRef.current.annotations.findByAsset).not.toHaveBeenCalled()
+  })
+
+  it('persists fine image rotation through the rotate_image_degrees command', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-image-1',
+          itemId: 'item-1',
+          path: 'docs/photo-a.jpg',
+          type: 'image',
+          createdAt: 1,
+        },
+      ],
+    })
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'rotate_image_degrees') {
+        return {
+          path: 'docs/photo-a_v2.png',
+          width: 206,
+          height: 111,
+          format_changed: true,
+          previous_path: 'docs/photo-a.jpg',
+        }
+      }
+      if (command === 'llm_get_results') return []
+      if (command === 'llm_get_result') return null
+      if (command === 'llm_is_available') return true
+      if (command === 'db_select') return []
+      return null
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+    await fireEvent.click(screen.getByRole('button', { name: /report image dimensions/i }))
+    await fireEvent.click(screen.getByRole('button', { name: /commit fine rotation/i }))
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('rotate_image_degrees', {
+        path: 'docs/photo-a.jpg',
+        degrees: 3,
+      })
+    })
+    await waitFor(() => {
+      expect(storeRef.current.assets.updatePath).toHaveBeenCalledWith(
+        'asset-image-1',
+        'docs/photo-a_v2.png'
+      )
+    })
   })
 
   it('reloads persisted layout after ocr:complete for the current asset', async () => {

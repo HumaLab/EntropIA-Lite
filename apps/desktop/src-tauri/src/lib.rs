@@ -422,6 +422,7 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             geo::commands::geocode_item_entities,
             image_edit::crop_image,
             image_edit::rotate_image,
+            image_edit::rotate_image_degrees,
             image_edit::erase_region,
             settings::settings_get,
             settings::settings_set,

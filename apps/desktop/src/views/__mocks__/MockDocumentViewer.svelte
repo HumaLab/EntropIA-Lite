@@ -17,6 +17,8 @@
     onSelectedAnnotationIdChange = () => {},
     onAnnotationToolChange = () => {},
     onAnnotationColorChange = () => {},
+    onDimensionsChange = () => {},
+    onFineRotateCommit = () => {},
   } = $props()
 
   function createDraftAnnotation() {
@@ -78,5 +80,11 @@
   <button type="button" onclick={() => onAnnotationToolChange('rectangle')}>Rectangle tool</button>
   <button type="button" onclick={() => onAnnotationColorChange('var(--color-warning)')}>
     Warning color
+  </button>
+  <button type="button" onclick={() => onDimensionsChange({ width: 200, height: 100 })}>
+    Report image dimensions
+  </button>
+  <button type="button" onclick={() => onFineRotateCommit(3)}>
+    Commit fine rotation
   </button>
 </div>

@@ -864,6 +864,38 @@ describe('DocumentViewer', () => {
       expect(rotationInfo).toHaveTextContent('+5°')
     })
 
+    it('commits fine rotation after click, wheel, and drag gestures with the final angle', async () => {
+      const onFineRotateCommit = vi.fn()
+
+      render(DocumentViewer, {
+        props: {
+          path: '/path/to/image.jpg',
+          type: 'image',
+          assetUrl: 'asset://localhost/path/to/image.jpg',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+          onFineRotateCommit,
+        },
+      })
+
+      const rotateRight = screen.getByRole('button', { name: /fine rotation right/i })
+
+      await fireEvent.click(rotateRight)
+      expect(onFineRotateCommit).toHaveBeenLastCalledWith(1)
+
+      await fireEvent.wheel(rotateRight, { deltaY: 200 })
+      expect(onFineRotateCommit).toHaveBeenLastCalledWith(3)
+
+      await fireEvent.pointerDown(rotateRight, { pointerId: 2, clientX: 0, clientY: 0, button: 0 })
+      await fireEvent.pointerMove(rotateRight, { pointerId: 2, clientX: 36, clientY: 0, button: 0 })
+      await fireEvent.pointerUp(rotateRight, { pointerId: 2, clientX: 36, clientY: 0, button: 0 })
+
+      expect(onFineRotateCommit).toHaveBeenLastCalledWith(6)
+      expect(onFineRotateCommit).toHaveBeenCalledTimes(3)
+    })
+
     it('toggles the hand pan tool and resets edit/annotation modes', async () => {
       const onAnnotationToolChange = vi.fn()
       const onEditToolChange = vi.fn()

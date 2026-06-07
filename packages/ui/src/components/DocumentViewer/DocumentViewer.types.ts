@@ -66,6 +66,7 @@ export interface DocumentViewerProps {
   onEditToolChange?: (tool: EditTool) => void
   onRotateLeft?: () => void
   onRotateRight?: () => void
+  onFineRotateCommit?: (degrees: number) => void | Promise<void>
   onUndo?: () => void
   onPageChange?: (page: number, totalPages: number) => void
   onDimensionsChange?: (dimensions: { width: number; height: number }) => void

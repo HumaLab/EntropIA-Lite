@@ -32,6 +32,7 @@
     onEditToolChange = () => {},
     onRotateLeft = () => {},
     onRotateRight = () => {},
+    onFineRotateCommit = () => {},
     onUndo = () => {},
     onPageChange = () => {},
     onDimensionsChange = () => {},
@@ -667,6 +668,11 @@
     imageRotation = clampFineRotation(imageRotation + deltaDegrees)
   }
 
+  function commitFineRotation() {
+    if (imageRotation === 0) return
+    void onFineRotateCommit(imageRotation)
+  }
+
   // ── PDF ─────────────────────────────────────────────────────────────
   function resetViewerState() {
     loading = false
@@ -837,6 +843,7 @@
           {canFineRotateLeft}
           {canFineRotateRight}
           onFineRotate={adjustFineRotation}
+          onFineRotateCommit={commitFineRotation}
           {onUndo}
           zoomPercent={Math.round(imageZoom * 100)}
           {canZoomOut}

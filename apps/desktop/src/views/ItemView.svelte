@@ -1053,6 +1053,38 @@
     }
   }
 
+  async function handleFineRotateCommit(degrees: number) {
+    if (!selectedAsset || selectedAsset.type !== 'image') return
+    if (!Number.isFinite(degrees) || degrees === 0) return
+
+    await flushPendingAnnotationSave()
+    const asset = selectedAsset
+
+    undoStack = appendImageEditUndoEntry(
+      undoStack,
+      createImageEditUndoEntry({
+        path: asset.path,
+        width: imageNaturalW,
+        height: imageNaturalH,
+        annotations,
+      })
+    )
+
+    try {
+      const result: ImageEditResult = await invoke('rotate_image_degrees', {
+        path: asset.path,
+        degrees,
+      })
+      // Free-angle rotation persists the pixels; rectangular annotations remain in
+      // their existing normalized coordinate model because arbitrary rotation would
+      // require polygon annotations or lossy bounding-box projection.
+      await handleImageEditResult(result, asset.id)
+    } catch (e) {
+      undoStack = discardLatestImageEditUndoEntry(undoStack)
+      console.error('[ItemView] Fine rotation failed:', e)
+    }
+  }
+
   /** Undo the last image edit: restore the asset path, dimensions,
    *  and annotations to the previous state. */
   async function handleUndo() {
@@ -2027,6 +2059,7 @@
         }}
         onRotateLeft={handleRotateLeft}
         onRotateRight={handleRotateRight}
+        onFineRotateCommit={handleFineRotateCommit}
         onUndo={handleUndo}
         onPageChange={(page: number, totalPages: number) => {
           viewerPage = page
