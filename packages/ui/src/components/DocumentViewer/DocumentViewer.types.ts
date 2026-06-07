@@ -69,6 +69,7 @@ export interface DocumentViewerProps {
   onUndo?: () => void
   onPageChange?: (page: number, totalPages: number) => void
   onDimensionsChange?: (dimensions: { width: number; height: number }) => void
+  audioFallbackBlobLoader?: (nativePath: string) => Promise<Blob>
   labels?: Partial<DocumentViewerLabels>
   annotationToolbarLabels?: Record<string, unknown>
 }

@@ -35,6 +35,7 @@
     onUndo = () => {},
     onPageChange = () => {},
     onDimensionsChange = () => {},
+    audioFallbackBlobLoader,
     labels: labelsProp = {},
     annotationToolbarLabels = {},
   }: DocumentViewerProps = $props()
@@ -63,6 +64,9 @@
   }
 
   const labels = $derived({ ...defaultLabels, ...labelsProp })
+  const audioPlayerFallbackBlobLoader = $derived(
+    audioFallbackBlobLoader ? () => audioFallbackBlobLoader(_path) : undefined
+  )
 
   const presetColors = [
     { value: 'var(--color-accent)', label: 'Accent' },
@@ -1087,6 +1091,7 @@
   {:else if type === 'audio'}
     <AudioPlayer
       src={assetUrl}
+      fallbackBlobLoader={audioPlayerFallbackBlobLoader}
       labels={{
         skipBack: labels.audioSkipBack,
         play: labels.audioPlay,

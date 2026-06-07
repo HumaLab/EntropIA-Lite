@@ -13,9 +13,11 @@
 
   let {
     src,
+    fallbackBlobLoader,
     labels: labelsProp = {},
   }: {
     src: string
+    fallbackBlobLoader?: () => Promise<Blob>
     labels?: Partial<AudioPlayerLabels>
   } = $props()
 
@@ -37,6 +39,8 @@
   let audioEl: HTMLAudioElement | undefined = $state()
   let blobUrl = $state<string | null>(null)
   let loadError = $state(false)
+  let fallbackDiagnostic = $state<string | null>(null)
+  let fallbackStage = $state<string | null>(null)
   let activeBlobUrl: string | null = null
   let lastSrc: string | null = null
   let fallbackAttempt = 0
@@ -50,6 +54,8 @@
     currentTime = 0
     duration = 0
     loadError = false
+    fallbackDiagnostic = null
+    fallbackStage = null
     clearBlobUrl()
 
     if (audioEl) {
@@ -139,35 +145,75 @@
     volume = audioEl.volume
   }
 
-  function handleError() {
+  async function handleError() {
     if (!src || !audioEl) return
 
     if (blobUrl) {
+      failFallbackPlayback()
       loadError = true
       return
     }
 
     const attemptedSrc = src
     const attempt = ++fallbackAttempt
-    fetch(attemptedSrc)
-      .then((response) => {
-        if (!response.ok) throw new Error(`HTTP ${response.status}`)
-        return response.blob()
-      })
-      .then((blob) => {
+
+    try {
+      const blob = fallbackBlobLoader
+        ? await fallbackBlobLoader()
+        : await fetchFallbackBlob(attemptedSrc)
+      if (attempt !== fallbackAttempt || attemptedSrc !== src || !audioEl) return
+
+      const typedBlob = ensureAudioBlobType(blob, attemptedSrc)
+      const nextBlobUrl = URL.createObjectURL(typedBlob)
+      replaceBlobUrl(nextBlobUrl)
+      fallbackStage = 'custom-loader'
+      audioEl.src = nextBlobUrl
+      audioEl.load()
+    } catch (customFallbackError) {
+      if (attempt !== fallbackAttempt || attemptedSrc !== src || !audioEl) return
+
+      if (!fallbackBlobLoader) {
+        failFallbackLoad(customFallbackError)
+        return
+      }
+
+      try {
+        const blob = await fetchFallbackBlob(attemptedSrc)
         if (attempt !== fallbackAttempt || attemptedSrc !== src || !audioEl) return
 
         const typedBlob = ensureAudioBlobType(blob, attemptedSrc)
         const nextBlobUrl = URL.createObjectURL(typedBlob)
         replaceBlobUrl(nextBlobUrl)
+        fallbackStage = 'fetch'
         audioEl.src = nextBlobUrl
         audioEl.load()
-      })
-      .catch((err) => {
+      } catch (fetchFallbackError) {
         if (attempt !== fallbackAttempt) return
-        console.error('[AudioPlayer] Fallback load failed:', err)
-        loadError = true
-      })
+        failFallbackLoad(fetchFallbackError, customFallbackError)
+      }
+    }
+  }
+
+  async function fetchFallbackBlob(source: string): Promise<Blob> {
+    const response = await fetch(source)
+    if (!response.ok) throw new Error(`HTTP ${response.status}`)
+    return response.blob()
+  }
+
+  function failFallbackLoad(error: unknown, customFallbackError?: unknown) {
+    console.error('[AudioPlayer] Fallback load failed:', error)
+    if (customFallbackError) {
+      console.error('[AudioPlayer] Custom fallback load failed:', customFallbackError)
+    }
+    fallbackDiagnostic = error instanceof Error ? error.message : null
+    loadError = true
+  }
+
+  function failFallbackPlayback() {
+    const code = audioEl?.error?.code
+    const detail = code ? `media error code ${code}` : 'unknown media error'
+    fallbackDiagnostic = `Fallback audio loaded via ${fallbackStage ?? 'blob'}, but playback failed (${detail})`
+    console.error('[AudioPlayer] Fallback playback failed:', fallbackDiagnostic)
   }
 
   function replaceBlobUrl(nextBlobUrl: string) {
@@ -230,8 +276,8 @@
 
   {#if loadError}
     <p class="audio-player__error" data-testid="audio-load-error">
-      No se pudo reproducir el audio. En Linux, esto suele deberse a una incompatibilidad entre
-      WebKitGTK y GStreamer. Verificá que tu sistema tenga GStreamer ≥ 1.22.
+      No se pudo reproducir el audio. Probá abrir el archivo original o convertirlo a un formato
+      compatible.{#if fallbackDiagnostic} Detalle: {fallbackDiagnostic}.{/if}
     </p>
   {/if}
 

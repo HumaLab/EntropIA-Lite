@@ -1047,6 +1047,41 @@ describe('DocumentViewer', () => {
     })
   })
 
+  describe('audio mode', () => {
+    it('passes the native path to the audio fallback blob loader', async () => {
+      Object.defineProperty(URL, 'createObjectURL', {
+        configurable: true,
+        value: vi.fn(() => 'blob:audio-fallback'),
+      })
+      Object.defineProperty(URL, 'revokeObjectURL', {
+        configurable: true,
+        value: vi.fn(),
+      })
+      const fetchMock = vi.fn()
+      const audioFallbackBlobLoader = vi
+        .fn()
+        .mockResolvedValue(new Blob(['audio'], { type: 'audio/wav' }))
+      vi.stubGlobal('fetch', fetchMock)
+
+      render(DocumentViewer, {
+        props: {
+          path: 'C:/audio/interview.wav',
+          type: 'audio',
+          assetUrl: 'asset://localhost/audio/interview.wav',
+          audioFallbackBlobLoader,
+        },
+      })
+      const audio = screen.getByTestId('audio-player').querySelector('audio') as HTMLAudioElement
+
+      await fireEvent.error(audio)
+
+      await waitFor(() =>
+        expect(audioFallbackBlobLoader).toHaveBeenCalledWith('C:/audio/interview.wav')
+      )
+      expect(fetchMock).not.toHaveBeenCalled()
+    })
+  })
+
   describe('pdf mode', () => {
     it('renders a canvas element for PDF', () => {
       render(DocumentViewer, {

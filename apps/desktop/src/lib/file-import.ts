@@ -1,5 +1,5 @@
 import { open } from '@tauri-apps/plugin-dialog'
-import { copyFile, mkdir, remove, stat } from '@tauri-apps/plugin-fs'
+import { copyFile, mkdir, readFile, remove, stat } from '@tauri-apps/plugin-fs'
 import { appDataDir, join } from '@tauri-apps/api/path'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { invoke } from '@tauri-apps/api/core'
@@ -301,6 +301,17 @@ export async function generatePdfThumbnail(
     assetId,
   })
   return convertFileSrc(nativePath)
+}
+
+export async function loadAudioPreviewBlob(assetPath: string): Promise<Blob> {
+  try {
+    const previewPath: string = await invoke('prepare_audio_preview', { assetPath })
+    const bytes = await readFile(previewPath)
+    return new Blob([bytes], { type: 'audio/wav' })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new Error(`Audio preview preparation failed: ${message}`)
+  }
 }
 
 /**

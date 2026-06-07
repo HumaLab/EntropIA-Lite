@@ -1,4 +1,5 @@
 mod app_logs;
+mod audio_preview;
 mod db;
 pub mod deps;
 mod geo;
@@ -400,6 +401,7 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             transcription::commands::transcribe_dictation,
             transcription::commands::test_assemblyai_connection,
             transcription::commands::update_transcription_text_cmd,
+            audio_preview::prepare_audio_preview,
             llm::commands::llm_correct_ocr,
             llm::commands::llm_extract_entities,
             llm::commands::llm_extract_triples,

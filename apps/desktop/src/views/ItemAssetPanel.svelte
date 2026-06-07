@@ -11,6 +11,7 @@
     type ViewerType,
   } from '@entropia/ui'
   import type { I18nKey, I18nParams } from '$lib/i18n'
+  import { loadAudioPreviewBlob } from '$lib/file-import'
   import type { Asset } from '@entropia/store'
   import type { AssetOcrState } from '$lib/ocr'
   import type { AssetTranscriptionState } from '$lib/transcription'
@@ -104,6 +105,10 @@
       leftPanelTab = 'document'
     }
   })
+
+  async function loadAudioFallbackBlob(nativePath: string): Promise<Blob> {
+    return loadAudioPreviewBlob(nativePath)
+  }
 </script>
 
 {#if selectedAsset}
@@ -170,6 +175,7 @@
         {onUndo}
         {onPageChange}
         {onDimensionsChange}
+        audioFallbackBlobLoader={loadAudioFallbackBlob}
         labels={documentViewerLabels}
         {annotationToolbarLabels}
       />
