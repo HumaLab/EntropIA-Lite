@@ -328,13 +328,43 @@ export async function deletePdfThumbnail(assetId: string): Promise<void> {
 // Scanned PDF detection and page conversion
 // ---------------------------------------------------------------------------
 
+export type PageKind = 'Native' | 'ImageOnly' | 'ImageWithOcr' | 'Uncertain'
+
+export type PageProfile = {
+  page_number: number
+  has_text: boolean
+  text_chars: number
+  image_count: number
+  largest_image_ratio: number
+  full_page_image_like: boolean
+  kind: PageKind
+}
+
+export type DocumentProfile = {
+  pages: PageProfile[]
+  native_pages: number
+  image_only_pages: number
+  image_with_ocr_pages: number
+  uncertain_pages: number
+  dominant_kind: PageKind
+  mixed: boolean
+  should_render_as_images: boolean
+}
+
 /**
- * Check whether a PDF file is scanned (image-only) by testing if its native
- * text layer passes quality checks. Returns true if the PDF should be split
- * into per-page image assets.
+ * Build a conservative per-page PDF profile. Only confidently native PDFs stay
+ * as PDF; uncertain, mixed, image-only, and image-with-OCR PDFs are routed to
+ * per-page image rendering.
+ */
+export async function probePdf(assetPath: string): Promise<DocumentProfile> {
+  return invoke<DocumentProfile>('probe_pdf', { assetPath })
+}
+
+/**
+ * Check whether a PDF file should be split into per-page image assets.
  *
- * Calls the Rust `is_scanned_pdf` command which reads the PDF, attempts native
- * text extraction, and checks if the result has ≥50 alphanumeric characters.
+ * Backward-compatible wrapper around the conservative backend profile: returns
+ * true for image-only, image-with-OCR, mixed, or uncertain PDFs.
  */
 export async function isScannedPdf(assetPath: string): Promise<boolean> {
   return invoke<boolean>('is_scanned_pdf', { assetPath })

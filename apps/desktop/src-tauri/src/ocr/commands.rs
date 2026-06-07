@@ -209,17 +209,33 @@ pub async fn is_scanned_pdf(
         .map_err(|e| format!("Failed to read PDF file: {e}"))?;
 
     let is_scanned = tokio::task::spawn_blocking(move || {
-        // Try native text extraction first
-        let native_text = super::pdf::extract_pdf_text(&bytes);
-        match native_text {
-            Ok(text) => !super::pdf::is_quality_text(&text),
-            Err(_) => true, // If extraction itself fails, treat as scanned
-        }
+        super::pdf_probe::profile_pdf_bytes(&bytes).map(|profile| profile.should_render_as_images)
     })
     .await
-    .map_err(|e| format!("PDF check task panicked: {e}"))?;
+    .map_err(|e| format!("PDF check task panicked: {e}"))??;
 
     Ok(is_scanned)
+}
+
+/// Build a conservative per-page profile for a PDF.
+///
+/// Only confidently native documents should stay as PDF; mixed, uncertain,
+/// image-only, and image-with-OCR documents should be rendered as image pages.
+#[tauri::command]
+pub async fn probe_pdf(
+    asset_path: String,
+    app_handle: tauri::AppHandle,
+) -> Result<super::pdf_probe::DocumentProfile, String> {
+    super::pdf::init_pdfium_path(&app_handle);
+
+    let bytes = tokio::task::spawn_blocking(move || std::fs::read(&asset_path))
+        .await
+        .map_err(|e| format!("Failed to read PDF file: {e}"))?
+        .map_err(|e| format!("Failed to read PDF file: {e}"))?;
+
+    tokio::task::spawn_blocking(move || super::pdf_probe::profile_pdf_bytes(&bytes))
+        .await
+        .map_err(|e| format!("PDF profile task panicked: {e}"))?
 }
 
 /// Render all pages of a PDF as PNG images and save them to disk.
@@ -257,18 +273,6 @@ pub async fn render_pdf_pages(
         let bytes =
             std::fs::read(&pdf_path).map_err(|e| format!("Failed to read PDF file: {e}"))?;
 
-        // Check if PDF has quality text (skip rendering if it's a text PDF)
-        // This is a safety check — the frontend should only call this for scanned PDFs
-        let native_text = super::pdf::extract_pdf_text(&bytes);
-        if let Ok(ref text) = native_text {
-            if super::pdf::is_quality_text(text) {
-                return Err(
-                    "PDF has quality native text — not a scanned PDF. Use as PDF asset instead."
-                        .to_string(),
-                );
-            }
-        }
-
         let page_count = super::pdf::pdf_page_count(&bytes)
             .map_err(|e| format!("Failed to get PDF page count: {e}"))?;
 
@@ -297,7 +301,7 @@ pub async fn render_pdf_pages(
             eprintln!("[render_pdf_pages] Rendered page {page_number}/{page_count}");
         }
 
-        Ok(rendered_pages)
+        Ok::<Vec<RenderedPage>, String>(rendered_pages)
     })
     .await
     .map_err(|e| format!("PDF render task panicked: {e}"))??;

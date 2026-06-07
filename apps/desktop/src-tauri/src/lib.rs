@@ -383,6 +383,7 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             ocr::commands::generate_pdf_thumbnail,
             ocr::commands::delete_pdf_thumbnail,
             ocr::commands::is_scanned_pdf,
+            ocr::commands::probe_pdf,
             ocr::commands::render_pdf_pages,
             nlp::commands::index_fts,
             nlp::commands::embed_asset,

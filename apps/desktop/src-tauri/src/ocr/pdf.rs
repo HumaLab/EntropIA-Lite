@@ -1,10 +1,7 @@
-//! PDF text extraction and page rendering for OCR fallback.
+//! PDF page rendering for OCR fallback.
 //!
-//! Two extraction strategies:
-//! 1. **Native text** — `extract_pdf_text()` extracts embedded text via `pdf-extract`.
-//!    Fast and accurate for text-based PDFs. Quality-checked with `is_quality_text()`.
-//! 2. **Page rendering** — `render_pdf_page_to_image()` renders a PDF page as PNG
-//!    bitmap via `pdfium-render`, enabling OCR fallback for scanned/image-based PDFs.
+//! `render_pdf_page_to_image()` renders a PDF page as a PNG bitmap via
+//! `pdfium-render`, enabling OCR fallback for scanned/image-based PDFs.
 //!
 //! Thumbnails:
 //! - `render_pdf_thumbnail()` renders the first page at 400px width, suitable for
@@ -183,7 +180,7 @@ fn strip_windows_prefix(path: PathBuf) -> PathBuf {
 /// # Errors
 /// Returns `Err` with a human-readable message if the Pdfium native
 /// library cannot be loaded (missing DLL/so/dylib, wrong architecture, etc.).
-fn get_pdfium() -> Result<Pdfium, String> {
+pub(super) fn get_pdfium() -> Result<Pdfium, String> {
     let cached_path = PDFIUM_PATH
         .get()
         .and_then(|cache| cache.lock().ok().and_then(|path| path.clone()));
@@ -250,17 +247,11 @@ fn dll_name_display() -> &'static str {
     }
 }
 
-/// Extract text from the native text layer of a PDF byte slice.
-/// Returns the raw extracted text or an error message.
-pub fn extract_pdf_text(bytes: &[u8]) -> Result<String, String> {
-    pdf_extract::extract_text_from_mem(bytes)
-        .map_err(|e| format!("PDF text extraction failed: {e}"))
-}
-
 /// Returns `true` if the text contains at least `MIN_ALPHANUM_CHARS` valid
 /// UTF-8 alphanumeric characters. Used to decide whether native PDF text is
 /// rich enough or we should fall back to OCR.
-pub fn is_quality_text(text: &str) -> bool {
+#[cfg(test)]
+fn is_quality_text(text: &str) -> bool {
     const MIN_ALPHANUM_CHARS: usize = 50;
     text.chars().filter(|c| c.is_alphanumeric()).count() >= MIN_ALPHANUM_CHARS
 }

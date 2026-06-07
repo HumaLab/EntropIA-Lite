@@ -219,8 +219,17 @@
           // If page conversion failed, fall through to create a regular PDF asset
         }
       } catch (e) {
-        console.warn('[CollectionView] Scanned PDF detection failed, treating as text PDF:', e)
-        // Fall through to create a regular PDF asset
+        console.warn('[CollectionView] PDF profile failed, trying image-page conversion:', e)
+        const pages = await convertScannedPdfToPages(imported, collectionId, itemId, store)
+        if (pages.length > 0) {
+          try {
+            await deleteAssetFile(imported.destPath)
+          } catch (deleteError) {
+            console.warn('[CollectionView] Failed to delete original PDF after fallback conversion:', deleteError)
+          }
+          return
+        }
+        // If both profiling and rendering fail, keep the imported PDF as the recoverable fallback.
       }
     }
 

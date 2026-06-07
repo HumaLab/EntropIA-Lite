@@ -1,5 +1,6 @@
 pub mod commands;
 pub mod glm_ocr;
+pub mod pdf_probe;
 pub mod postprocess;
 pub mod provider;
 
