@@ -4,6 +4,9 @@ use tauri::{AppHandle, State};
 
 use crate::db::state::AppDbState;
 const SECRET_REF_PREFIX: &str = "secret_ref:";
+const OPENROUTER_MODEL_KEY: &str = "openrouter_model";
+const LEGACY_DEFAULT_OPENROUTER_MODEL: &str = "google/gemma-3-4b-it";
+const DEFAULT_OPENROUTER_MODEL: &str = "google/gemma-4-26b-a4b-it";
 const SECRET_SERVICE: &str = "EntropIA Lite";
 const SECRET_KEYS: &[&str] = &[
     "openrouter_api_key",
@@ -272,11 +275,74 @@ pub fn get_setting(conn: &rusqlite::Connection, key: &str) -> Option<String> {
     resolve_secret_ref(key, &value).or(Some(value))
 }
 
+pub fn migrate_legacy_default_openrouter_model(
+    conn: &rusqlite::Connection,
+) -> Result<(), String> {
+    conn.execute(
+        "UPDATE app_settings SET value = ?1 WHERE key = ?2 AND value = ?3",
+        rusqlite::params![
+            DEFAULT_OPENROUTER_MODEL,
+            OPENROUTER_MODEL_KEY,
+            LEGACY_DEFAULT_OPENROUTER_MODEL
+        ],
+    )
+    .map(|_| ())
+    .map_err(|e| format!("Failed to migrate default OpenRouter model: {e}"))
+}
+
 pub fn get_secret_setting(conn: &rusqlite::Connection, key: &str) -> Option<String> {
     let value = get_setting(conn, key)?;
     if value.trim().starts_with(SECRET_REF_PREFIX) {
         None
     } else {
         Some(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn setup_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch(
+            "CREATE TABLE app_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);",
+        )
+        .expect("settings table");
+        conn
+    }
+
+    #[test]
+    fn migrates_only_legacy_default_openrouter_model() {
+        let conn = setup_conn();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)",
+            params![OPENROUTER_MODEL_KEY, LEGACY_DEFAULT_OPENROUTER_MODEL],
+        )
+        .expect("insert legacy default");
+
+        migrate_legacy_default_openrouter_model(&conn).expect("migration");
+
+        assert_eq!(
+            get_setting(&conn, OPENROUTER_MODEL_KEY).as_deref(),
+            Some(DEFAULT_OPENROUTER_MODEL)
+        );
+    }
+
+    #[test]
+    fn preserves_custom_openrouter_model() {
+        let conn = setup_conn();
+        conn.execute(
+            "INSERT INTO app_settings (key, value) VALUES (?1, ?2)",
+            params![OPENROUTER_MODEL_KEY, "anthropic/claude-3.7-sonnet"],
+        )
+        .expect("insert custom model");
+
+        migrate_legacy_default_openrouter_model(&conn).expect("migration");
+
+        assert_eq!(
+            get_setting(&conn, OPENROUTER_MODEL_KEY).as_deref(),
+            Some("anthropic/claude-3.7-sonnet")
+        );
     }
 }
