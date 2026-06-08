@@ -133,7 +133,7 @@ export class AssetRepo {
    * so the caller can remove the associated file from the filesystem.
    *
    * @throws Error if the asset is not found
-   * @throws Error if the transaction fails (partial cleanup possible)
+   * @throws Error if the transaction fails
    */
   async deleteWithCascade(id: string): Promise<Asset> {
     if (!this.rawClient) {
@@ -146,16 +146,21 @@ export class AssetRepo {
       throw new Error(`Asset not found: ${id}`)
     }
 
-    // Step 2: Execute all deletes in a single transaction
-    // Using a single SQL batch ensures atomicity (all or nothing)
+    // Step 2: Execute all deletes in a single explicit transaction.
+    const esc = id.replace(/'/g, "''")
     try {
       await this.rawClient.executeBatch(`
-        DELETE FROM extractions WHERE asset_id = '${id.replace(/'/g, "''")}';
-        DELETE FROM layouts WHERE asset_id = '${id.replace(/'/g, "''")}';
-        DELETE FROM transcriptions WHERE asset_id = '${id.replace(/'/g, "''")}';
-        DELETE FROM llm_results WHERE target_id = '${id.replace(/'/g, "''")}' AND (target_type = 'asset' OR target_type = 'unknown');
-        DELETE FROM annotations WHERE asset_id = '${id.replace(/'/g, "''")}';
-        DELETE FROM assets WHERE id = '${id.replace(/'/g, "''")}';
+        BEGIN;
+        DELETE FROM extractions WHERE asset_id = '${esc}';
+        DELETE FROM layouts WHERE asset_id = '${esc}';
+        DELETE FROM transcriptions WHERE asset_id = '${esc}';
+        DELETE FROM llm_results WHERE target_id = '${esc}' AND (target_type = 'asset' OR target_type = 'unknown');
+        DELETE FROM annotations WHERE asset_id = '${esc}';
+        DELETE FROM entities WHERE asset_id = '${esc}';
+        DELETE FROM triples WHERE asset_id = '${esc}';
+        DELETE FROM vec_assets WHERE asset_id = '${esc}';
+        DELETE FROM assets WHERE id = '${esc}';
+        COMMIT;
       `)
     } catch (e) {
       // Transaction failed — rethrow with context
