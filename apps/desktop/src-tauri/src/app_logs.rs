@@ -234,8 +234,6 @@ fn redact_sensitive(value: String) -> String {
         "token",
         "password",
         "secret",
-        "openrouter",
-        "assemblyai",
     ];
 
     let lower = value.to_ascii_lowercase();

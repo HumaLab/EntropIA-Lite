@@ -1,6 +1,6 @@
 use rusqlite::params;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::db::state::AppDbState;
 const SECRET_REF_PREFIX: &str = "secret_ref:";
@@ -59,25 +59,54 @@ pub async fn settings_get(
 pub async fn settings_set(
     key: String,
     value: String,
+    app_handle: AppHandle,
     db: State<'_, AppDbState>,
     deps: State<'_, crate::deps::DepsState>,
 ) -> Result<(), String> {
     let should_invalidate = crate::deps::should_invalidate_cache_for_setting(&key);
-    let stored_value = prepare_setting_value_for_storage(&key, &value)?;
+    let stored_value = match prepare_setting_value_for_storage(&key, &value) {
+        Ok(stored_value) => stored_value,
+        Err(error) => {
+            crate::app_logs::error(
+                &app_handle,
+                setting_log_source(&key),
+                format!("No se pudo guardar configuración: key={key}; {error}"),
+            );
+            return Err(error);
+        }
+    };
     {
-        let conn = db
-            .ui_conn
-            .lock()
-            .map_err(|e| format!("DB lock error: {e}"))?;
+        let conn = db.ui_conn.lock().map_err(|e| {
+            let error = format!("DB lock error: {e}");
+            crate::app_logs::error(
+                &app_handle,
+                setting_log_source(&key),
+                format!("No se pudo guardar configuración: key={key}; {error}"),
+            );
+            error
+        })?;
         conn.execute(
             "INSERT OR REPLACE INTO app_settings (key, value) VALUES (?1, ?2)",
             params![key.as_str(), stored_value.as_str()],
         )
-        .map_err(|e| format!("Failed to save setting: {e}"))?;
+        .map_err(|e| {
+            let error = format!("Failed to save setting: {e}");
+            crate::app_logs::error(
+                &app_handle,
+                setting_log_source(&key),
+                format!("No se pudo guardar configuración: key={key}; {error}"),
+            );
+            error
+        })?;
     }
     if should_invalidate {
         invalidate_dependency_probe_cache_if_needed(&key, Some(&deps)).await;
     }
+    crate::app_logs::info(
+        &app_handle,
+        setting_log_source(&key),
+        format!("Configuración guardada: key={key}"),
+    );
     Ok(())
 }
 
@@ -110,6 +139,7 @@ pub async fn settings_get_all(db: State<'_, AppDbState>) -> Result<Vec<SettingEn
 #[tauri::command]
 pub async fn settings_delete(
     key: String,
+    app_handle: AppHandle,
     db: State<'_, AppDbState>,
     deps: State<'_, crate::deps::DepsState>,
 ) -> Result<(), String> {
@@ -118,24 +148,59 @@ pub async fn settings_delete(
         let _ = delete_secret(&key);
     }
     {
-        let conn = db
-            .ui_conn
-            .lock()
-            .map_err(|e| format!("DB lock error: {e}"))?;
+        let conn = db.ui_conn.lock().map_err(|e| {
+            let error = format!("DB lock error: {e}");
+            crate::app_logs::error(
+                &app_handle,
+                setting_log_source(&key),
+                format!("No se pudo borrar configuración: key={key}; {error}"),
+            );
+            error
+        })?;
         conn.execute(
             "DELETE FROM app_settings WHERE key = ?1",
             params![key.as_str()],
         )
-        .map_err(|e| format!("Failed to delete setting: {e}"))?;
+        .map_err(|e| {
+            let error = format!("Failed to delete setting: {e}");
+            crate::app_logs::error(
+                &app_handle,
+                setting_log_source(&key),
+                format!("No se pudo borrar configuración: key={key}; {error}"),
+            );
+            error
+        })?;
     }
     if should_invalidate {
         invalidate_dependency_probe_cache_if_needed(&key, Some(&deps)).await;
     }
+    crate::app_logs::info(
+        &app_handle,
+        setting_log_source(&key),
+        format!("Configuración borrada: key={key}"),
+    );
     Ok(())
 }
 
 fn is_secret_key(key: &str) -> bool {
     SECRET_KEYS.contains(&key)
+}
+
+fn setting_log_source(key: &str) -> &'static str {
+    match key {
+        "openrouter_api_key"
+        | "openrouter_model"
+        | "openrouter_embedding_model"
+        | "llm_mode"
+        | "embedding_provider" => "settings/openrouter",
+        "assemblyai_api_key" | "assemblyai_role_speaker_identification" | "stt_mode" => {
+            "settings/assemblyai"
+        }
+        "glm_ocr_api_key" | "ocrh_mode" => "settings/glm_ocr",
+        key if key.starts_with("prompt_") => "settings/prompts",
+        key if key.starts_with("llm_") => "settings/llm",
+        _ => "settings",
+    }
 }
 
 fn secret_ref_for_key(key: &str) -> String {

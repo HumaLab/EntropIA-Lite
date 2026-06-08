@@ -1,4 +1,4 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use super::openrouter::{ModelInfo, OpenRouterClient};
 use super::{LlmJob, LlmQueue, LlmResultEntry, LocalModelInfo};
@@ -153,6 +153,7 @@ pub async fn llm_get_results(
 #[tauri::command]
 pub async fn test_openrouter_connection(
     api_key: String,
+    app_handle: AppHandle,
     db: State<'_, AppDbState>,
 ) -> Result<Vec<ModelInfo>, String> {
     let api_key = if api_key.trim().is_empty() {
@@ -166,7 +167,20 @@ pub async fn test_openrouter_connection(
     };
 
     let client = OpenRouterClient::new(api_key.trim().to_string(), String::new());
-    client.test_connection().await
+    let result = client.test_connection().await;
+    match &result {
+        Ok(models) => crate::app_logs::info(
+            &app_handle,
+            "settings/openrouter",
+            format!("Conexión OpenRouter verificada: modelos={}", models.len()),
+        ),
+        Err(error) => crate::app_logs::error(
+            &app_handle,
+            "settings/openrouter",
+            format!("Falló prueba de conexión OpenRouter: {error}"),
+        ),
+    }
+    result
 }
 
 /// Retrieve the latest single LLM result for a target + job_type.

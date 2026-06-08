@@ -7,6 +7,7 @@ use tauri::{AppHandle, State};
 #[tauri::command]
 pub async fn test_assemblyai_connection(
     api_key: String,
+    app_handle: AppHandle,
     db: State<'_, AppDbState>,
 ) -> Result<(), String> {
     let api_key = if api_key.trim().is_empty() {
@@ -20,9 +21,22 @@ pub async fn test_assemblyai_connection(
         api_key
     };
 
-    super::assemblyai::AssemblyAiClient::new(api_key.trim().to_string())
+    let result = super::assemblyai::AssemblyAiClient::new(api_key.trim().to_string())
         .test_connection()
-        .await
+        .await;
+    match &result {
+        Ok(()) => crate::app_logs::info(
+            &app_handle,
+            "settings/assemblyai",
+            "Conexión AssemblyAI verificada",
+        ),
+        Err(error) => crate::app_logs::error(
+            &app_handle,
+            "settings/assemblyai",
+            format!("Falló prueba de conexión AssemblyAI: {error}"),
+        ),
+    }
+    result
 }
 
 /// Submit a transcription job to the background worker queue.

@@ -102,7 +102,9 @@
   {/if}
 
   <div class="logs-tab__body" aria-live="polite">
-    {#if entries.length === 0}
+    {#if loading && entries.length === 0}
+      <p class="logs-tab__empty">Cargando logs…</p>
+    {:else if entries.length === 0}
       <p class="logs-tab__empty">Todavía no hay logs capturados en esta sesión.</p>
     {:else}
       {#each entries as entry (entry.id)}
