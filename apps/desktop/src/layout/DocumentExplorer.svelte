@@ -26,6 +26,11 @@
   const MAX_WIDTH = Math.round(DEFAULT_WIDTH * 1.1)
   const MAX_RESTORED_OPEN_COLLECTIONS = 16
   const MAX_RESTORED_OPEN_ITEMS = 16
+  const TREE_VISUAL_LEVEL = {
+    collection: 0,
+    item: 1,
+    asset: 2,
+  } as const
 
   const pendingItemLoads = new Map<string, Promise<void>>()
   const pendingAssetLoads = new Map<string, Promise<void>>()
@@ -648,7 +653,10 @@
                   aria-current={collection.id === activeCollectionId ? 'true' : undefined}
                   aria-label={collection.name}
                 >
-                  <div class="explorer__row explorer__row--collection">
+                  <div
+                    class="explorer__row explorer__row--collection"
+                    style:--tree-level={TREE_VISUAL_LEVEL.collection}
+                  >
                     <button
                       type="button"
                       class="explorer__chevron"
@@ -684,11 +692,17 @@
                   {#if collectionExpanded}
                     <div class="explorer__group" role="group">
                       {#if isCollectionLoading(collection.id)}
-                        <p class="explorer__message explorer__message--nested">
+                        <p
+                          class="explorer__message explorer__message--nested"
+                          style:--tree-level={TREE_VISUAL_LEVEL.item}
+                        >
                           {$currentLocale && translateExplorer('explorer.loading')}
                         </p>
                       {:else if collectionItems.length === 0}
-                        <p class="explorer__message explorer__message--nested">
+                        <p
+                          class="explorer__message explorer__message--nested"
+                          style:--tree-level={TREE_VISUAL_LEVEL.item}
+                        >
                           {$currentLocale && translateExplorer('explorer.emptyDocuments')}
                         </p>
                       {:else}
@@ -709,7 +723,11 @@
                                 : undefined}
                               aria-label={item.title}
                             >
-                              <div class="explorer__row explorer__row--item">
+                              <div
+                                class="explorer__row explorer__row--item"
+                                style:--tree-level={TREE_VISUAL_LEVEL.item}
+                              >
+                                <span class="explorer__chevron-spacer" aria-hidden="true"></span>
                                 <button
                                   type="button"
                                   class="explorer__node explorer__node--item explorer__node--flush"
@@ -735,14 +753,17 @@
                             role="treeitem"
                             aria-level="2"
                             aria-expanded={itemExpanded}
-                            aria-selected={item.id === activeItemId}
-                            aria-current={item.id === activeItemId ? 'true' : undefined}
-                            aria-label={item.title}
-                          >
-                            <div class="explorer__row explorer__row--item">
-                              <button
-                                type="button"
-                                class="explorer__chevron"
+                             aria-selected={item.id === activeItemId}
+                             aria-current={item.id === activeItemId ? 'true' : undefined}
+                             aria-label={item.title}
+                           >
+                            <div
+                              class="explorer__row explorer__row--item"
+                              style:--tree-level={TREE_VISUAL_LEVEL.item}
+                            >
+                               <button
+                                 type="button"
+                                 class="explorer__chevron"
                                 aria-label={getToggleLabel('item', itemExpanded, item.title)}
                                 aria-expanded={itemExpanded}
                                 onclick={() => toggleItemExpanded(item)}
@@ -774,11 +795,17 @@
                             {#if itemExpanded}
                               <div class="explorer__group" role="group">
                                 {#if isItemLoading(item.id)}
-                                  <p class="explorer__message explorer__message--nested">
+                                  <p
+                                    class="explorer__message explorer__message--nested"
+                                    style:--tree-level={TREE_VISUAL_LEVEL.asset}
+                                  >
                                     {$currentLocale && translateExplorer('explorer.loading')}
                                   </p>
                                 {:else if itemAssets.length === 0}
-                                  <p class="explorer__message explorer__message--nested">
+                                  <p
+                                    class="explorer__message explorer__message--nested"
+                                    style:--tree-level={TREE_VISUAL_LEVEL.asset}
+                                  >
                                     {$currentLocale && translateExplorer('explorer.emptyAssets')}
                                   </p>
                                 {:else}
@@ -788,11 +815,15 @@
                                       class="explorer__treeitem"
                                       role="treeitem"
                                       aria-level="3"
-                                      aria-selected={asset.id === activeAssetId}
-                                      aria-current={asset.id === activeAssetId ? 'true' : undefined}
-                                      aria-label={getAssetLabel(asset, index)}
-                                    >
-                                      <div class="explorer__row explorer__row--asset">
+                                       aria-selected={asset.id === activeAssetId}
+                                       aria-current={asset.id === activeAssetId ? 'true' : undefined}
+                                       aria-label={getAssetLabel(asset, index)}
+                                     >
+                                      <div
+                                        class="explorer__row explorer__row--asset"
+                                        style:--tree-level={TREE_VISUAL_LEVEL.asset}
+                                      >
+                                        <span class="explorer__chevron-spacer" aria-hidden="true"></span>
                                         <button
                                           type="button"
                                           class="explorer__node explorer__node--asset"
@@ -827,7 +858,11 @@
                               aria-current={item.id === activeItemId ? 'true' : undefined}
                               aria-label={item.title}
                             >
-                              <div class="explorer__row explorer__row--item">
+                              <div
+                                class="explorer__row explorer__row--item"
+                                style:--tree-level={TREE_VISUAL_LEVEL.item}
+                              >
+                                <span class="explorer__chevron-spacer" aria-hidden="true"></span>
                                 <button
                                   type="button"
                                   class="explorer__node explorer__node--item explorer__node--flush"
@@ -957,6 +992,9 @@
   }
 
   .explorer__tree {
+    --tree-indent-step: 24px;
+    --tree-guide-offset: 8px;
+    --tree-control-width: 17px;
     display: flex;
     flex-direction: column;
     gap: 1px;
@@ -971,24 +1009,13 @@
 
   .explorer__row {
     position: relative;
-    display: flex;
+    display: grid;
+    grid-template-columns: var(--tree-control-width) minmax(0, 1fr);
     align-items: center;
     gap: 3px;
     min-width: 0;
     min-height: 23px;
-    padding-left: var(--tree-indent, 0px);
-  }
-
-  .explorer__row--collection {
-    --tree-indent: 0px;
-  }
-
-  .explorer__row--item {
-    --tree-indent: 24px;
-  }
-
-  .explorer__row--asset {
-    --tree-indent: 52px;
+    padding-left: calc(var(--tree-level, 0) * var(--tree-indent-step));
   }
 
   .explorer__row::before,
@@ -999,7 +1026,7 @@
   }
 
   .explorer__row::before {
-    left: calc(var(--tree-indent, 0px) + 8px);
+    left: calc((var(--tree-level, 0) * var(--tree-indent-step)) + var(--tree-guide-offset));
     top: -3px;
     bottom: -3px;
     width: 1px;
@@ -1007,7 +1034,7 @@
   }
 
   .explorer__row::after {
-    left: calc(var(--tree-indent, 0px) + 8px);
+    left: calc((var(--tree-level, 0) * var(--tree-indent-step)) + var(--tree-guide-offset));
     top: 50%;
     width: 8px;
     height: 1px;
@@ -1032,13 +1059,18 @@
     gap: 1px;
   }
 
+  .explorer__chevron-spacer {
+    width: var(--tree-control-width);
+    height: 20px;
+    pointer-events: none;
+  }
+
   .explorer__chevron {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 17px;
+    width: var(--tree-control-width);
     height: 20px;
-    flex: 0 0 17px;
     border: 1px solid transparent;
     border-radius: 5px;
     background: transparent;
@@ -1214,7 +1246,7 @@
   }
 
   .explorer__message--nested {
-    padding: 4px 0 5px 28px;
+    padding: 4px 0 5px calc((var(--tree-level, 0) * var(--tree-indent-step)) + 20px);
   }
 
   .explorer__message--error {

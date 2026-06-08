@@ -551,7 +551,7 @@ describe('DocumentExplorer', () => {
     }
   })
 
-  it('uses explicit visual indentation classes for collection item and asset levels', async () => {
+  it('derives visual indentation structurally from a shared tree level source', async () => {
     persistOpenTree(['col-1'], ['item-1'])
 
     render(DocumentExplorer)
@@ -559,17 +559,31 @@ describe('DocumentExplorer', () => {
     const collectionNode = await screen.findByRole('treeitem', { name: 'Colección 1' })
     const itemNode = await screen.findByRole('treeitem', { name: 'Acta 1' })
     const assetNode = await screen.findByRole('treeitem', { name: 'acta-1.pdf' })
+    const singleAssetNode = screen.getByRole('treeitem', { name: 'Acta 2' })
 
-    expect(collectionNode.querySelector('.explorer__row')).toHaveClass('explorer__row--collection')
-    expect(itemNode.querySelector('.explorer__row')).toHaveClass('explorer__row--item')
-    expect(assetNode.querySelector('.explorer__row')).toHaveClass('explorer__row--asset')
-    expect(screen.getByRole('treeitem', { name: 'Acta 2' }).querySelector('.explorer__row')).toHaveClass(
-      'explorer__row--item'
-    )
+    const collectionRow = collectionNode.querySelector('.explorer__row')
+    const itemRow = itemNode.querySelector('.explorer__row')
+    const assetRow = assetNode.querySelector('.explorer__row')
+    const singleAssetRow = singleAssetNode.querySelector('.explorer__row')
+
+    expect(collectionRow).toHaveClass('explorer__row--collection')
+    expect(itemRow).toHaveClass('explorer__row--item')
+    expect(assetRow).toHaveClass('explorer__row--asset')
+    expect(singleAssetRow).toHaveClass('explorer__row--item')
     expect(collectionNode).toHaveAttribute('aria-level', '1')
     expect(itemNode).toHaveAttribute('aria-level', '2')
     expect(assetNode).toHaveAttribute('aria-level', '3')
-    expect(screen.getByRole('treeitem', { name: 'Acta 2' })).toHaveAttribute('aria-level', '2')
+    expect(singleAssetNode).toHaveAttribute('aria-level', '2')
+
+    expect(collectionRow).toHaveAttribute('style', '--tree-level: 0;')
+    expect(itemRow).toHaveAttribute('style', '--tree-level: 1;')
+    expect(assetRow).toHaveAttribute('style', '--tree-level: 2;')
+    expect(singleAssetRow).toHaveAttribute('style', '--tree-level: 1;')
+
+    expect(collectionRow?.querySelector('.explorer__chevron-spacer')).toBeNull()
+    expect(itemRow?.querySelector('.explorer__chevron')).toBeInTheDocument()
+    expect(assetRow?.querySelector('.explorer__chevron-spacer')).toBeInTheDocument()
+    expect(singleAssetRow?.querySelector('.explorer__chevron-spacer')).toBeInTheDocument()
   })
 
   it('keeps the document explorer open and removes the internal collapse control', async () => {
