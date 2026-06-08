@@ -673,29 +673,30 @@
                           {@const singleAsset = getSingleAssetForItem(item)}
                           {@const itemExpandable = canExpandItem(item)}
                           {#if singleAsset}
-                            {@const assetIcon = getAssetIcon(singleAsset.type)}
                             <div
                               class="explorer__treeitem"
                               class:is-active={item.id === activeItemId || singleAsset.id === activeAssetId}
                               role="treeitem"
-                              aria-level="3"
+                              aria-level="2"
                               aria-selected={item.id === activeItemId || singleAsset.id === activeAssetId}
-                              aria-current={singleAsset.id === activeAssetId ? 'true' : undefined}
+                              aria-current={item.id === activeItemId || singleAsset.id === activeAssetId
+                                ? 'true'
+                                : undefined}
                               aria-label={item.title}
                             >
-                              <div class="explorer__row explorer__row--asset">
+                              <div class="explorer__row explorer__row--item">
                                 <button
                                   type="button"
-                                  class="explorer__node explorer__node--asset"
+                                  class="explorer__node explorer__node--item explorer__node--flush"
                                   class:is-active={item.id === activeItemId || singleAsset.id === activeAssetId}
                                   aria-label={item.title}
                                   onclick={() => handleSingleAssetItemClick(item, singleAsset)}
                                 >
                                   <span
-                                    class="explorer__node-icon explorer__node-icon--asset"
+                                    class="explorer__node-icon explorer__node-icon--item"
                                     aria-hidden="true"
                                   >
-                                    <ActionIcon name={assetIcon} size={14} />
+                                    <ActionIcon name="file-text" size={14} />
                                   </span>
                                   <span class="explorer__node-main">{item.title}</span>
                                   <span class="explorer__asset-type">{singleAsset.type}</span>

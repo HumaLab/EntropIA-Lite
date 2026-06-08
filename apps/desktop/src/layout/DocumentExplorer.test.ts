@@ -497,7 +497,7 @@ describe('DocumentExplorer', () => {
     expect(state.replace).not.toHaveBeenCalled()
   })
 
-  it('renders single-asset items at the asset child level without a chevron', async () => {
+  it('renders single-asset items as non-expandable document rows with asset context', async () => {
     persistOpenTree(['col-1'])
 
     render(DocumentExplorer)
@@ -506,8 +506,9 @@ describe('DocumentExplorer', () => {
     expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-2')
 
     const singleAssetNode = screen.getByRole('treeitem', { name: 'Acta 2' })
-    expect(singleAssetNode).toHaveAttribute('aria-level', '3')
-    expect(singleAssetNode.querySelector('.explorer__row')).toHaveClass('explorer__row--asset')
+    expect(singleAssetNode).toHaveAttribute('aria-level', '2')
+    expect(singleAssetNode.querySelector('.explorer__row')).toHaveClass('explorer__row--item')
+    expect(singleAssetNode.querySelector('.explorer__node')).toHaveClass('explorer__node--item')
     expect(singleAssetNode).not.toHaveAttribute('aria-expanded')
     expect(screen.queryByRole('button', { name: 'Expandir documento Acta 2' })).not.toBeInTheDocument()
     expect(screen.queryByRole('treeitem', { name: 'foto-acta-2.png' })).not.toBeInTheDocument()
@@ -561,9 +562,13 @@ describe('DocumentExplorer', () => {
     expect(collectionNode.querySelector('.explorer__row')).toHaveClass('explorer__row--collection')
     expect(itemNode.querySelector('.explorer__row')).toHaveClass('explorer__row--item')
     expect(assetNode.querySelector('.explorer__row')).toHaveClass('explorer__row--asset')
+    expect(screen.getByRole('treeitem', { name: 'Acta 2' }).querySelector('.explorer__row')).toHaveClass(
+      'explorer__row--item'
+    )
     expect(collectionNode).toHaveAttribute('aria-level', '1')
     expect(itemNode).toHaveAttribute('aria-level', '2')
     expect(assetNode).toHaveAttribute('aria-level', '3')
+    expect(screen.getByRole('treeitem', { name: 'Acta 2' })).toHaveAttribute('aria-level', '2')
   })
 
   it('keeps the document explorer open and removes the internal collapse control', async () => {
