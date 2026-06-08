@@ -183,10 +183,6 @@ fn complete_job(
         );
     } else if let Ok(Some(item_id)) = &save_result {
         let nlp_queue = app_handle.state::<NlpQueue>();
-        let _ = nlp_queue.submit(NlpJob::ExtractEntitiesForAsset {
-            item_id: item_id.clone(),
-            asset_id: asset_id.to_string(),
-        });
         let _ = nlp_queue.submit(NlpJob::IndexFts {
             item_id: item_id.clone(),
         });
