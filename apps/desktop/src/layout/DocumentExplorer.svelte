@@ -7,7 +7,6 @@
   import {
     DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT,
     DOCUMENT_EXPLORER_ASSET_SELECTED_EVENT,
-    DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT,
     type DocumentExplorerAssetDetail,
     type DocumentExplorerCollectionChangedDetail,
   } from '$lib/document-explorer'
@@ -502,27 +501,11 @@
     }
 
     activeAssetId = asset.id
-    window.dispatchEvent(
-      new CustomEvent<DocumentExplorerAssetDetail>(DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT, {
-        detail: {
-          itemId: asset.itemId,
-          assetId: asset.id,
-        },
-      })
-    )
   }
 
   function handleSingleAssetItemClick(item: Item, asset: Asset) {
-    handleItemClick(item)
+    handleItemClick(item, { id: asset.id, label: getAssetLabel(asset, 0) })
     activeAssetId = asset.id
-    window.dispatchEvent(
-      new CustomEvent<DocumentExplorerAssetDetail>(DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT, {
-        detail: {
-          itemId: asset.itemId,
-          assetId: asset.id,
-        },
-      })
-    )
   }
 
   const activeCollectionId = $derived(getActiveCollectionId($navigation.current))

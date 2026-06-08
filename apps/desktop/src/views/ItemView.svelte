@@ -116,7 +116,6 @@
   import { navigation } from '$lib/navigation'
   import {
     DOCUMENT_EXPLORER_ASSET_SELECTED_EVENT,
-    DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT,
     type DocumentExplorerAssetDetail,
   } from '$lib/document-explorer'
   import { locale, t, type I18nKey, type I18nParams } from '$lib/i18n'
@@ -160,13 +159,6 @@
   let isDragging = $state(false)
   let itemViewEl: HTMLElement | undefined = $state()
   let dragCleanup: (() => void) | null = null
-
-  function handleExplorerAssetSelectRequest(event: Event) {
-    const detail = (event as CustomEvent<DocumentExplorerAssetDetail>).detail
-    if (detail.itemId !== itemId || !detail.assetId) return
-
-    selectAssetById(detail.assetId)
-  }
 
   function selectAssetById(assetId: string | null | undefined) {
     if (!assetId) return false
@@ -1939,11 +1931,6 @@
   })
 
   onMount(() => {
-    window.addEventListener(
-      DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT,
-      handleExplorerAssetSelectRequest
-    )
-
     ocrStore
       .startListening((eventName, callback) =>
         listen(eventName, callback).then((unlisten) => {
@@ -2026,10 +2013,6 @@
     triplesLoadGuard.invalidate()
     similarAssetsLoadGuard.invalidate()
     llmSummaryLoadGuard.invalidate()
-    window.removeEventListener(
-      DOCUMENT_EXPLORER_ASSET_SELECT_REQUEST_EVENT,
-      handleExplorerAssetSelectRequest
-    )
     ocrStore.stopListening()
     nlpStore.stopListening()
     transcriptionStore.stopListening()

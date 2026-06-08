@@ -296,6 +296,8 @@ describe('DocumentExplorer', () => {
       collectionName: 'Colección 1',
       itemId: 'item-2',
       itemTitle: 'Acta 2',
+      assetId: 'asset-3',
+      assetLabel: 'foto-acta-2.png',
     })
     expect(state.resetToPath).not.toHaveBeenCalled()
   })
@@ -341,6 +343,8 @@ describe('DocumentExplorer', () => {
       collectionName: 'Colección 1',
       itemId: 'item-2',
       itemTitle: 'Acta 2',
+      assetId: 'asset-3',
+      assetLabel: 'foto-acta-2.png',
     })
 
     setCurrentNavigationView({
@@ -378,6 +382,8 @@ describe('DocumentExplorer', () => {
       collectionName: 'Colección 1',
       itemId: 'item-2',
       itemTitle: 'Acta 2',
+      assetId: 'asset-3',
+      assetLabel: 'foto-acta-2.png',
     })
 
     setCurrentNavigationView({
@@ -429,6 +435,8 @@ describe('DocumentExplorer', () => {
         collectionName: 'Colección 2',
         itemId: 'item-3',
         itemTitle: 'Acta 3',
+        assetId: 'asset-4',
+        assetLabel: 'acta-3.pdf',
       },
     ])
     expect(state.replace).not.toHaveBeenCalled()
@@ -507,6 +515,40 @@ describe('DocumentExplorer', () => {
     expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-2')
   })
 
+  it('navigates single-asset rows with asset context instead of dispatching a select request', async () => {
+    persistOpenTree(['col-1'])
+    const assetSelectRequests: CustomEvent[] = []
+    const handleAssetSelectRequest = (event: Event) => {
+      assetSelectRequests.push(event as CustomEvent)
+    }
+    window.addEventListener(
+      'entropia:document-explorer-asset-select-request',
+      handleAssetSelectRequest
+    )
+
+    try {
+      render(DocumentExplorer)
+
+      await fireEvent.click(await screen.findByRole('button', { name: 'Acta 2' }))
+
+      expect(state.replace).toHaveBeenLastCalledWith({
+        name: 'item',
+        collectionId: 'col-1',
+        collectionName: 'Colección 1',
+        itemId: 'item-2',
+        itemTitle: 'Acta 2',
+        assetId: 'asset-3',
+        assetLabel: 'foto-acta-2.png',
+      })
+      expect(assetSelectRequests).toHaveLength(0)
+    } finally {
+      window.removeEventListener(
+        'entropia:document-explorer-asset-select-request',
+        handleAssetSelectRequest
+      )
+    }
+  })
+
   it('uses explicit visual indentation classes for collection item and asset levels', async () => {
     persistOpenTree(['col-1'], ['item-1'])
 
@@ -559,16 +601,6 @@ describe('DocumentExplorer', () => {
 
     render(DocumentExplorer)
 
-    const assetSelectRequests: CustomEvent[] = []
-    const handleAssetSelectRequest = (event: Event) => {
-      assetSelectRequests.push(event as CustomEvent)
-    }
-
-    window.addEventListener(
-      'entropia:document-explorer-asset-select-request',
-      handleAssetSelectRequest
-    )
-
     const assetButton = (await screen.findByText('acta-1.pdf')).closest('button')
 
     if (!assetButton) {
@@ -578,7 +610,15 @@ describe('DocumentExplorer', () => {
     await fireEvent.click(assetButton)
     await fireEvent.click(screen.getByRole('button', { name: 'Colapsar documento Acta 1' }))
 
-    expect(assetSelectRequests.at(-1)?.detail).toEqual({ itemId: 'item-1', assetId: 'asset-1' })
+    expect(state.replace).toHaveBeenLastCalledWith({
+      name: 'item',
+      collectionId: 'col-1',
+      collectionName: 'Colección 1',
+      itemId: 'item-1',
+      itemTitle: 'Acta 1',
+      assetId: 'asset-1',
+      assetLabel: 'acta-1.pdf',
+    })
     expect(screen.getByRole('treeitem', { name: 'Acta 1' })).toHaveAttribute(
       'aria-selected',
       'true'
@@ -590,11 +630,6 @@ describe('DocumentExplorer', () => {
     expect(await screen.findByRole('treeitem', { name: 'acta-1.pdf' })).toHaveAttribute(
       'aria-current',
       'true'
-    )
-
-    window.removeEventListener(
-      'entropia:document-explorer-asset-select-request',
-      handleAssetSelectRequest
     )
   })
 
