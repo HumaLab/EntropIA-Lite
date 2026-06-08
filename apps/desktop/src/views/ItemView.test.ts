@@ -1692,6 +1692,70 @@ describe('ItemView image annotations', () => {
     })
   })
 
+  it('undo restores only the latest image edit per click', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-image-1',
+          itemId: 'item-1',
+          path: 'docs/photo-a.jpg',
+          type: 'image',
+          createdAt: 1,
+        },
+      ],
+    })
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      if (command === 'rotate_image_degrees') {
+        const path = (args as { path: string }).path
+        return {
+          path: path === 'docs/photo-a.jpg' ? 'docs/photo-a_v2.png' : 'docs/photo-a_v3.png',
+          width: 206,
+          height: 111,
+          format_changed: true,
+          previous_path: path,
+        }
+      }
+      if (command === 'llm_get_results') return []
+      if (command === 'llm_get_result') return null
+      if (command === 'llm_is_available') return true
+      if (command === 'db_select') return []
+      return null
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+    await fireEvent.click(screen.getByRole('button', { name: /report image dimensions/i }))
+    await fireEvent.click(screen.getByRole('button', { name: /commit fine rotation/i }))
+    await waitFor(() => {
+      expect(storeRef.current.assets.updatePath).toHaveBeenCalledWith(
+        'asset-image-1',
+        'docs/photo-a_v2.png'
+      )
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /commit fine rotation/i }))
+    await waitFor(() => {
+      expect(storeRef.current.assets.updatePath).toHaveBeenCalledWith(
+        'asset-image-1',
+        'docs/photo-a_v3.png'
+      )
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /undo edit/i }))
+
+    await waitFor(() => {
+      expect(storeRef.current.assets.updatePath).toHaveBeenLastCalledWith(
+        'asset-image-1',
+        'docs/photo-a_v2.png'
+      )
+    })
+    expect(storeRef.current.assets.updatePath).not.toHaveBeenLastCalledWith(
+      'asset-image-1',
+      'docs/photo-a.jpg'
+    )
+  })
+
   it('reloads persisted layout after ocr:complete for the current asset', async () => {
     getLayoutByAssetMock.mockResolvedValueOnce(null).mockResolvedValueOnce(layoutFixture)
     storeRef.current = createStore({
@@ -1771,6 +1835,80 @@ describe('ItemView image annotations', () => {
     expect(indexFtsMock).toHaveBeenCalledWith('item-1')
     expect(indexFtsMock).toHaveBeenCalledTimes(2)
     expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
+  })
+
+  it('auto-runs FTS and EMBED but not NER after OCRH completion', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-image-1',
+          itemId: 'item-1',
+          path: 'docs/photo-a.jpg',
+          type: 'image',
+          createdAt: 1,
+        },
+      ],
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+    nlpEventHandlers.get('ocr:complete')?.({
+      payload: {
+        asset_id: 'asset-image-1',
+        method: 'glm_ocr',
+        text_length: 128,
+        text_content: 'OCRH listo',
+      },
+    })
+
+    await waitFor(() => {
+      expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
+    })
+    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
+  })
+
+  it('auto-runs FTS, EMBED, and NER after OCRC completion is persisted', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-image-1',
+          itemId: 'item-1',
+          path: 'docs/photo-a.jpg',
+          type: 'image',
+          createdAt: 1,
+        },
+      ],
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+    nlpEventHandlers.get('ocr:complete')?.({
+      payload: {
+        asset_id: 'asset-image-1',
+        method: 'glm_ocr',
+        text_length: 128,
+        text_content: 'Texto OCRH',
+      },
+    })
+    embedAssetMock.mockClear()
+    indexFtsMock.mockClear()
+    extractEntitiesForAssetMock.mockClear()
+
+    nlpEventHandlers.get('llm:complete')?.({
+      payload: { id: 'asset-image-1', job: 'correct_ocr', result: 'Texto OCRC' },
+    })
+    await vi.advanceTimersByTimeAsync(2100)
+
+    expect(invokeMock).toHaveBeenCalledWith('update_extraction_text_cmd', {
+      assetId: 'asset-image-1',
+      textContent: 'Texto OCRC',
+    })
+    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
+    expect(extractEntitiesForAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
   })
 
   it('persists manual OCR edits and auto-runs only FTS indexing', async () => {

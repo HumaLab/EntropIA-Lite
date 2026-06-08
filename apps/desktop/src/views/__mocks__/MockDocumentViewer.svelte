@@ -19,6 +19,8 @@
     onAnnotationColorChange = () => {},
     onDimensionsChange = () => {},
     onFineRotateCommit = () => {},
+    onUndo = () => {},
+    canUndo = false,
   } = $props()
 
   function createDraftAnnotation() {
@@ -86,5 +88,8 @@
   </button>
   <button type="button" onclick={() => onFineRotateCommit(3)}>
     Commit fine rotation
+  </button>
+  <button type="button" disabled={!canUndo} onclick={() => onUndo()}>
+    Undo edit
   </button>
 </div>

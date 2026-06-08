@@ -264,7 +264,7 @@ describe('OcrStore', () => {
   // onComplete callback — auto-trigger FTS indexing after OCR
   // ─────────────────────────────────────────────────────────────────────────
 
-  it('calls onComplete callback with assetId when ocr:complete fires', async () => {
+  it('calls onComplete callback with assetId and method when ocr:complete fires', async () => {
     const onComplete = vi.fn()
     const storeWithCallback = new OcrStore({ onComplete })
 
@@ -288,8 +288,8 @@ describe('OcrStore', () => {
       },
     })
 
-    // The onComplete callback must be called with the assetId
-    expect(onComplete).toHaveBeenCalledWith('asset-ocr-done')
+    // The onComplete callback must be called with the assetId and OCR method
+    expect(onComplete).toHaveBeenCalledWith('asset-ocr-done', 'ocr')
     // State must still be updated correctly
     const state = storeWithCallback.getState('asset-ocr-done')
     expect(state.status).toBe('done')

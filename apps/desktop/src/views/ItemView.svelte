@@ -272,7 +272,8 @@
   let imageVersion = $state(0)
 
   let undoStack = $state<ImageEditUndoEntry[]>([])
-  let canUndo = $derived(undoStack.length > 0)
+  let undoInProgress = $state(false)
+  let canUndo = $derived(undoStack.length > 0 && !undoInProgress)
   let lastSelectedAssetId = $state<string | null>(null)
 
   // OCR state — plain TS class, updated via Tauri events
@@ -308,6 +309,7 @@
 
   let transEditedText = $state(new Map<string, string>())
   let autoEmbeddedAfterGeneratedTextAssetIds = new Set<string>()
+  let pendingOcrCorrectionAutomationAssetIds = new Set<string>()
 
   const PERSIST_IDLE_MS = 500
 
@@ -317,6 +319,10 @@
       invoke('update_extraction_text_cmd', { assetId, textContent: text }),
     afterPersist: (assetId) => {
       void indexFtsAfterTextAvailable(assetId)
+      if (pendingOcrCorrectionAutomationAssetIds.delete(assetId)) {
+        void embedAfterOcrCorrection(assetId)
+        void extractEntitiesAfterOcrCorrection(assetId)
+      }
     },
     onError: (error) => {
       console.error('[ItemView] Failed to persist OCR correction:', error)
@@ -366,6 +372,22 @@
       await embedAsset(itemId, assetId)
     } catch (error) {
       console.error('[ItemView] Automatic post-text embedding failed', { itemId, assetId, error })
+    }
+  }
+
+  async function embedAfterOcrCorrection(assetId: string) {
+    try {
+      await embedAsset(itemId, assetId)
+    } catch (error) {
+      console.error('[ItemView] Automatic post-OCRC embedding failed', { itemId, assetId, error })
+    }
+  }
+
+  async function extractEntitiesAfterOcrCorrection(assetId: string) {
+    try {
+      await extractEntitiesForAsset(itemId, assetId)
+    } catch (error) {
+      console.error('[ItemView] Automatic post-OCRC NER failed', { itemId, assetId, error })
     }
   }
 
@@ -552,6 +574,7 @@
         if (assetId) {
           ocrEditedText.set(assetId, result)
           ocrStore.setTextContent(assetId, result)
+          pendingOcrCorrectionAutomationAssetIds.add(assetId)
           schedulePersist(assetId, result)
         }
       }
@@ -1087,6 +1110,7 @@
    *  and annotations to the previous state. */
   async function handleUndo() {
     if (!selectedAsset || selectedAsset.type !== 'image') return
+    if (undoInProgress) return
     if (undoStack.length === 0) return
 
     await flushPendingAnnotationSave()
@@ -1094,30 +1118,36 @@
     const entry = getLatestImageEditUndoEntry(undoStack)
     if (!entry) return
     const assetId = selectedAsset.id
-
-    // Restore state from undo entry
-    const store = getStore()
-    await store.assets.updatePath(assetId, entry.path)
-    assets = updateAssetPathInList(assets, assetId, entry.path)
-    annotations = entry.annotations
-    selectedAnnotationId = null
-    // Force image refresh
-    imageVersion++
-
-    // Persist the restored annotations
-    await persistAnnotations(assetId, annotations)
-
-    // Pop the undo stack
     undoStack = discardLatestImageEditUndoEntry(undoStack)
+    undoInProgress = true
 
-    // Notify other views
     try {
-      await emit(
-        'asset:image-updated',
-        createImageUpdatedPayload({ itemId, assetId, path: entry.path })
-      )
+      // Restore state from exactly one undo entry.
+      const store = getStore()
+      await store.assets.updatePath(assetId, entry.path)
+      assets = updateAssetPathInList(assets, assetId, entry.path)
+      annotations = entry.annotations
+      selectedAnnotationId = null
+      // Force image refresh
+      imageVersion++
+
+      // Persist the restored annotations
+      await persistAnnotations(assetId, annotations)
+
+      // Notify other views
+      try {
+        await emit(
+          'asset:image-updated',
+          createImageUpdatedPayload({ itemId, assetId, path: entry.path })
+        )
+      } catch (e) {
+        console.warn('[ItemView] Failed to emit asset:image-updated event on undo:', e)
+      }
     } catch (e) {
-      console.warn('[ItemView] Failed to emit asset:image-updated event on undo:', e)
+      undoStack = appendImageEditUndoEntry(undoStack, entry)
+      console.error('[ItemView] Undo failed:', e)
+    } finally {
+      undoInProgress = false
     }
   }
 
