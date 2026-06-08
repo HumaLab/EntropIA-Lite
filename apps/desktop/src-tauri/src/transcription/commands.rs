@@ -150,11 +150,10 @@ pub async fn transcribe_dictation(
         let conn = rusqlite::Connection::open(&db_path)
             .map_err(|e| format!("Failed to open settings DB for dictation: {e}"))?;
 
-        super::transcribe_with_selected_provider(
+        super::transcribe_dictation_with_selected_provider(
             &app_handle_for_worker,
             Some(db_path.as_path()),
             &conn,
-            None,
             &audio_path_for_worker,
         )
         .map(|result| result.transcription)

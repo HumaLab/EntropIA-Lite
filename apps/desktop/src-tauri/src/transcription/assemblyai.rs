@@ -22,8 +22,7 @@ struct CreateTranscriptRequest {
     speech_models: [&'static str; 2],
     language_detection: bool,
     temperature: u8,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    speaker_labels: Option<bool>,
+    speaker_labels: bool,
 }
 
 #[derive(Deserialize)]
@@ -135,7 +134,7 @@ impl AssemblyAiClient {
                 speech_models: DEFAULT_SPEECH_MODELS,
                 language_detection: true,
                 temperature: 0,
-                speaker_labels: enable_speaker_labels.then_some(true),
+                speaker_labels: enable_speaker_labels,
             })
             .send()
             .await
@@ -380,17 +379,17 @@ mod tests {
     }
 
     #[test]
-    fn transcript_request_omits_speech_understanding_when_disabled() {
+    fn transcript_request_sends_speaker_labels_false_when_disabled() {
         let payload = serde_json::to_value(CreateTranscriptRequest {
             audio_url: "https://example.test/audio.mp3".to_string(),
             speech_models: DEFAULT_SPEECH_MODELS,
             language_detection: true,
             temperature: 0,
-            speaker_labels: None,
+            speaker_labels: false,
         })
         .expect("request serializes");
 
-        assert_eq!(payload.get("speaker_labels"), None);
+        assert_eq!(payload.get("speaker_labels"), Some(&json!(false)));
         assert_eq!(payload.get("speech_understanding"), None);
         assert_eq!(payload.get("speech_model"), None);
         assert_eq!(
@@ -406,7 +405,7 @@ mod tests {
             speech_models: DEFAULT_SPEECH_MODELS,
             language_detection: true,
             temperature: 0,
-            speaker_labels: Some(true),
+            speaker_labels: true,
         })
         .expect("request serializes");
 

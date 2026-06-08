@@ -252,17 +252,14 @@ describe('SettingsView', () => {
     expect(settingsSetMock).toHaveBeenCalledWith('openrouter_embedding_model', 'baai/bge-m3')
     expect(settingsSetMock).toHaveBeenCalledWith('llm_mode', 'openrouter')
     expect(settingsSetMock).toHaveBeenCalledWith('stt_mode', 'assemblyai')
-    expect(settingsSetMock).toHaveBeenCalledWith(
-      'assemblyai_role_speaker_identification',
-      'true'
-    )
+    expect(settingsSetMock).toHaveBeenCalledWith('assemblyai_role_speaker_identification', 'true')
     expect(settingsSetMock).toHaveBeenCalledWith('ocrh_mode', 'glm_ocr')
   })
 
-  it('loads AssemblyAI speaker labels enabled by default and saves it', async () => {
+  it('loads collection audio AssemblyAI speaker labels enabled by default and saves it', async () => {
     render(SettingsView)
 
-    const speakerSelect = await screen.findByLabelText('Identificación de hablantes')
+    const speakerSelect = await screen.findByLabelText('Identificación de hablantes en audio de colección')
     expect(speakerSelect).toHaveValue('true')
 
     await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
@@ -273,7 +270,7 @@ describe('SettingsView', () => {
     )
   })
 
-  it('respects a saved false value for AssemblyAI speaker labels', async () => {
+  it('respects a saved false value for collection audio AssemblyAI speaker labels', async () => {
     settingsGetMock.mockImplementation(async (key: string) => {
       if (key === 'openrouter_api_key') return 'sk-or-v1-test-key'
       if (key === 'openrouter_model') return 'anthropic/claude-3.7-sonnet'
@@ -285,7 +282,7 @@ describe('SettingsView', () => {
 
     render(SettingsView)
 
-    const speakerSelect = await screen.findByLabelText('Identificación de hablantes')
+    const speakerSelect = await screen.findByLabelText('Identificación de hablantes en audio de colección')
     await waitFor(() => expect(speakerSelect).toHaveValue('false'))
 
     await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
@@ -294,6 +291,19 @@ describe('SettingsView', () => {
       'assemblyai_role_speaker_identification',
       'false'
     )
+  })
+
+  it('does not expose or persist a note dictation speaker labels setting', async () => {
+    render(SettingsView)
+
+    await screen.findByLabelText('Identificación de hablantes en audio de colección')
+
+    expect(screen.queryByLabelText(/dictado/i)).not.toBeInTheDocument()
+    expect(settingsGetMock).not.toHaveBeenCalledWith('dictation_speaker_labels')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(settingsSetMock).not.toHaveBeenCalledWith('dictation_speaker_labels', expect.any(String))
   })
 
   it('enables connection tests for saved keyring credentials without retyping secrets', async () => {

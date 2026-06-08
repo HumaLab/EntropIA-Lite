@@ -96,9 +96,9 @@ const es = {
   'settings.assemblyAiApiKeyPlaceholder': 'aai-...',
   'settings.enterAssemblyAiApiKey': 'Ingresá una API key de AssemblyAI antes de probar la conexión.',
   'settings.assemblyAiConnectionReady': 'Conexión lista · AssemblyAI validó tu cuenta.',
-  'settings.assemblyAiSpeakerLabels': 'Identificación de hablantes',
+  'settings.assemblyAiSpeakerLabels': 'Identificación de hablantes en audio de colección',
   'settings.assemblyAiSpeakerLabelsHint':
-    'Activada por defecto para pedir speaker_labels y etiquetar la transcripción como Hablante 1, Hablante 2, Hablante 3…',
+    'Sólo aplica a transcripciones STT de assets de audio de colección. El dictado de notas siempre envía speaker_labels=false.',
   'settings.optionEnabled': 'Activado',
   'settings.optionDisabled': 'Desactivado',
   'dbBrowser.eyebrow': 'Base de datos',
@@ -689,9 +689,9 @@ const en: Record<keyof typeof es | ExtraI18nKey, string> = {
   'settings.assemblyAiApiKeyPlaceholder': 'aai-...',
   'settings.enterAssemblyAiApiKey': 'Enter an AssemblyAI API key before testing the connection.',
   'settings.assemblyAiConnectionReady': 'Connection ready · AssemblyAI validated your account.',
-  'settings.assemblyAiSpeakerLabels': 'Speaker identification',
+  'settings.assemblyAiSpeakerLabels': 'Collection audio speaker identification',
   'settings.assemblyAiSpeakerLabelsHint':
-    'Enabled by default to request speaker_labels and label the transcription as Speaker 1, Speaker 2, Speaker 3…',
+    'Only applies to collection audio asset STT. Note dictation always sends speaker_labels=false.',
   'settings.optionEnabled': 'Enabled',
   'settings.optionDisabled': 'Disabled',
   'dbBrowser.eyebrow': 'Database',

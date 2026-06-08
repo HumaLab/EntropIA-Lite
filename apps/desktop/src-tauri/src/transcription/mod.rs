@@ -11,6 +11,7 @@ use tokio::sync::mpsc;
 
 const ASSEMBLYAI_API_KEY_SETTING: &str = "assemblyai_api_key";
 const ASSEMBLYAI_SPEAKER_LABELS_SETTING: &str = "assemblyai_role_speaker_identification";
+const DICTATION_SPEAKER_LABELS: bool = false;
 
 #[derive(Clone, Serialize)]
 pub struct TranscriptionProgressPayload {
@@ -116,7 +117,7 @@ pub fn ensure_selected_cloud_key(conn: &rusqlite::Connection) -> Result<(), Stri
     Ok(())
 }
 
-pub fn transcribe_with_selected_provider(
+pub fn transcribe_collection_audio_with_selected_provider(
     app_handle: &AppHandle,
     settings_db_path: Option<&Path>,
     conn: &rusqlite::Connection,
@@ -132,9 +133,7 @@ pub fn transcribe_with_selected_provider(
         return Err("EntropIA Lite requiere AssemblyAI para transcripción.".to_string());
     }
 
-    let enable_speaker_labels = parse_enabled_by_default(
-        crate::settings::get_setting(conn, ASSEMBLYAI_SPEAKER_LABELS_SETTING).as_deref(),
-    );
+    let enable_speaker_labels = collection_audio_speaker_labels_enabled(conn);
 
     let mut emit_provider_progress = |pct: u8, stage: &str| {
         if let Some(asset_id) = asset_id {
@@ -160,6 +159,53 @@ pub fn transcribe_with_selected_provider(
         transcription,
         model_name: "assemblyai-universal",
     })
+}
+
+pub fn transcribe_dictation_with_selected_provider(
+    _app_handle: &AppHandle,
+    settings_db_path: Option<&Path>,
+    conn: &rusqlite::Connection,
+    audio_path: &str,
+) -> Result<ManagedTranscriptionResult, String> {
+    let assemblyai_api_key = crate::settings::get_setting(conn, ASSEMBLYAI_API_KEY_SETTING)
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    if assemblyai_api_key.is_empty() {
+        return Err("EntropIA Lite requiere AssemblyAI para transcripción.".to_string());
+    }
+
+    let mut emit_provider_progress = |_pct: u8, _stage: &str| {};
+    let transcription = transcribe_with_assemblyai_provider(
+        audio_path,
+        &assemblyai_api_key,
+        DICTATION_SPEAKER_LABELS,
+        &mut emit_provider_progress,
+    )?;
+
+    if let Some(path) = settings_db_path {
+        eprintln!(
+            "[transcription] AssemblyAI dictation API key loaded from {}; speaker_labels forced false",
+            path.display()
+        );
+    }
+
+    Ok(ManagedTranscriptionResult {
+        transcription,
+        model_name: "assemblyai-universal",
+    })
+}
+
+fn collection_audio_speaker_labels_enabled(conn: &rusqlite::Connection) -> bool {
+    parse_enabled_by_default(
+        crate::settings::get_setting(conn, ASSEMBLYAI_SPEAKER_LABELS_SETTING).as_deref(),
+    )
+}
+
+#[cfg(test)]
+fn dictation_speaker_labels_enabled() -> bool {
+    DICTATION_SPEAKER_LABELS
 }
 
 fn transcribe_with_assemblyai_provider<F>(
@@ -254,7 +300,7 @@ fn process_job(
     let ManagedTranscriptionResult {
         transcription: result,
         model_name,
-    } = transcribe_with_selected_provider(
+    } = transcribe_collection_audio_with_selected_provider(
         app_handle,
         Some(settings_db_path),
         conn,
@@ -338,7 +384,17 @@ fn emit_error(app_handle: &AppHandle, asset_id: String, error: String) {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_enabled_by_default;
+    use super::{
+        collection_audio_speaker_labels_enabled, dictation_speaker_labels_enabled,
+        parse_enabled_by_default,
+    };
+
+    fn settings_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("in-memory db");
+        conn.execute_batch("CREATE TABLE app_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+            .expect("settings table");
+        conn
+    }
 
     #[test]
     fn speaker_labels_setting_defaults_enabled_when_missing_or_blank() {
@@ -356,5 +412,37 @@ mod tests {
         for value in ["true", "1", "yes", "on", "anything-else"] {
             assert!(parse_enabled_by_default(Some(value)));
         }
+    }
+
+    #[test]
+    fn collection_audio_speaker_labels_default_enabled_when_setting_missing() {
+        let conn = settings_conn();
+
+        assert!(collection_audio_speaker_labels_enabled(&conn));
+    }
+
+    #[test]
+    fn collection_audio_speaker_labels_respects_saved_false() {
+        let conn = settings_conn();
+        conn.execute(
+            "INSERT INTO app_settings(key, value) VALUES ('assemblyai_role_speaker_identification', 'false')",
+            [],
+        )
+        .expect("insert speaker labels setting");
+
+        assert!(!collection_audio_speaker_labels_enabled(&conn));
+    }
+
+    #[test]
+    fn dictation_speaker_labels_are_hardcoded_false() {
+        let conn = settings_conn();
+        conn.execute(
+            "INSERT INTO app_settings(key, value) VALUES ('assemblyai_role_speaker_identification', 'true')",
+            [],
+        )
+        .expect("insert unrelated collection setting");
+
+        assert!(!dictation_speaker_labels_enabled());
+        assert!(collection_audio_speaker_labels_enabled(&conn));
     }
 }

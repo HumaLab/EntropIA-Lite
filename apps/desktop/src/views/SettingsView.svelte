@@ -31,7 +31,7 @@
   let assemblyAiApiKey = $state('')
   let maskedAssemblyAiApiKey = $state('')
   let showAssemblyAiApiKey = $state(false)
-  let assemblyAiSpeakerLabels = $state(true)
+  let assemblyAiCollectionSpeakerLabels = $state(true)
   let glmOcrApiKey = $state('')
   let maskedGlmOcrApiKey = $state('')
   let showGlmOcrApiKey = $state(false)
@@ -185,7 +185,7 @@
         assemblyAiApiKey = storedAssemblyAiKey
         maskedAssemblyAiApiKey = maskKey(storedAssemblyAiKey, 5)
       }
-      assemblyAiSpeakerLabels = parseEnabledByDefault(storedAssemblyAiSpeakerLabels)
+      assemblyAiCollectionSpeakerLabels = parseEnabledByDefault(storedAssemblyAiSpeakerLabels)
       if (storedGlmOcrKey?.startsWith(SECRET_REF_PREFIX)) {
         glmOcrApiKey = ''
         maskedGlmOcrApiKey = 'Clave guardada en Windows Credential Manager'
@@ -419,7 +419,7 @@
         settingsSet(SETTINGS_KEYS.STT_MODE, 'assemblyai'),
         settingsSet(
           SETTINGS_KEYS.ASSEMBLYAI_SPEAKER_LABELS,
-          assemblyAiSpeakerLabels ? 'true' : 'false'
+          assemblyAiCollectionSpeakerLabels ? 'true' : 'false'
         ),
         settingsSet(SETTINGS_KEYS.OCRH_MODE, 'glm_ocr'),
         settingsSet(SETTINGS_KEYS.OCR_CORRECTION_PROMPT, ocrCorrectionPrompt.trim() || DEFAULT_PROMPTS.ocrCorrectionPrompt),
@@ -723,7 +723,7 @@
           <select
             id="assemblyai-speaker-labels"
             class="settings__input settings__input--select"
-            bind:value={assemblyAiSpeakerLabels}
+            bind:value={assemblyAiCollectionSpeakerLabels}
           >
             <option value={true}>{t('settings.optionEnabled')}</option>
             <option value={false}>{t('settings.optionDisabled')}</option>
