@@ -210,7 +210,7 @@ describe('SettingsView', () => {
 
   it('shows refined success feedback for connection checks and saves', async () => {
     testOpenrouterConnectionMock.mockResolvedValue([
-      { id: 'google/gemma-3-4b-it', name: 'Gemma 3 4B', context_length: 8192 },
+      { id: 'google/gemma-4-26b-a4b-it', name: 'Gemma 4 26B', context_length: 8192 },
       { id: 'anthropic/claude-3.7-sonnet', name: 'Claude 3.7 Sonnet', context_length: 200000 },
     ])
 
@@ -306,7 +306,7 @@ describe('SettingsView', () => {
       return null
     })
     testOpenrouterConnectionMock.mockResolvedValue([
-      { id: 'google/gemma-3-4b-it', name: 'Gemma 3 4B', context_length: 8192 },
+      { id: 'google/gemma-4-26b-a4b-it', name: 'Gemma 4 26B', context_length: 8192 },
     ])
 
     render(SettingsView)

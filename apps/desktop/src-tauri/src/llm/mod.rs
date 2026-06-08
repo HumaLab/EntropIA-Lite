@@ -974,7 +974,7 @@ impl LlmQueue {
                 let api_key =
                     settings::get_setting(&conn, "openrouter_api_key").unwrap_or_default();
                 let remote_model = settings::get_setting(&conn, "openrouter_model")
-                    .unwrap_or_else(|| "google/gemma-3-4b-it".to_string());
+                    .unwrap_or_else(|| "google/gemma-4-26b-a4b-it".to_string());
                 let job_log_prefix = llm_job_prefix(&job);
 
                 emit_progress(&app_handle, &id, job_name, 10);

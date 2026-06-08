@@ -115,7 +115,7 @@ export type EmbeddingProvider = 'api'
 export type SttMode = 'assemblyai'
 export type OcrhMode = 'glm_ocr'
 
-export const DEFAULT_OPENROUTER_MODEL = 'google/gemma-3-4b-it'
+export const DEFAULT_OPENROUTER_MODEL = 'google/gemma-4-26b-a4b-it'
 export const DEFAULT_OPENROUTER_EMBEDDING_MODEL = 'baai/bge-m3'
 export const DEFAULT_LLM_MODE: LlmMode = 'openrouter'
 export const DEFAULT_EMBEDDING_PROVIDER: EmbeddingProvider = 'api'

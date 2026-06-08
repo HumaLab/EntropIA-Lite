@@ -532,7 +532,7 @@ mod tests {
         ]
         ```"#;
 
-        let entities = parse_openrouter_entities(text, &[], raw, "google/gemma-3-4b-it")
+        let entities = parse_openrouter_entities(text, &[], raw, "google/gemma-4-26b-a4b-it")
             .expect("valid fenced JSON should parse");
 
         assert_eq!(entities.len(), 4);
@@ -548,7 +548,7 @@ mod tests {
 
     #[test]
     fn openrouter_ner_rejects_bad_json_without_fallback() {
-        let error = parse_openrouter_entities("texto", &[], "[not json]", "google/gemma-3-4b-it")
+        let error = parse_openrouter_entities("texto", &[], "[not json]", "google/gemma-4-26b-a4b-it")
             .expect_err("bad JSON should not silently fall back");
 
         assert!(error.contains("OpenRouter NER"));
@@ -573,7 +573,7 @@ mod tests {
             "Don Manuel Belgrano viajó a Buenos Aires.",
             &protected,
             raw,
-            "google/gemma-3-4b-it",
+            "google/gemma-4-26b-a4b-it",
         )
         .expect("valid JSON should parse");
 

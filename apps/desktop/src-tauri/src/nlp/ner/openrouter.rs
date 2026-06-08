@@ -3,7 +3,7 @@ use serde::Deserialize;
 use super::types::{sanitize_entity_value, Entity, EntitySource, EntityType};
 use super::{find_entity_span, is_suppressed_by_protected, normalize_entity_value};
 
-pub const DEFAULT_OPENROUTER_NER_MODEL: &str = "google/gemma-3-4b-it";
+pub const DEFAULT_OPENROUTER_NER_MODEL: &str = "google/gemma-4-26b-a4b-it";
 pub const OPENROUTER_NER_MODEL_SETTING_KEY: &str = "openrouter_ner_model";
 
 #[derive(Debug, Deserialize)]

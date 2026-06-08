@@ -77,7 +77,7 @@ describe('settings', () => {
 
   describe('testOpenrouterConnection', () => {
     it('calls invoke with api key', async () => {
-      const mockModels = [{ id: 'google/gemma-3-4b-it', name: 'Gemma 3 4B', context_length: 8192 }]
+      const mockModels = [{ id: 'google/gemma-4-26b-a4b-it', name: 'Gemma 4 26B', context_length: 8192 }]
       mockInvoke.mockResolvedValueOnce(mockModels)
       const result = await testOpenrouterConnection('sk-or-test')
       expect(mockInvoke).toHaveBeenCalledWith('test_openrouter_connection', {
@@ -123,7 +123,7 @@ describe('settings', () => {
     })
 
     it('has correct defaults', () => {
-      expect(DEFAULT_OPENROUTER_MODEL).toBe('google/gemma-3-4b-it')
+      expect(DEFAULT_OPENROUTER_MODEL).toBe('google/gemma-4-26b-a4b-it')
       expect(DEFAULT_LLM_MODE).toBe('openrouter')
       expect(DEFAULT_STT_MODE).toBe('assemblyai')
       expect(DEFAULT_OCRH_MODE).toBe('glm_ocr')
