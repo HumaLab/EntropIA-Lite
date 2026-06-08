@@ -272,6 +272,81 @@ describe('CollectionView consumer compatibility', () => {
     expect(image).not.toHaveAttribute('src', originalAssetUrl)
   })
 
+  it('generates image thumbnails with limited concurrency and renders each chunk', async () => {
+    const summaries = Array.from({ length: 6 }, (_, index) => {
+      const itemNumber = index + 1
+      return {
+        id: `item-${itemNumber}`,
+        title: `Imagen ${itemNumber}`,
+        createdAt: itemNumber,
+        updatedAt: itemNumber,
+        collectionId: 'col-1',
+        metadata: null,
+        assetCount: 1,
+        primaryAssetId: `asset-${itemNumber}`,
+        primaryAssetPath: `/app-data/assets/col-1/item-${itemNumber}/original.jpg`,
+        primaryAssetType: 'image',
+      }
+    })
+    const thumbnailLoads: Array<{ assetId: string; resolve: (value: string) => void }> = []
+    let activeThumbnailLoads = 0
+    let maxActiveThumbnailLoads = 0
+    fileImportRef.generateImageThumbnail.mockImplementation((_path: string, assetId: string) => {
+      activeThumbnailLoads++
+      maxActiveThumbnailLoads = Math.max(maxActiveThumbnailLoads, activeThumbnailLoads)
+      const load = deferred<string>()
+      thumbnailLoads.push({
+        assetId,
+        resolve: (value) => {
+          activeThumbnailLoads--
+          load.resolve(value)
+        },
+      })
+      return load.promise
+    })
+    storeRef.current = {
+      items: {
+        findCardSummariesByCollection: vi.fn().mockResolvedValue(summaries),
+        findByCollection: vi.fn(),
+        searchByText: vi.fn(),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+        deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+      assets: {
+        create: vi.fn(),
+        findByItem: vi.fn(),
+        findById: vi.fn(),
+        deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+    }
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    expect(await screen.findByText('Imagen 1')).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(fileImportRef.generateImageThumbnail).toHaveBeenCalledTimes(4)
+    })
+    expect(maxActiveThumbnailLoads).toBe(4)
+
+    for (const load of thumbnailLoads.slice(0, 4)) {
+      load.resolve(`asset://localhost/app-data/thumbnails/${load.assetId}.png`)
+    }
+
+    await waitFor(() => {
+      expect(fileImportRef.generateImageThumbnail).toHaveBeenCalledTimes(6)
+    })
+
+    for (const load of thumbnailLoads.slice(4)) {
+      load.resolve(`asset://localhost/app-data/thumbnails/${load.assetId}.png`)
+    }
+
+    const image = await screen.findByRole('img', { name: 'Imagen 6' })
+    expect(image).toHaveAttribute('src', 'asset://localhost/app-data/thumbnails/asset-6.png')
+  })
+
   it('updates translated collection copy when locale changes', async () => {
     render(CollectionView, { collectionId: 'col-1' })
 

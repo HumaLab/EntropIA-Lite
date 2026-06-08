@@ -54,6 +54,7 @@
   let itemAssetsLoadRequestId = 0
   let imageThumbnailLoadRequestId = 0
   let activeCollectionId: string | null = null
+  const IMAGE_THUMBNAIL_CONCURRENCY = 4
 
   type ItemAssetMeta = {
     assetCount: number
@@ -124,31 +125,45 @@
 
   async function loadImageThumbnails(summaries: CollectionItemCardSummary[]) {
     const requestId = ++imageThumbnailLoadRequestId
-    for (const summary of summaries) {
-      if (
-        summary.primaryAssetType !== 'image' ||
-        !summary.primaryAssetId ||
-        !summary.primaryAssetPath
-      ) {
-        continue
+    const imageSummaries = summaries.filter(
+      (summary) =>
+        summary.primaryAssetType === 'image' &&
+        summary.primaryAssetId &&
+        summary.primaryAssetPath
+    )
+
+    for (let i = 0; i < imageSummaries.length; i += IMAGE_THUMBNAIL_CONCURRENCY) {
+      const chunk = imageSummaries.slice(i, i + IMAGE_THUMBNAIL_CONCURRENCY)
+      const thumbnailResults = await Promise.all(
+        chunk.map(async (summary) => {
+          try {
+            const thumbnailUrl = await generateImageThumbnail(
+              summary.primaryAssetPath!,
+              summary.primaryAssetId!
+            )
+            return { summary, thumbnailUrl }
+          } catch (e) {
+            console.warn('[CollectionView] Failed to generate image thumbnail for item', summary.id, e)
+            return null
+          }
+        })
+      )
+
+      if (requestId !== imageThumbnailLoadRequestId) return
+
+      const newMeta = new Map(itemAssetMeta)
+      let changed = false
+      for (const result of thumbnailResults) {
+        if (!result) continue
+
+        const currentMeta = newMeta.get(result.summary.id)
+        if (!currentMeta || currentMeta.primaryAssetPath !== result.summary.primaryAssetPath) continue
+
+        newMeta.set(result.summary.id, { ...currentMeta, thumbnailUrl: result.thumbnailUrl })
+        changed = true
       }
 
-      try {
-        const thumbnailUrl = await generateImageThumbnail(
-          summary.primaryAssetPath,
-          summary.primaryAssetId
-        )
-        if (requestId !== imageThumbnailLoadRequestId) return
-
-        const currentMeta = itemAssetMeta.get(summary.id)
-        if (!currentMeta || currentMeta.primaryAssetPath !== summary.primaryAssetPath) continue
-
-        const newMeta = new Map(itemAssetMeta)
-        newMeta.set(summary.id, { ...currentMeta, thumbnailUrl })
-        itemAssetMeta = newMeta
-      } catch (e) {
-        console.warn('[CollectionView] Failed to generate image thumbnail for item', summary.id, e)
-      }
+      if (changed) itemAssetMeta = newMeta
     }
   }
 
