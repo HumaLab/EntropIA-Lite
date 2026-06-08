@@ -74,7 +74,19 @@ fn next_version_path(path: &str, force_extension: Option<&str>) -> String {
 /// Saves the result as a NEW versioned file (never in-place).
 /// The original file is kept on disk for undo.
 #[tauri::command]
-pub fn crop_image(
+pub async fn crop_image(
+    path: String,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+) -> Result<ImageEditResult, String> {
+    tokio::task::spawn_blocking(move || crop_image_file(path, x, y, width, height))
+        .await
+        .map_err(|e| format!("Image crop task panicked: {e}"))?
+}
+
+fn crop_image_file(
     path: String,
     x: u32,
     y: u32,
@@ -123,7 +135,13 @@ pub fn crop_image(
 /// - `"left"` = 90° counter-clockwise (270° CW)
 /// - `"right"` = 90° clockwise
 #[tauri::command]
-pub fn rotate_image(path: String, direction: String) -> Result<ImageEditResult, String> {
+pub async fn rotate_image(path: String, direction: String) -> Result<ImageEditResult, String> {
+    tokio::task::spawn_blocking(move || rotate_image_file(path, direction))
+        .await
+        .map_err(|e| format!("Image rotation task panicked: {e}"))?
+}
+
+fn rotate_image_file(path: String, direction: String) -> Result<ImageEditResult, String> {
     let img = image::open(&path).map_err(|e| format!("Failed to open image: {e}"))?;
 
     let rotated = match direction.as_str() {
@@ -156,7 +174,13 @@ pub fn rotate_image(path: String, direction: String) -> Result<ImageEditResult, 
 /// Saves the result as a NEW PNG versioned file with an expanded transparent
 /// canvas so corners are not clipped by the rotation.
 #[tauri::command]
-pub fn rotate_image_degrees(path: String, degrees: f32) -> Result<ImageEditResult, String> {
+pub async fn rotate_image_degrees(path: String, degrees: f32) -> Result<ImageEditResult, String> {
+    tokio::task::spawn_blocking(move || rotate_image_degrees_file(path, degrees))
+        .await
+        .map_err(|e| format!("Fine image rotation task panicked: {e}"))?
+}
+
+fn rotate_image_degrees_file(path: String, degrees: f32) -> Result<ImageEditResult, String> {
     if !degrees.is_finite() {
         return Err("Rotation degrees must be finite".to_string());
     }
@@ -206,7 +230,20 @@ pub fn rotate_image_degrees(path: String, degrees: f32) -> Result<ImageEditResul
 /// (e.g. JPEG), the output is converted to PNG.
 /// The original file is kept on disk for undo.
 #[tauri::command]
-pub fn erase_region(
+pub async fn erase_region(
+    path: String,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    fill: String,
+) -> Result<ImageEditResult, String> {
+    tokio::task::spawn_blocking(move || erase_region_file(path, x, y, width, height, fill))
+        .await
+        .map_err(|e| format!("Image erase task panicked: {e}"))?
+}
+
+fn erase_region_file(
     path: String,
     x: u32,
     y: u32,
@@ -298,7 +335,7 @@ mod tests {
             .save_with_format(&source_path, ImageFormat::Jpeg)
             .expect("save source");
 
-        let result = rotate_image_degrees(source_path.to_string_lossy().to_string(), 45.0)
+        let result = rotate_image_degrees_file(source_path.to_string_lossy().to_string(), 45.0)
             .expect("fine rotate image");
 
         assert_eq!(result.previous_path, source_path.to_string_lossy());
@@ -311,8 +348,8 @@ mod tests {
 
     #[test]
     fn rotate_image_degrees_rejects_invalid_degrees() {
-        assert!(rotate_image_degrees("missing.png".to_string(), 0.0).is_err());
-        assert!(rotate_image_degrees("missing.png".to_string(), f32::NAN).is_err());
-        assert!(rotate_image_degrees("missing.png".to_string(), 361.0).is_err());
+        assert!(rotate_image_degrees_file("missing.png".to_string(), 0.0).is_err());
+        assert!(rotate_image_degrees_file("missing.png".to_string(), f32::NAN).is_err());
+        assert!(rotate_image_degrees_file("missing.png".to_string(), 361.0).is_err());
     }
 }
