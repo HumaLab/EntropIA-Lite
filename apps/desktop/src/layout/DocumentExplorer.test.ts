@@ -38,6 +38,51 @@ const state = vi.hoisted(() => {
       countItems: vi.fn().mockImplementation(async (id: string) => (id === 'col-1' ? 2 : 1)),
     },
     items: {
+      findCardSummariesByCollection: vi.fn().mockImplementation(async (collectionId: string) => {
+        if (collectionId === 'col-2') {
+          return [
+            {
+              id: 'item-3',
+              title: 'Acta 3',
+              collectionId: 'col-2',
+              metadata: null,
+              createdAt: 1,
+              updatedAt: 3,
+              assetCount: 1,
+              primaryAssetId: 'asset-4',
+              primaryAssetPath: 'docs/acta-3.pdf',
+              primaryAssetType: 'pdf',
+            },
+          ]
+        }
+
+        return [
+          {
+            id: 'item-1',
+            title: 'Acta 1',
+            collectionId: 'col-1',
+            metadata: null,
+            createdAt: 1,
+            updatedAt: 2,
+            assetCount: 2,
+            primaryAssetId: 'asset-1',
+            primaryAssetPath: 'docs/acta-1.pdf',
+            primaryAssetType: 'pdf',
+          },
+          {
+            id: 'item-2',
+            title: 'Acta 2',
+            collectionId: 'col-1',
+            metadata: null,
+            createdAt: 1,
+            updatedAt: 1,
+            assetCount: 1,
+            primaryAssetId: 'asset-3',
+            primaryAssetPath: 'docs/foto-acta-2.png',
+            primaryAssetType: 'image',
+          },
+        ]
+      }),
       findByCollection: vi.fn().mockImplementation(async (collectionId: string) => {
         if (collectionId === 'col-2') {
           return [
@@ -210,6 +255,7 @@ describe('DocumentExplorer', () => {
     state.resetToPath.mockReset()
     state.store.collections.findAll.mockClear()
     state.store.collections.countItems.mockClear()
+    state.store.items.findCardSummariesByCollection.mockClear()
     state.store.items.findByCollection.mockClear()
     state.store.assets.findByItem.mockClear()
   })
@@ -227,7 +273,7 @@ describe('DocumentExplorer', () => {
     expect(state.replace).not.toHaveBeenCalled()
 
     await waitFor(() => {
-      expect(state.store.items.findByCollection).toHaveBeenCalledWith('col-2')
+      expect(state.store.items.findCardSummariesByCollection).toHaveBeenCalledWith('col-2')
     })
 
     expect(await screen.findByRole('treeitem', { name: 'Acta 3' })).toBeInTheDocument()
@@ -443,7 +489,7 @@ describe('DocumentExplorer', () => {
     expect(state.replace).not.toHaveBeenCalled()
   })
 
-  it('flattens single-asset items without rendering a nested duplicate asset row', async () => {
+  it('renders single-asset items at the asset child level without a chevron', async () => {
     persistOpenTree(['col-1'])
 
     render(DocumentExplorer)
@@ -451,16 +497,13 @@ describe('DocumentExplorer', () => {
     await screen.findByText('Acta 2')
     expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-2')
 
-    await fireEvent.click(screen.getByRole('button', { name: 'Expandir documento Acta 2' }))
-
-    await waitFor(() => {
-      expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-2')
-    })
-
-    expect(screen.getByRole('treeitem', { name: 'Acta 2' })).not.toHaveAttribute('aria-expanded')
+    const singleAssetNode = screen.getByRole('treeitem', { name: 'Acta 2' })
+    expect(singleAssetNode).toHaveAttribute('aria-level', '3')
+    expect(singleAssetNode).not.toHaveAttribute('aria-expanded')
     expect(screen.queryByRole('button', { name: 'Expandir documento Acta 2' })).not.toBeInTheDocument()
     expect(screen.queryByRole('treeitem', { name: 'foto-acta-2.png' })).not.toBeInTheDocument()
     expect(screen.getByText('image')).toBeInTheDocument()
+    expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-2')
   })
 
   it('keeps the document explorer open and removes the internal collapse control', async () => {
@@ -557,7 +600,7 @@ describe('DocumentExplorer', () => {
     state.emit()
 
     await waitFor(() => {
-      expect(state.store.items.findByCollection).toHaveBeenCalledWith('col-1')
+      expect(state.store.items.findCardSummariesByCollection).toHaveBeenCalledWith('col-1')
     })
     expect(screen.getByRole('treeitem', { name: 'Colección 1' })).toHaveAttribute(
       'aria-expanded',
@@ -599,7 +642,7 @@ describe('DocumentExplorer', () => {
     expect(screen.queryByRole('treeitem', { name: 'acta-1.pdf' })).not.toBeInTheDocument()
 
     await waitFor(() => {
-      expect(state.store.items.findByCollection).toHaveBeenCalledWith('col-2')
+      expect(state.store.items.findCardSummariesByCollection).toHaveBeenCalledWith('col-2')
       expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-3')
     })
   })
@@ -636,10 +679,6 @@ describe('DocumentExplorer', () => {
     render(DocumentExplorer)
 
     await screen.findByText('Acta 2')
-    await fireEvent.click(screen.getByRole('button', { name: 'Expandir documento Acta 2' }))
-    await waitFor(() => {
-      expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-2')
-    })
 
     const imageAssetButton = (await screen.findByText('Acta 2')).closest('button')
 
@@ -649,6 +688,7 @@ describe('DocumentExplorer', () => {
 
     expect(imageAssetButton.querySelector('svg')).not.toBeNull()
     expect(screen.getByText('image')).toBeInTheDocument()
+    expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-2')
   })
 
   it('refreshes cached collection items and counts when the collection changes', async () => {
@@ -659,7 +699,7 @@ describe('DocumentExplorer', () => {
     await screen.findByText('Acta 2')
     expect(screen.getByText('2')).toBeInTheDocument()
 
-    state.store.items.findByCollection.mockImplementation(async (collectionId: string) => {
+    state.store.items.findCardSummariesByCollection.mockImplementation(async (collectionId: string) => {
       if (collectionId === 'col-1') {
         return [
           {
@@ -669,6 +709,10 @@ describe('DocumentExplorer', () => {
             metadata: null,
             createdAt: 1,
             updatedAt: 4,
+            assetCount: 0,
+            primaryAssetId: null,
+            primaryAssetPath: null,
+            primaryAssetType: null,
           },
         ]
       }
@@ -681,6 +725,10 @@ describe('DocumentExplorer', () => {
           metadata: null,
           createdAt: 1,
           updatedAt: 3,
+          assetCount: 1,
+          primaryAssetId: 'asset-4',
+          primaryAssetPath: 'docs/acta-3.pdf',
+          primaryAssetType: 'pdf',
         },
       ]
     })

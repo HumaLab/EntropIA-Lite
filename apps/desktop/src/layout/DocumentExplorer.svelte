@@ -11,7 +11,12 @@
     type DocumentExplorerAssetDetail,
     type DocumentExplorerCollectionChangedDetail,
   } from '$lib/document-explorer'
-  import type { Asset, Collection, Item } from '@entropia/store'
+  import type { Asset, Collection, Item, CollectionItemCardSummary } from '@entropia/store'
+
+  type ItemAssetSummary = Pick<
+    CollectionItemCardSummary,
+    'assetCount' | 'primaryAssetId' | 'primaryAssetPath' | 'primaryAssetType'
+  >
 
   let { filterText = '' }: { filterText?: string } = $props()
 
@@ -35,6 +40,7 @@
   )
   let itemsByCollection = $state<Record<string, Item[]>>({})
   let assetsByItem = $state<Record<string, Asset[]>>({})
+  let assetSummariesByItem = $state<Record<string, ItemAssetSummary>>({})
   let itemCounts = $state<Record<string, number>>({})
   let loadingCollections = $state<string[]>([])
   let loadingItems = $state<string[]>([])
@@ -163,8 +169,57 @@
     return 'file'
   }
 
-  function areItemAssetsLoaded(itemId: string) {
-    return Boolean(assetsByItem[itemId])
+  function getItemAssetSummary(itemId: string) {
+    const assets = assetsByItem[itemId]
+    if (assets) {
+      const [primaryAsset] = assets
+      return {
+        assetCount: assets.length,
+        primaryAssetId: primaryAsset?.id ?? null,
+        primaryAssetPath: primaryAsset?.path ?? null,
+        primaryAssetType: primaryAsset?.type ?? null,
+      }
+    }
+
+    return assetSummariesByItem[itemId] ?? null
+  }
+
+  function getSingleAssetForItem(item: Item): Asset | null {
+    const summary = getItemAssetSummary(item.id)
+    if (summary?.assetCount !== 1) return null
+    if (!summary.primaryAssetId || !summary.primaryAssetPath || !summary.primaryAssetType) return null
+
+    return {
+      id: summary.primaryAssetId,
+      itemId: item.id,
+      path: summary.primaryAssetPath,
+      type: summary.primaryAssetType,
+      size: 0,
+      sortIndex: 0,
+      createdAt: item.createdAt,
+    }
+  }
+
+  function canExpandItem(item: Item) {
+    const summary = getItemAssetSummary(item.id)
+    return summary ? summary.assetCount > 1 : true
+  }
+
+  function cacheItemAssetSummaries(summaries: CollectionItemCardSummary[]) {
+    assetSummariesByItem = {
+      ...assetSummariesByItem,
+      ...Object.fromEntries(
+        summaries.map((summary) => [
+          summary.id,
+          {
+            assetCount: summary.assetCount,
+            primaryAssetId: summary.primaryAssetId,
+            primaryAssetPath: summary.primaryAssetPath,
+            primaryAssetType: summary.primaryAssetType,
+          },
+        ])
+      ),
+    }
   }
 
   function isCollectionExpanded(collectionId: string) {
@@ -230,10 +285,11 @@
       loadError = null
 
       try {
-        const items = await getStore().items.findByCollection(collectionId)
+        const summaries = await getStore().items.findCardSummariesByCollection(collectionId)
+        cacheItemAssetSummaries(summaries)
         itemsByCollection = {
           ...itemsByCollection,
-          [collectionId]: items,
+          [collectionId]: summaries,
         }
       } catch (error) {
         loadError = error instanceof Error ? error.message : translateExplorer('explorer.loadError')
@@ -256,17 +312,29 @@
 
     try {
       const store = getStore()
-      const [items, count] = await Promise.all([
-        store.items.findByCollection(collectionId),
+      const [summaries, count] = await Promise.all([
+        store.items.findCardSummariesByCollection(collectionId),
         store.collections.countItems(collectionId),
       ])
+      const items = summaries
       const itemIds = new Set(items.map((item) => item.id))
       const previousItemIds = itemsByCollection[collectionId]?.map((item) => item.id) ?? []
       const nextAssetsByItem = { ...assetsByItem }
+      const nextAssetSummariesByItem = { ...assetSummariesByItem }
 
       for (const previousItemId of previousItemIds) {
         if (previousItemId === itemId || !itemIds.has(previousItemId)) {
           delete nextAssetsByItem[previousItemId]
+          delete nextAssetSummariesByItem[previousItemId]
+        }
+      }
+
+      for (const summary of summaries) {
+        nextAssetSummariesByItem[summary.id] = {
+          assetCount: summary.assetCount,
+          primaryAssetId: summary.primaryAssetId,
+          primaryAssetPath: summary.primaryAssetPath,
+          primaryAssetType: summary.primaryAssetType,
         }
       }
 
@@ -279,6 +347,7 @@
         [collectionId]: count,
       }
       assetsByItem = nextAssetsByItem
+      assetSummariesByItem = nextAssetSummariesByItem
     } catch (error) {
       loadError = error instanceof Error ? error.message : translateExplorer('explorer.loadError')
     } finally {
@@ -618,24 +687,20 @@
                         {#each collectionItems as item (item.id)}
                           {@const itemExpanded = isItemExpanded(item.id)}
                           {@const itemAssets = assetsByItem[item.id] ?? []}
-                          {@const itemAssetsLoaded = areItemAssetsLoaded(item.id)}
-                          {@const singleAsset = itemAssetsLoaded && itemAssets.length === 1 ? itemAssets[0] : null}
+                          {@const singleAsset = getSingleAssetForItem(item)}
+                          {@const itemExpandable = canExpandItem(item)}
                           {#if singleAsset}
                             {@const assetIcon = getAssetIcon(singleAsset.type)}
                             <div
                               class="explorer__treeitem"
                               class:is-active={item.id === activeItemId || singleAsset.id === activeAssetId}
                               role="treeitem"
-                              aria-level="2"
+                              aria-level="3"
                               aria-selected={item.id === activeItemId || singleAsset.id === activeAssetId}
                               aria-current={singleAsset.id === activeAssetId ? 'true' : undefined}
                               aria-label={item.title}
                             >
-                              <div class="explorer__row" style:--level="2">
-                                <span
-                                  class="explorer__chevron explorer__chevron--placeholder"
-                                  aria-hidden="true"
-                                ></span>
+                              <div class="explorer__row" style:--level="3">
                                 <button
                                   type="button"
                                   class="explorer__node explorer__node--asset"
@@ -654,7 +719,7 @@
                                 </button>
                               </div>
                             </div>
-                          {:else}
+                          {:else if itemExpandable}
                           <div
                             class="explorer__treeitem"
                             class:is-active={item.id === activeItemId}
@@ -747,6 +812,33 @@
                               </div>
                             {/if}
                           </div>
+                          {:else}
+                            <div
+                              class="explorer__treeitem"
+                              class:is-active={item.id === activeItemId}
+                              role="treeitem"
+                              aria-level="2"
+                              aria-selected={item.id === activeItemId}
+                              aria-current={item.id === activeItemId ? 'true' : undefined}
+                              aria-label={item.title}
+                            >
+                              <div class="explorer__row" style:--level="2">
+                                <button
+                                  type="button"
+                                  class="explorer__node explorer__node--item explorer__node--flush"
+                                  class:is-active={item.id === activeItemId}
+                                  onclick={() => handleItemClick(item)}
+                                >
+                                  <span
+                                    class="explorer__node-icon explorer__node-icon--item"
+                                    aria-hidden="true"
+                                  >
+                                    <ActionIcon name="file-text" size={14} />
+                                  </span>
+                                  <span class="explorer__node-main">{item.title}</span>
+                                </button>
+                              </div>
+                            </div>
                           {/if}
                         {/each}
                       {/if}
