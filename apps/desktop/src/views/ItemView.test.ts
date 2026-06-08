@@ -630,8 +630,8 @@ describe('ItemView semantic triples panel', () => {
     expect(triplesBtn).toBeDisabled()
     expect(screen.getByText('pending')).toBeInTheDocument()
 
-    nlpEventHandlers.get('nlp:progress')?.({
-      payload: { item_id: 'item-1', job: 'triples', pct: 25 },
+    nlpEventHandlers.get('llm:progress')?.({
+      payload: { id: 'asset-1', job: 'extract_triples', pct: 25 },
     })
     await waitFor(() => {
       expect(screen.getByText('running')).toBeInTheDocument()

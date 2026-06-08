@@ -1986,6 +1986,12 @@
     llmStore.startListening().then(() => {
       llmStore.onChange(() => {
         llmTick++
+        const target = getActiveLlmTarget({ itemId, selectedAssetId: selectedAsset?.id ?? null })
+        const llmState = llmStore.getState(target.targetId)
+        if (isLlmTriplesJob(llmState.activeJob ?? '') && llmState.status === 'running') {
+          nlpStore._setJobStatus(itemId, 'triples', 'running')
+          nlpTick++
+        }
       })
       // Load persisted LLM results for the item (legacy item-level results).
       // Asset-level results are loaded in the selectedAsset effect below.
