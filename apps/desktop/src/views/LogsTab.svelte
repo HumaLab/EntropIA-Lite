@@ -14,13 +14,14 @@
   let loading = $state(false)
   let feedback = $state<{ tone: 'success' | 'error'; text: string } | null>(null)
   let unlisten: (() => void) | null = null
+  const LOG_WINDOW_SIZE = 20
 
   let renderedLogs = $derived(entries.map(formatLogEntry).join('\n'))
 
   onMount(async () => {
     await refreshLogs()
     unlisten = await onLogEntry((entry) => {
-      entries = [...entries, entry].slice(-2000)
+      entries = [...entries, entry].slice(-LOG_WINDOW_SIZE)
     })
   })
 
@@ -32,7 +33,7 @@
     loading = true
     feedback = null
     try {
-      entries = await getLogs()
+      entries = (await getLogs()).slice(-LOG_WINDOW_SIZE)
     } catch (error) {
       feedback = { tone: 'error', text: `No se pudieron cargar los logs: ${String(error)}` }
     } finally {

@@ -9,6 +9,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, State};
 
 const MAX_LOG_ENTRIES: usize = 2_000;
+const DEFAULT_LOG_ENTRIES_WINDOW: usize = 20;
 const LOG_FILE_NAME: &str = "entropia.log";
 const MAX_MESSAGE_CHARS: usize = 4_000;
 
@@ -62,12 +63,13 @@ impl AppLogsState {
         }
     }
 
-    fn entries(&self) -> Vec<AppLogEntry> {
+    fn recent_entries(&self, limit: usize) -> Vec<AppLogEntry> {
         let inner = self
             .inner
             .lock()
             .unwrap_or_else(|poison| poison.into_inner());
-        inner.entries.iter().cloned().collect()
+        let start = inner.entries.len().saturating_sub(limit);
+        inner.entries.iter().skip(start).cloned().collect()
     }
 
     fn clear(&self) -> Result<(), String> {
@@ -151,7 +153,7 @@ impl AppLogsState {
 
 #[tauri::command]
 pub fn logs_get(state: State<'_, AppLogsState>) -> Result<Vec<AppLogEntry>, String> {
-    Ok(state.entries())
+    Ok(state.recent_entries(DEFAULT_LOG_ENTRIES_WINDOW))
 }
 
 #[tauri::command]
