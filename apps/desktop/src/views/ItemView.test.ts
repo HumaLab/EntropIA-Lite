@@ -734,6 +734,47 @@ describe('ItemView asset-level embedding and similarity', () => {
     expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-embed-1')
   })
 
+  it('does not show asset A embedding completion as ready on asset B', async () => {
+    await openAnalysis(
+      createStore({
+        assetsRows: [
+          {
+            id: 'asset-embed-a',
+            itemId: 'item-1',
+            path: 'docs/acta-1.pdf',
+            type: 'pdf',
+            createdAt: 1,
+          },
+          {
+            id: 'asset-embed-b',
+            itemId: 'item-1',
+            path: 'docs/acta-2.pdf',
+            type: 'pdf',
+            createdAt: 2,
+          },
+        ],
+      })
+    )
+
+    nlpEventHandlers.get('nlp:complete')?.({
+      payload: { item_id: 'item-1', asset_id: 'asset-embed-a', job: 'embed' },
+    })
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('button', { name: /EMBED/i })).getByText('done')
+      ).toBeInTheDocument()
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Página siguiente|Next page/i }))
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('button', { name: /EMBED/i })).getByText('idle')
+      ).toBeInTheDocument()
+    })
+  })
+
   it('disables EMBED and shows a graceful hint when no asset is selected', async () => {
     storeRef.current = createStore({ assetsRows: [] })
     render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })

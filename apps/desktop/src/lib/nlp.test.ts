@@ -62,6 +62,24 @@ describe('NlpStore', () => {
     expect(stateB.fts).toBe('idle')
   })
 
+  it('getState keeps asset-scoped jobs isolated within the same item', () => {
+    store._setJobStatus('item-a', 'embed', 'done', undefined, 'asset-a')
+
+    expect(store.getState('item-a', 'asset-a').embed).toBe('done')
+    expect(store.getState('item-a', 'asset-b').embed).toBe('idle')
+  })
+
+  it('getState falls back to item-wide job state when an asset has no override', () => {
+    store._setJobStatus('item-a', 'fts', 'done')
+    store._setJobStatus('item-a', 'embed', 'running', undefined, 'asset-a')
+
+    const assetState = store.getState('item-a', 'asset-a')
+    expect(assetState.fts).toBe('done')
+    expect(assetState.embed).toBe('running')
+    expect(store.getState('item-a', 'asset-b').fts).toBe('done')
+    expect(store.getState('item-a', 'asset-b').embed).toBe('idle')
+  })
+
   // ─────────────────────────────────────────────────────────────────────────
   // invoke wrappers
   // ─────────────────────────────────────────────────────────────────────────
@@ -232,6 +250,27 @@ describe('NlpStore', () => {
     expect(state.ner).toBe('idle')
   })
 
+  it('nlp:progress with asset_id updates only that asset state', async () => {
+    let progressCallback: ((event: { payload: unknown }) => void) | null = null
+
+    vi.mocked(listen).mockImplementation((eventName, callback) => {
+      if (eventName === 'nlp:progress') {
+        progressCallback = callback as (event: { payload: unknown }) => void
+      }
+      return Promise.resolve(vi.fn())
+    })
+
+    await store.startListening(listen)
+
+    progressCallback!({
+      payload: { item_id: 'item-emb', asset_id: 'asset-a', job: 'embed', pct: 10 },
+    })
+
+    expect(store.getState('item-emb', 'asset-a').embed).toBe('running')
+    expect(store.getState('item-emb', 'asset-b').embed).toBe('idle')
+    expect(store.getState('item-emb').embed).toBe('idle')
+  })
+
   it('nlp:progress for ner job sets ner status to running', async () => {
     let progressCallback: ((event: { payload: unknown }) => void) | null = null
 
@@ -311,6 +350,25 @@ describe('NlpStore', () => {
     expect(store.getState('item-2').embed).toBe('done')
   })
 
+  it('nlp:complete with asset_id does not mark sibling assets done', async () => {
+    let completeCallback: ((event: { payload: unknown }) => void) | null = null
+
+    vi.mocked(listen).mockImplementation((eventName, callback) => {
+      if (eventName === 'nlp:complete') {
+        completeCallback = callback as (event: { payload: unknown }) => void
+      }
+      return Promise.resolve(vi.fn())
+    })
+
+    await store.startListening(listen)
+
+    completeCallback!({ payload: { item_id: 'item-2', asset_id: 'asset-a', job: 'embed' } })
+
+    expect(store.getState('item-2', 'asset-a').embed).toBe('done')
+    expect(store.getState('item-2', 'asset-b').embed).toBe('idle')
+    expect(store.getState('item-2').embed).toBe('idle')
+  })
+
   it('nlp:complete for ner job transitions ner to done', async () => {
     let completeCallback: ((event: { payload: unknown }) => void) | null = null
 
@@ -385,6 +443,28 @@ describe('NlpStore', () => {
     const state = store.getState('item-err2')
     expect(state.embed).toBe('error')
     expect(state.errors?.embed).toBe('BGE-M3 failed')
+  })
+
+  it('nlp:error with asset_id stores the error only on that asset', async () => {
+    let errorCallback: ((event: { payload: unknown }) => void) | null = null
+
+    vi.mocked(listen).mockImplementation((eventName, callback) => {
+      if (eventName === 'nlp:error') {
+        errorCallback = callback as (event: { payload: unknown }) => void
+      }
+      return Promise.resolve(vi.fn())
+    })
+
+    await store.startListening(listen)
+
+    errorCallback!({
+      payload: { item_id: 'item-err2', asset_id: 'asset-a', job: 'embed', error: 'BGE-M3 failed' },
+    })
+
+    expect(store.getState('item-err2', 'asset-a').embed).toBe('error')
+    expect(store.getState('item-err2', 'asset-a').errors?.embed).toBe('BGE-M3 failed')
+    expect(store.getState('item-err2', 'asset-b').embed).toBe('idle')
+    expect(store.getState('item-err2', 'asset-b').errors?.embed).toBeUndefined()
   })
 
   it('nlp:error for ner job transitions ner to error with message', async () => {

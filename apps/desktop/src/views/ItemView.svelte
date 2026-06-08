@@ -1214,9 +1214,9 @@
     return transcriptionStore.getState(assetId)
   }
 
-  function getNlpState() {
+  function getNlpState(assetId: string | null = selectedAsset?.id ?? null) {
     void nlpTick
-    return nlpStore.getState(itemId)
+    return nlpStore.getState(itemId, assetId)
   }
 
   async function handleIndexFts() {
@@ -1252,27 +1252,41 @@
       return
     }
 
-    nlpStore._setJobStatus(itemId, 'embed', 'pending')
+    const assetId = selectedAsset.id
+    nlpStore._setJobStatus(itemId, 'embed', 'pending', undefined, assetId)
     nlpTick++
     try {
-      await embedAsset(itemId, selectedAsset.id)
+      await embedAsset(itemId, assetId)
     } catch (e) {
-      nlpStore._setJobStatus(itemId, 'embed', 'error', e instanceof Error ? e.message : 'Failed')
+      nlpStore._setJobStatus(
+        itemId,
+        'embed',
+        'error',
+        e instanceof Error ? e.message : 'Failed',
+        assetId
+      )
       nlpTick++
     }
   }
 
   async function handleExtractEntities() {
-    nlpStore._setJobStatus(itemId, 'ner', 'pending')
+    const assetId = selectedAsset?.id ?? null
+    nlpStore._setJobStatus(itemId, 'ner', 'pending', undefined, assetId)
     nlpTick++
     try {
-      if (selectedAsset) {
-        await extractEntitiesForAsset(itemId, selectedAsset.id)
+      if (assetId) {
+        await extractEntitiesForAsset(itemId, assetId)
       } else {
         await extractEntities(itemId)
       }
     } catch (e) {
-      nlpStore._setJobStatus(itemId, 'ner', 'error', e instanceof Error ? e.message : 'Failed')
+      nlpStore._setJobStatus(
+        itemId,
+        'ner',
+        'error',
+        e instanceof Error ? e.message : 'Failed',
+        assetId
+      )
       nlpTick++
     }
   }
@@ -1954,8 +1968,8 @@
       )
       .then(() => {
         const origSet = nlpStore._setJobStatus.bind(nlpStore)
-        nlpStore._setJobStatus = (id, job, status, err) => {
-          origSet(id, job, status, err)
+        nlpStore._setJobStatus = (id, job, status, err, assetId) => {
+          origSet(id, job, status, err, assetId)
           nlpTick++
           // After NER completes, reload entities for the current context
           if (job === 'ner' && status === 'done' && id === itemId) {

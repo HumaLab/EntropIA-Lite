@@ -27,6 +27,8 @@ struct CachedEmbeddingEngine {
 #[derive(Clone, Serialize)]
 pub struct NlpProgressPayload {
     pub item_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
     pub job: String,
     pub pct: u8,
 }
@@ -34,12 +36,16 @@ pub struct NlpProgressPayload {
 #[derive(Clone, Serialize)]
 pub struct NlpCompletePayload {
     pub item_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
     pub job: String,
 }
 
 #[derive(Clone, Serialize)]
 pub struct NlpErrorPayload {
     pub item_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub asset_id: Option<String>,
     pub job: String,
     pub error: String,
 }
@@ -429,7 +435,7 @@ impl NlpQueue {
                         eprintln!(
                             "[nlp/embeddings] EMBED job queued item_id={item_id} asset_id={asset_id}"
                         );
-                        emit_progress(&app_handle, &item_id, "embed", 10);
+                        emit_asset_progress(&app_handle, &item_id, &asset_id, "embed", 10);
                         let engine = ensure_embed_engine_for_current_settings(
                             &conn,
                             &mut embed_engine,
@@ -466,23 +472,34 @@ impl NlpQueue {
                                     eprintln!(
                                         "[nlp/embeddings] EMBED job complete provider={provider} item_id={item_id} asset_id={asset_id}"
                                     );
-                                    emit_progress(&app_handle, &item_id, "embed", 100);
-                                    emit_complete(&app_handle, &item_id, "embed");
+                                    emit_asset_progress(
+                                        &app_handle,
+                                        &item_id,
+                                        &asset_id,
+                                        "embed",
+                                        100,
+                                    );
+                                    emit_asset_complete(&app_handle, &item_id, &asset_id, "embed");
                                 }
-                                Ok(false) => emit_error(
+                                Ok(false) => emit_asset_error(
                                     &app_handle,
                                     &item_id,
+                                    &asset_id,
                                     "embed",
                                     "Asset embedding job completed but no vector was persisted",
                                 ),
-                                Err(e) => emit_error(&app_handle, &item_id, "embed", &e),
+                                Err(e) => {
+                                    emit_asset_error(&app_handle, &item_id, &asset_id, "embed", &e)
+                                }
                             },
-                            Err(e) => emit_error(&app_handle, &item_id, "embed", &e),
+                            Err(e) => {
+                                emit_asset_error(&app_handle, &item_id, &asset_id, "embed", &e)
+                            }
                         }
                     }
 
                     NlpJob::ExtractEntitiesForAsset { item_id, asset_id } => {
-                        emit_progress(&app_handle, &item_id, "ner", 10);
+                        emit_asset_progress(&app_handle, &item_id, &asset_id, "ner", 10);
                         let result =
                             ner::prepare_ner_candidates_for_asset(&conn, &item_id, &asset_id);
                         let result = match result {
@@ -518,11 +535,11 @@ impl NlpQueue {
                                         &final_entities,
                                     )
                                 }) {
-                                    emit_error(&app_handle, &item_id, "ner", &e);
+                                    emit_asset_error(&app_handle, &item_id, &asset_id, "ner", &e);
                                     continue;
                                 }
-                                emit_progress(&app_handle, &item_id, "ner", 100);
-                                emit_complete(&app_handle, &item_id, "ner");
+                                emit_asset_progress(&app_handle, &item_id, &asset_id, "ner", 100);
+                                emit_asset_complete(&app_handle, &item_id, &asset_id, "ner");
                                 if let Err(e) = crate::geo::enqueue_geocoding_for_item(
                                     &app_handle.state::<crate::geo::GeoQueue>(),
                                     &item_id,
@@ -530,7 +547,7 @@ impl NlpQueue {
                                     eprintln!("[geo] Failed to auto-enqueue geocoding after asset NER: {e}");
                                 }
                             }
-                            Err(e) => emit_error(&app_handle, &item_id, "ner", &e),
+                            Err(e) => emit_asset_error(&app_handle, &item_id, &asset_id, "ner", &e),
                         }
                     }
                 }
@@ -630,6 +647,20 @@ pub(crate) fn ensure_nlp_runtime_ready(app_handle: &AppHandle) -> Result<(), Str
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
 fn emit_progress(app_handle: &AppHandle, item_id: &str, job: &str, pct: u8) {
+    emit_progress_payload(app_handle, item_id, None, job, pct);
+}
+
+fn emit_asset_progress(app_handle: &AppHandle, item_id: &str, asset_id: &str, job: &str, pct: u8) {
+    emit_progress_payload(app_handle, item_id, Some(asset_id), job, pct);
+}
+
+fn emit_progress_payload(
+    app_handle: &AppHandle,
+    item_id: &str,
+    asset_id: Option<&str>,
+    job: &str,
+    pct: u8,
+) {
     if pct == 10 || pct == 100 {
         crate::app_logs::info(
             app_handle,
@@ -641,6 +672,7 @@ fn emit_progress(app_handle: &AppHandle, item_id: &str, job: &str, pct: u8) {
         "nlp:progress",
         NlpProgressPayload {
             item_id: item_id.to_string(),
+            asset_id: asset_id.map(str::to_string),
             job: job.to_string(),
             pct,
         },
@@ -648,6 +680,14 @@ fn emit_progress(app_handle: &AppHandle, item_id: &str, job: &str, pct: u8) {
 }
 
 fn emit_complete(app_handle: &AppHandle, item_id: &str, job: &str) {
+    emit_complete_payload(app_handle, item_id, None, job);
+}
+
+fn emit_asset_complete(app_handle: &AppHandle, item_id: &str, asset_id: &str, job: &str) {
+    emit_complete_payload(app_handle, item_id, Some(asset_id), job);
+}
+
+fn emit_complete_payload(app_handle: &AppHandle, item_id: &str, asset_id: Option<&str>, job: &str) {
     crate::app_logs::info(
         app_handle,
         "nlp",
@@ -657,12 +697,27 @@ fn emit_complete(app_handle: &AppHandle, item_id: &str, job: &str) {
         "nlp:complete",
         NlpCompletePayload {
             item_id: item_id.to_string(),
+            asset_id: asset_id.map(str::to_string),
             job: job.to_string(),
         },
     );
 }
 
 fn emit_error(app_handle: &AppHandle, item_id: &str, job: &str, error: &str) {
+    emit_error_payload(app_handle, item_id, None, job, error);
+}
+
+fn emit_asset_error(app_handle: &AppHandle, item_id: &str, asset_id: &str, job: &str, error: &str) {
+    emit_error_payload(app_handle, item_id, Some(asset_id), job, error);
+}
+
+fn emit_error_payload(
+    app_handle: &AppHandle,
+    item_id: &str,
+    asset_id: Option<&str>,
+    job: &str,
+    error: &str,
+) {
     crate::app_logs::error(
         app_handle,
         "nlp",
@@ -672,6 +727,7 @@ fn emit_error(app_handle: &AppHandle, item_id: &str, job: &str, error: &str) {
         "nlp:error",
         NlpErrorPayload {
             item_id: item_id.to_string(),
+            asset_id: asset_id.map(str::to_string),
             job: job.to_string(),
             error: error.to_string(),
         },
