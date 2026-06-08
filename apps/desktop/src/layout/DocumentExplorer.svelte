@@ -24,6 +24,8 @@
   const DEFAULT_WIDTH = 244
   const MIN_WIDTH = 220
   const MAX_WIDTH = Math.round(DEFAULT_WIDTH * 1.1)
+  const MAX_RESTORED_OPEN_COLLECTIONS = 16
+  const MAX_RESTORED_OPEN_ITEMS = 16
 
   const pendingItemLoads = new Map<string, Promise<void>>()
   const pendingAssetLoads = new Map<string, Promise<void>>()
@@ -127,6 +129,29 @@
         })
       )
     } catch {}
+  }
+
+  function limitRestoredIds(ids: string[], limit: number, requiredId: string | null) {
+    const limitedIds = uniqueIds(ids).slice(-limit)
+    return requiredId ? uniqueIds([...limitedIds, requiredId]) : limitedIds
+  }
+
+  function limitRestoredTreeState(
+    persistedTree: { collections: string[]; items: string[] },
+    currentView: View
+  ) {
+    return {
+      collections: limitRestoredIds(
+        persistedTree.collections,
+        MAX_RESTORED_OPEN_COLLECTIONS,
+        getActiveCollectionId(currentView)
+      ),
+      items: limitRestoredIds(
+        persistedTree.items,
+        MAX_RESTORED_OPEN_ITEMS,
+        getActiveItemId(currentView)
+      ),
+    }
   }
 
   function commitTreeState(nextCollections: string[], nextItems: string[]) {
@@ -549,7 +574,7 @@
 
   onMount(() => {
     explorerWidth = readPersistedWidth()
-    const persistedTree = readPersistedTreeState()
+    const persistedTree = limitRestoredTreeState(readPersistedTreeState(), $navigation.current)
     openCollections = persistedTree.collections
     openItems = persistedTree.items
 

@@ -445,6 +445,7 @@ describe('DocumentExplorer', () => {
 
   it('keeps multi-asset document nodes expandable and nested', async () => {
     persistOpenTree(['col-1'])
+    setCurrentNavigationView({ name: 'collection', id: 'col-1', collectionName: 'Colección 1' })
 
     render(DocumentExplorer)
 
@@ -639,6 +640,8 @@ describe('DocumentExplorer', () => {
   })
 
   it('does not auto-expand a closed parent when navigation selects an item', async () => {
+    setCurrentNavigationView({ name: 'collections' })
+
     render(DocumentExplorer)
 
     expect(await screen.findByRole('treeitem', { name: 'Colección 1' })).toHaveAttribute(
@@ -672,10 +675,8 @@ describe('DocumentExplorer', () => {
 
     render(DocumentExplorer)
 
-    expect(await screen.findByRole('treeitem', { name: 'Acta 1' })).toHaveAttribute(
-      'aria-expanded',
-      'false'
-    )
+    await screen.findByRole('treeitem', { name: 'Acta 1' })
+    await fireEvent.click(screen.getByRole('button', { name: 'Colapsar documento Acta 1' }))
 
     window.dispatchEvent(
       new CustomEvent('entropia:document-explorer-asset-selected', {
@@ -690,19 +691,44 @@ describe('DocumentExplorer', () => {
     expect(screen.queryByRole('treeitem', { name: 'acta-1.pdf' })).not.toBeInTheDocument()
   })
 
-  it('persists expanded nodes and restores them without auto-expanding the active path', async () => {
+  it('persists expanded nodes and restores them with the active path open', async () => {
     persistOpenTree(['col-2'], ['item-3'])
 
     render(DocumentExplorer)
 
     expect(await screen.findByRole('treeitem', { name: 'Acta 3' })).toBeInTheDocument()
-    expect(screen.queryByRole('treeitem', { name: 'Acta 1' })).not.toBeInTheDocument()
-    expect(screen.queryByRole('treeitem', { name: 'acta-1.pdf' })).not.toBeInTheDocument()
+    expect(await screen.findByRole('treeitem', { name: 'Acta 1' })).toBeInTheDocument()
+    expect(await screen.findByRole('treeitem', { name: 'acta-1.pdf' })).toBeInTheDocument()
 
     await waitFor(() => {
       expect(state.store.items.findCardSummariesByCollection).toHaveBeenCalledWith('col-2')
       expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-3')
+      expect(state.store.items.findCardSummariesByCollection).toHaveBeenCalledWith('col-1')
+      expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-1')
     })
+  })
+
+  it('caps huge persisted open trees while preserving the active path outside the cap', async () => {
+    const backgroundCollections = Array.from({ length: 20 }, (_, index) => `col-bg-${index + 1}`)
+    const backgroundItems = Array.from({ length: 20 }, (_, index) => `item-bg-${index + 1}`)
+    persistOpenTree(backgroundCollections, backgroundItems)
+
+    render(DocumentExplorer)
+
+    expect(await screen.findByRole('treeitem', { name: 'Acta 1' })).toBeInTheDocument()
+    expect(await screen.findByRole('treeitem', { name: 'acta-1.pdf' })).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(state.store.items.findCardSummariesByCollection).toHaveBeenCalledWith('col-bg-20')
+      expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-bg-20')
+      expect(state.store.items.findCardSummariesByCollection).toHaveBeenCalledWith('col-1')
+      expect(state.store.assets.findByItem).toHaveBeenCalledWith('item-1')
+    })
+
+    expect(state.store.items.findCardSummariesByCollection).not.toHaveBeenCalledWith('col-bg-1')
+    expect(state.store.items.findCardSummariesByCollection).not.toHaveBeenCalledWith('col-bg-4')
+    expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-bg-1')
+    expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-bg-4')
   })
 
   it('renders centralized svg icons for explorer controls and nodes', async () => {
