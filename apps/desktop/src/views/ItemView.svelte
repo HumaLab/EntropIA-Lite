@@ -279,14 +279,9 @@
   // OCR state — plain TS class, updated via Tauri events
   const ocrStore = new OcrStore({
     onComplete: (assetId) => {
-      // After OCR extraction completes on a specific asset, auto-trigger
-      // OCR-dependent refreshes and one automatic embedding pass.
+      // Backend owns automatic OCR post-processing; frontend only refreshes visible state.
       if (selectedAsset && selectedAsset.id === assetId) {
         void reloadSelectedAssetPersistedState({ layout: true })
-      }
-      if (assets.some((asset) => asset.id === assetId)) {
-        void indexFtsAfterTextAvailable(assetId)
-        void embedAfterSuccessfulTextGeneration(assetId)
       }
     },
   })
@@ -296,19 +291,10 @@
   let ocrEditedText = $state(new Map<string, string>())
 
   // Transcription state — mirrors OcrStore pattern for audio assets
-  const transcriptionStore = new TranscriptionStore({
-    onComplete: (assetId) => {
-      // After STT produces text, run the same one-shot embedding pass as OCR/PTT.
-      if (assets.some((asset) => asset.id === assetId)) {
-        void indexFtsAfterTextAvailable(assetId)
-        void embedAfterSuccessfulTextGeneration(assetId)
-      }
-    },
-  })
+  const transcriptionStore = new TranscriptionStore()
   let transcriptionTick = $state(0)
 
   let transEditedText = $state(new Map<string, string>())
-  let autoEmbeddedAfterGeneratedTextAssetIds = new Set<string>()
   let pendingOcrCorrectionAutomationByAssetId = new Map<string, string>()
 
   const PERSIST_IDLE_MS = 500
@@ -363,17 +349,6 @@
       await indexFts(itemId)
     } catch (error) {
       console.error('[ItemView] Automatic FTS indexing failed', { itemId, assetId, error })
-    }
-  }
-
-  async function embedAfterSuccessfulTextGeneration(assetId: string) {
-    if (autoEmbeddedAfterGeneratedTextAssetIds.has(assetId)) return
-    autoEmbeddedAfterGeneratedTextAssetIds.add(assetId)
-
-    try {
-      await embedAsset(itemId, assetId)
-    } catch (error) {
-      console.error('[ItemView] Automatic post-text embedding failed', { itemId, assetId, error })
     }
   }
 
@@ -1201,7 +1176,6 @@
   })
 
   async function handleExtractText(asset: Asset, mode: OcrMode = 'light') {
-    autoEmbeddedAfterGeneratedTextAssetIds.delete(asset.id)
     await runPendingAssetJob({
       assetId: asset.id,
       updateState: (assetId, state) => ocrStore._updateState(assetId, state),
@@ -1214,7 +1188,6 @@
   }
 
   async function handleTranscribeAudio(asset: Asset) {
-    autoEmbeddedAfterGeneratedTextAssetIds.delete(asset.id)
     await runPendingAssetJob({
       assetId: asset.id,
       updateState: (assetId, state) => transcriptionStore._updateState(assetId, state),

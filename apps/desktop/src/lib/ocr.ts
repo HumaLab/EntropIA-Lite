@@ -104,7 +104,7 @@ export class OcrStore {
         method: p.method,
         textContent: p.text_content,
       })
-      // Notify caller (e.g., to trigger FTS indexing after OCR completes)
+      // Notify caller so views can refresh visible OCR-dependent state.
       this.onComplete?.(p.asset_id, p.method)
     })
 

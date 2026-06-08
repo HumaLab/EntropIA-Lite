@@ -1793,16 +1793,13 @@ describe('ItemView image annotations', () => {
       expect(getLayoutByAssetMock).toHaveBeenCalledTimes(2)
       expect(layoutToggle).toBeEnabled()
     })
-    await waitFor(() => {
-      expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
-    })
-    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
-    expect(embedAssetMock).toHaveBeenCalledTimes(1)
+    expect(indexFtsMock).not.toHaveBeenCalled()
+    expect(embedAssetMock).not.toHaveBeenCalled()
     expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
     expect(screen.getByText(/paddle_vl · 5 bloques · 5 regiones/i)).toBeInTheDocument()
   })
 
-  it('runs automatic EMBED only once and indexes FTS for duplicate OCR completion events', async () => {
+  it('does not enqueue frontend FTS or EMBED for duplicate OCR completion events', async () => {
     storeRef.current = createStore({
       assetsRows: [
         {
@@ -1828,16 +1825,12 @@ describe('ItemView image annotations', () => {
     nlpEventHandlers.get('ocr:complete')?.({ payload: completePayload })
     nlpEventHandlers.get('ocr:complete')?.({ payload: completePayload })
 
-    await waitFor(() => {
-      expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
-    })
-    expect(embedAssetMock).toHaveBeenCalledTimes(1)
-    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
-    expect(indexFtsMock).toHaveBeenCalledTimes(2)
+    expect(embedAssetMock).not.toHaveBeenCalled()
+    expect(indexFtsMock).not.toHaveBeenCalled()
     expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
   })
 
-  it('auto-runs FTS and EMBED but not NER after OCRH completion', async () => {
+  it('does not enqueue frontend FTS, EMBED, or NER after OCRH completion', async () => {
     storeRef.current = createStore({
       assetsRows: [
         {
@@ -1862,10 +1855,8 @@ describe('ItemView image annotations', () => {
       },
     })
 
-    await waitFor(() => {
-      expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
-    })
-    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(embedAssetMock).not.toHaveBeenCalled()
+    expect(indexFtsMock).not.toHaveBeenCalled()
     expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
   })
 
@@ -1981,8 +1972,6 @@ describe('ItemView image annotations', () => {
         text_content: 'OCR listo',
       },
     })
-    expect(embedAssetMock).toHaveBeenCalledTimes(1)
-
     embedAssetMock.mockClear()
     extractEntitiesForAssetMock.mockClear()
     indexFtsMock.mockClear()
@@ -2028,9 +2017,6 @@ describe('ItemView image annotations', () => {
         segments_count: 1,
       },
     })
-    expect(embedAssetMock).toHaveBeenCalledTimes(1)
-    expect(indexFtsMock).toHaveBeenCalledTimes(1)
-
     embedAssetMock.mockClear()
     extractEntitiesForAssetMock.mockClear()
     indexFtsMock.mockClear()
@@ -2720,7 +2706,7 @@ describe('ItemView processing labels by asset type', () => {
     expect(screen.queryByRole('button', { name: 'OCRR' })).not.toBeInTheDocument()
   })
 
-  it('auto-runs EMBED once and indexes FTS when transcription completes', async () => {
+  it('does not enqueue frontend FTS or EMBED when transcription completes', async () => {
     await renderTextTabForAsset('audio')
 
     const completePayload = {
@@ -2737,10 +2723,10 @@ describe('ItemView processing labels by asset type', () => {
     })
     nlpEventHandlers.get('transcription:complete')?.({ payload: completePayload })
 
-    expect(embedAssetMock).toHaveBeenCalledWith('item-1', 'asset-audio-1')
-    expect(embedAssetMock).toHaveBeenCalledTimes(1)
-    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
-    expect(indexFtsMock).toHaveBeenCalledTimes(2)
+    await fireEvent.click(screen.getByRole('tab', { name: /^Texto$/i }))
+    expect(screen.getByDisplayValue('Transcripción lista')).toBeInTheDocument()
+    expect(embedAssetMock).not.toHaveBeenCalled()
+    expect(indexFtsMock).not.toHaveBeenCalled()
     expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
   })
 })

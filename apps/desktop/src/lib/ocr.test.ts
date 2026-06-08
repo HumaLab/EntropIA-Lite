@@ -261,7 +261,7 @@ describe('OcrStore', () => {
   })
 
   // ─────────────────────────────────────────────────────────────────────────
-  // onComplete callback — auto-trigger FTS indexing after OCR
+  // onComplete callback — refresh OCR-dependent UI after OCR
   // ─────────────────────────────────────────────────────────────────────────
 
   it('calls onComplete callback with assetId and method when ocr:complete fires', async () => {

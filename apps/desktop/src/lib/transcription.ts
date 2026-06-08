@@ -151,7 +151,7 @@ export class TranscriptionStore {
         durationMs: p.duration_ms ?? 0,
         segmentsCount: p.segments_count ?? 0,
       })
-      // Notify caller (e.g., to trigger FTS indexing after transcription completes)
+      // Notify caller so views can refresh visible transcription-dependent state.
       this.onComplete?.(p.asset_id)
     })
 
