@@ -499,11 +499,29 @@ describe('DocumentExplorer', () => {
 
     const singleAssetNode = screen.getByRole('treeitem', { name: 'Acta 2' })
     expect(singleAssetNode).toHaveAttribute('aria-level', '3')
+    expect(singleAssetNode.querySelector('.explorer__row')).toHaveClass('explorer__row--asset')
     expect(singleAssetNode).not.toHaveAttribute('aria-expanded')
     expect(screen.queryByRole('button', { name: 'Expandir documento Acta 2' })).not.toBeInTheDocument()
     expect(screen.queryByRole('treeitem', { name: 'foto-acta-2.png' })).not.toBeInTheDocument()
     expect(screen.getByText('image')).toBeInTheDocument()
     expect(state.store.assets.findByItem).not.toHaveBeenCalledWith('item-2')
+  })
+
+  it('uses explicit visual indentation classes for collection item and asset levels', async () => {
+    persistOpenTree(['col-1'], ['item-1'])
+
+    render(DocumentExplorer)
+
+    const collectionNode = await screen.findByRole('treeitem', { name: 'Colección 1' })
+    const itemNode = await screen.findByRole('treeitem', { name: 'Acta 1' })
+    const assetNode = await screen.findByRole('treeitem', { name: 'acta-1.pdf' })
+
+    expect(collectionNode.querySelector('.explorer__row')).toHaveClass('explorer__row--collection')
+    expect(itemNode.querySelector('.explorer__row')).toHaveClass('explorer__row--item')
+    expect(assetNode.querySelector('.explorer__row')).toHaveClass('explorer__row--asset')
+    expect(collectionNode).toHaveAttribute('aria-level', '1')
+    expect(itemNode).toHaveAttribute('aria-level', '2')
+    expect(assetNode).toHaveAttribute('aria-level', '3')
   })
 
   it('keeps the document explorer open and removes the internal collapse control', async () => {

@@ -640,7 +640,7 @@
                   aria-current={collection.id === activeCollectionId ? 'true' : undefined}
                   aria-label={collection.name}
                 >
-                  <div class="explorer__row" style:--level="1">
+                  <div class="explorer__row explorer__row--collection">
                     <button
                       type="button"
                       class="explorer__chevron"
@@ -700,7 +700,7 @@
                               aria-current={singleAsset.id === activeAssetId ? 'true' : undefined}
                               aria-label={item.title}
                             >
-                              <div class="explorer__row" style:--level="3">
+                              <div class="explorer__row explorer__row--asset">
                                 <button
                                   type="button"
                                   class="explorer__node explorer__node--asset"
@@ -730,7 +730,7 @@
                             aria-current={item.id === activeItemId ? 'true' : undefined}
                             aria-label={item.title}
                           >
-                            <div class="explorer__row" style:--level="2">
+                            <div class="explorer__row explorer__row--item">
                               <button
                                 type="button"
                                 class="explorer__chevron"
@@ -783,11 +783,7 @@
                                       aria-current={asset.id === activeAssetId ? 'true' : undefined}
                                       aria-label={getAssetLabel(asset, index)}
                                     >
-                                      <div class="explorer__row" style:--level="3">
-                                        <span
-                                          class="explorer__chevron explorer__chevron--placeholder"
-                                          aria-hidden="true"
-                                        ></span>
+                                      <div class="explorer__row explorer__row--asset">
                                         <button
                                           type="button"
                                           class="explorer__node explorer__node--asset"
@@ -822,7 +818,7 @@
                               aria-current={item.id === activeItemId ? 'true' : undefined}
                               aria-label={item.title}
                             >
-                              <div class="explorer__row" style:--level="2">
+                              <div class="explorer__row explorer__row--item">
                                 <button
                                   type="button"
                                   class="explorer__node explorer__node--item explorer__node--flush"
@@ -971,7 +967,19 @@
     gap: 3px;
     min-width: 0;
     min-height: 23px;
-    padding-left: calc((var(--level) - 1) * 11px);
+    padding-left: var(--tree-indent, 0px);
+  }
+
+  .explorer__row--collection {
+    --tree-indent: 0px;
+  }
+
+  .explorer__row--item {
+    --tree-indent: 24px;
+  }
+
+  .explorer__row--asset {
+    --tree-indent: 52px;
   }
 
   .explorer__row::before,
@@ -982,7 +990,7 @@
   }
 
   .explorer__row::before {
-    left: calc((var(--level) - 1) * 11px + 8px);
+    left: calc(var(--tree-indent, 0px) + 8px);
     top: -3px;
     bottom: -3px;
     width: 1px;
@@ -990,7 +998,7 @@
   }
 
   .explorer__row::after {
-    left: calc((var(--level) - 1) * 11px + 8px);
+    left: calc(var(--tree-indent, 0px) + 8px);
     top: 50%;
     width: 8px;
     height: 1px;
@@ -1047,15 +1055,6 @@
     box-shadow:
       0 0 0 1px color-mix(in srgb, var(--color-accent) 22%, transparent),
       0 0 0 3px color-mix(in srgb, var(--color-accent) 12%, transparent);
-  }
-
-  .explorer__chevron--placeholder {
-    cursor: default;
-  }
-
-  .explorer__chevron--placeholder:hover {
-    background: transparent;
-    color: var(--color-text-muted);
   }
 
   .explorer__chevron-icon {
