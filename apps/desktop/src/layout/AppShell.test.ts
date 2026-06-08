@@ -119,6 +119,16 @@ describe('AppShell', () => {
     expect(source).toContain('font-size: calc(0.58rem + 3px);')
   })
 
+  it('delegates open explorer width and border ownership to DocumentExplorer', () => {
+    const source = readFileSync(resolve(import.meta.dirname, 'AppShell.svelte'), 'utf-8')
+    const sidebarRule = source.match(/\.sidebar \{(?<body>[\s\S]*?)\n  \}/)?.groups?.body ?? ''
+
+    expect(sidebarRule).not.toContain('width: 240px')
+    expect(sidebarRule).not.toContain('border-right')
+    expect(sidebarRule).not.toContain('overflow: hidden')
+    expect(sidebarRule).toContain('flex: 0 0 auto;')
+  })
+
   it('opens external links through the desktop bridge', async () => {
     render(AppShellHost)
 

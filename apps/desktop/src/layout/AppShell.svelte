@@ -238,11 +238,8 @@
   .sidebar {
     display: flex;
     flex-direction: column;
-    width: 240px;
-    flex-shrink: 0;
-    border-right: 1px solid var(--border-subtle);
+    flex: 0 0 auto;
     background: var(--surface-panel);
-    overflow: hidden;
     transition: width var(--transition-base);
   }
 
@@ -302,9 +299,9 @@
   }
 
   .sidebar__body {
+    display: flex;
     flex: 1;
     min-height: 0;
-    overflow-y: auto;
   }
 
   .sidebar__placeholder {
