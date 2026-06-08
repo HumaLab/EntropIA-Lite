@@ -59,7 +59,7 @@ export class DebouncedAssetTextPersistor {
     private readonly options: {
       delayMs: number
       persist: (assetId: string, text: string) => Promise<unknown>
-      afterPersist?: (assetId: string) => void
+      afterPersist?: (assetId: string, text: string) => void
       onError?: (error: unknown) => void
     }
   ) {}
@@ -70,7 +70,7 @@ export class DebouncedAssetTextPersistor {
     const timer = setTimeout(async () => {
       try {
         await this.options.persist(assetId, text)
-        this.options.afterPersist?.(assetId)
+        this.options.afterPersist?.(assetId, text)
       } catch (error) {
         this.options.onError?.(error)
       } finally {

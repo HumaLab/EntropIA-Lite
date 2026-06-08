@@ -28,7 +28,7 @@ describe('DebouncedAssetTextPersistor', () => {
 
     expect(persist).toHaveBeenCalledTimes(1)
     expect(persist).toHaveBeenCalledWith('asset-1', 'new text')
-    expect(afterPersist).toHaveBeenCalledWith('asset-1')
+    expect(afterPersist).toHaveBeenCalledWith('asset-1', 'new text')
   })
 
   it('does not call afterPersist when persistence fails', async () => {

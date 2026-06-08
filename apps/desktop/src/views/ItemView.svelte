@@ -309,7 +309,7 @@
 
   let transEditedText = $state(new Map<string, string>())
   let autoEmbeddedAfterGeneratedTextAssetIds = new Set<string>()
-  let pendingOcrCorrectionAutomationAssetIds = new Set<string>()
+  let pendingOcrCorrectionAutomationByAssetId = new Map<string, string>()
 
   const PERSIST_IDLE_MS = 500
 
@@ -317,9 +317,11 @@
     delayMs: PERSIST_IDLE_MS,
     persist: (assetId, text) =>
       invoke('update_extraction_text_cmd', { assetId, textContent: text }),
-    afterPersist: (assetId) => {
+    afterPersist: (assetId, text) => {
       void indexFtsAfterTextAvailable(assetId)
-      if (pendingOcrCorrectionAutomationAssetIds.delete(assetId)) {
+      const expectedOcrCorrectionText = pendingOcrCorrectionAutomationByAssetId.get(assetId)
+      pendingOcrCorrectionAutomationByAssetId.delete(assetId)
+      if (expectedOcrCorrectionText === text) {
         void embedAfterOcrCorrection(assetId)
         void extractEntitiesAfterOcrCorrection(assetId)
       }
@@ -574,7 +576,7 @@
         if (assetId) {
           ocrEditedText.set(assetId, result)
           ocrStore.setTextContent(assetId, result)
-          pendingOcrCorrectionAutomationAssetIds.add(assetId)
+          pendingOcrCorrectionAutomationByAssetId.set(assetId, result)
           schedulePersist(assetId, result)
         }
       }

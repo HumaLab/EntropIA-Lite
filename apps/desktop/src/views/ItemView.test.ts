@@ -1911,6 +1911,52 @@ describe('ItemView image annotations', () => {
     expect(extractEntitiesForAssetMock).toHaveBeenCalledWith('item-1', 'asset-image-1')
   })
 
+  it('does not auto-run NER when pending OCRC automation is replaced by another OCR persistence', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        {
+          id: 'asset-image-1',
+          itemId: 'item-1',
+          path: 'docs/photo-a.jpg',
+          type: 'image',
+          createdAt: 1,
+        },
+      ],
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+    nlpEventHandlers.get('ocr:complete')?.({
+      payload: {
+        asset_id: 'asset-image-1',
+        method: 'glm_ocr',
+        text_length: 128,
+        text_content: 'Texto OCRH',
+      },
+    })
+    embedAssetMock.mockClear()
+    indexFtsMock.mockClear()
+    extractEntitiesForAssetMock.mockClear()
+
+    nlpEventHandlers.get('llm:complete')?.({
+      payload: { id: 'asset-image-1', job: 'correct_ocr', result: 'Texto OCRC' },
+    })
+
+    await fireEvent.click(screen.getByRole('tab', { name: /^Texto$/i }))
+    const textarea = screen.getByDisplayValue('Texto OCRC') as HTMLTextAreaElement
+    await fireEvent.input(textarea, { target: { value: 'Texto OCRH/manual posterior' } })
+    await vi.advanceTimersByTimeAsync(2100)
+
+    expect(invokeMock).toHaveBeenCalledWith('update_extraction_text_cmd', {
+      assetId: 'asset-image-1',
+      textContent: 'Texto OCRH/manual posterior',
+    })
+    expect(indexFtsMock).toHaveBeenCalledWith('item-1')
+    expect(embedAssetMock).not.toHaveBeenCalled()
+    expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
+  })
+
   it('persists manual OCR edits and auto-runs only FTS indexing', async () => {
     storeRef.current = createStore({
       assetsRows: [
