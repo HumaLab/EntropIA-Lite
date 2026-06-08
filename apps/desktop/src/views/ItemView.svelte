@@ -2425,9 +2425,6 @@
     min-height: 0;
     overflow: hidden;
     margin: 0 var(--space-3) var(--space-3);
-    background: var(--surface-input);
-    border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-surface);
   }
   .right-panel-pane {
     display: flex;
