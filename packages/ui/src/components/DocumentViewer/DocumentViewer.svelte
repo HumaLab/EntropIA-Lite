@@ -98,6 +98,8 @@
   let pdfDoc: any = null
   let pdfCanvasW = $state(0)
   let pdfCanvasH = $state(0)
+  let renderRequestId = 0
+  let activeRenderTask: any = null
 
   // Image geometry — natural (intrinsic) dimensions of the source file
   let naturalW = $state(0)
@@ -674,7 +676,19 @@
   }
 
   // ── PDF ─────────────────────────────────────────────────────────────
+  function cancelActiveRenderTask() {
+    if (!activeRenderTask || typeof activeRenderTask.cancel !== 'function') return
+    activeRenderTask.cancel()
+  }
+
+  function isRenderCancellation(err: unknown) {
+    return err instanceof Error && err.name === 'RenderingCancelledException'
+  }
+
   function resetViewerState() {
+    renderRequestId++
+    cancelActiveRenderTask()
+    activeRenderTask = null
     loading = false
     error = null
     pdfPage = 1
@@ -711,19 +725,35 @@
 
   async function renderPage() {
     if (!pdfDoc || !canvasEl) return
+    const requestId = ++renderRequestId
+    const requestedPage = pdfPage
+    const requestedZoom = pdfZoom
+    cancelActiveRenderTask()
+    activeRenderTask = null
+
     try {
-      const page = await pdfDoc.getPage(pdfPage)
-      const viewport = page.getViewport({ scale: pdfZoom })
+      const page = await pdfDoc.getPage(requestedPage)
+      if (requestId !== renderRequestId) return
+
+      const viewport = page.getViewport({ scale: requestedZoom })
       const context = canvasEl.getContext('2d')
       if (!context) return
       canvasEl.width = viewport.width
       canvasEl.height = viewport.height
       pdfCanvasW = viewport.width
       pdfCanvasH = viewport.height
-      await page.render({ canvasContext: context, viewport }).promise
-      onPageChange(pdfPage, totalPages)
+      const renderTask = page.render({ canvasContext: context, viewport })
+      activeRenderTask = renderTask
+      await renderTask.promise
+      if (requestId !== renderRequestId) return
+      onPageChange(requestedPage, totalPages)
     } catch (err) {
+      if (requestId !== renderRequestId || isRenderCancellation(err)) return
       error = err instanceof Error ? err.message : labels.pdfRenderError
+    } finally {
+      if (requestId === renderRequestId) {
+        activeRenderTask = null
+      }
     }
   }
 

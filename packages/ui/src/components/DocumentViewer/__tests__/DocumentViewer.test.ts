@@ -50,18 +50,34 @@ vi.stubGlobal('cancelAnimationFrame', (id: number) => {
 
 vi.stubGlobal('getComputedStyle', window.getComputedStyle.bind(window))
 
-// Mock pdfjs-dist for test environment
-vi.mock('pdfjs-dist', () => {
-  const mockPage = {
-    getViewport: vi.fn(() => ({ width: 800, height: 600, scale: 1 })),
-    render: vi.fn(() => ({ promise: Promise.resolve() })),
-  }
+const pdfMock = vi.hoisted(() => {
+  const createPage = (width = 800, height = 600) => ({
+    getViewport: vi.fn(({ scale }: { scale: number }) => ({
+      width: width * scale,
+      height: height * scale,
+      scale,
+    })),
+    render: vi.fn(() => ({ promise: Promise.resolve(), cancel: vi.fn() })),
+  })
+
+  const mockPage = createPage()
   const mockDocument = {
     numPages: 3,
     getPage: vi.fn(() => Promise.resolve(mockPage)),
   }
+
   return {
+    createPage,
     getDocument: vi.fn(() => ({ promise: Promise.resolve(mockDocument) })),
+    mockDocument,
+    mockPage,
+  }
+})
+
+// Mock pdfjs-dist for test environment
+vi.mock('pdfjs-dist', () => {
+  return {
+    getDocument: pdfMock.getDocument,
     GlobalWorkerOptions: { workerSrc: '' },
   }
 })
@@ -71,7 +87,24 @@ describe('DocumentViewer', () => {
     MockResizeObserver.instances = []
     rafId = 0
     rafQueue = []
+    pdfMock.mockPage.getViewport.mockClear()
+    pdfMock.mockPage.render.mockClear()
+    pdfMock.mockDocument.getPage.mockReset()
+    pdfMock.mockDocument.getPage.mockImplementation(() => Promise.resolve(pdfMock.mockPage))
+    pdfMock.getDocument.mockReset()
+    pdfMock.getDocument.mockImplementation(() => ({ promise: Promise.resolve(pdfMock.mockDocument) }))
   })
+
+  function deferred<T>() {
+    let resolve!: (value: T) => void
+    let reject!: (reason?: unknown) => void
+    const promise = new Promise<T>((res, rej) => {
+      resolve = res
+      reject = rej
+    })
+
+    return { promise, resolve, reject }
+  }
 
   async function flushRaf() {
     const pending = [...rafQueue]
@@ -1172,6 +1205,50 @@ describe('DocumentViewer', () => {
 
       await fireEvent.click(screen.getByTestId('pdf-zoom-out'))
       expect(screen.getByTestId('pdf-zoom-info')).toHaveTextContent('100%')
+    })
+
+    it('ignores stale pdf renders after a newer render starts', async () => {
+      const getContext = vi.spyOn(HTMLCanvasElement.prototype, 'getContext')
+      getContext.mockReturnValue({} as CanvasRenderingContext2D)
+
+      const initialPage = pdfMock.createPage()
+      const stalePage = pdfMock.createPage()
+      const latestPage = pdfMock.createPage()
+      const stalePageRequest = deferred<typeof stalePage>()
+      const onPageChange = vi.fn()
+
+      pdfMock.mockDocument.getPage
+        .mockResolvedValueOnce(initialPage)
+        .mockReturnValueOnce(stalePageRequest.promise)
+        .mockResolvedValueOnce(latestPage)
+
+      render(DocumentViewer, {
+        props: {
+          path: '/path/to/doc.pdf',
+          type: 'pdf',
+          assetUrl: 'asset://localhost/path/to/doc.pdf',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+          onPageChange,
+        },
+      })
+
+      await waitFor(() => expect(initialPage.render).toHaveBeenCalledTimes(1))
+
+      await fireEvent.click(screen.getByTestId('pdf-zoom-in'))
+      await fireEvent.click(screen.getByTestId('pdf-zoom-in'))
+      await waitFor(() => expect(latestPage.render).toHaveBeenCalledTimes(1))
+
+      stalePageRequest.resolve(stalePage)
+      await Promise.resolve()
+
+      expect(stalePage.render).not.toHaveBeenCalled()
+      expect(onPageChange).toHaveBeenLastCalledWith(1, 3)
+      expect(screen.getByTestId('pdf-zoom-info')).toHaveTextContent('120%')
+
+      getContext.mockRestore()
     })
 
     it('shows loading state initially', () => {
