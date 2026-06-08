@@ -150,8 +150,8 @@ describe('AssetRepo', () => {
 
     it('returns assets for a specific item', async () => {
       const assets = [
-        { id: 'a1', itemId: 'item-1', path: '/a.pdf', type: 'pdf', size: 100, createdAt: 10 },
-        { id: 'a2', itemId: 'item-1', path: '/b.jpg', type: 'image', size: 200, createdAt: 20 },
+        { id: 'a1', itemId: 'item-1', path: '/a.pdf', type: 'pdf', sortIndex: 0, size: 100, createdAt: 10 },
+        { id: 'a2', itemId: 'item-1', path: '/b.jpg', type: 'image', sortIndex: 0, size: 200, createdAt: 20 },
       ]
 
       const selectResult = createChainMock(assets)
@@ -160,8 +160,38 @@ describe('AssetRepo', () => {
       const result = await repo.findByItem('item-1')
       expect(result).toEqual(assets)
       expect(result).toHaveLength(2)
+      expect(selectResult.chain['orderBy']).toHaveBeenCalledOnce()
       expect(result[0]!.type).toBe('pdf')
       expect(result[1]!.type).toBe('image')
+    })
+
+    it('keeps A-Z path ordering for multi-asset items without page sort indexes', async () => {
+      const unorderedAssets = [
+        { id: 'b', itemId: 'item-1', path: '/Zeta.jpg', type: 'image', sortIndex: 0, size: 100, createdAt: 10 },
+        { id: 'a', itemId: 'item-1', path: '/alpha.jpg', type: 'image', sortIndex: 0, size: 100, createdAt: 20 },
+      ]
+
+      const selectResult = createChainMock(unorderedAssets)
+      ;(db.db.select as ReturnType<typeof vi.fn>).mockReturnValue(selectResult.proxy)
+
+      const result = await repo.findByItem('item-1')
+
+      expect(result.map((asset) => asset.path)).toEqual(['/alpha.jpg', '/Zeta.jpg'])
+    })
+
+    it('preserves original PDF page order for multi-page assets with sort indexes', async () => {
+      const lexicographicTrapAssets = [
+        { id: 'page-10', itemId: 'item-1', path: '/scan_page_10.png', type: 'image', sortIndex: 9, size: 100, createdAt: 10 },
+        { id: 'page-2', itemId: 'item-1', path: '/scan_page_2.png', type: 'image', sortIndex: 1, size: 100, createdAt: 20 },
+        { id: 'page-1', itemId: 'item-1', path: '/scan_page_1.png', type: 'image', sortIndex: 0, size: 100, createdAt: 30 },
+      ]
+
+      const selectResult = createChainMock(lexicographicTrapAssets)
+      ;(db.db.select as ReturnType<typeof vi.fn>).mockReturnValue(selectResult.proxy)
+
+      const result = await repo.findByItem('item-1')
+
+      expect(result.map((asset) => asset.id)).toEqual(['page-1', 'page-2', 'page-10'])
     })
   })
 

@@ -1,4 +1,4 @@
-import { eq, and, like, or, desc } from 'drizzle-orm'
+import { eq, and, like, or, asc } from 'drizzle-orm'
 import type { DrizzleClient, DbClient } from '../types'
 import { items } from '../schema'
 import { FtsRepo, type FtsResult } from './fts.repo'
@@ -80,11 +80,30 @@ export class ItemRepo {
   }
 
   async findByCollection(collectionId: string): Promise<Item[]> {
+    if (this.rawClient) {
+      const rows = await this.rawClient.select<CollectionItemCardSummaryRow>(
+        `SELECT id, title, collection_id, metadata, created_at, updated_at
+         FROM items
+         WHERE collection_id = ?
+         ORDER BY title COLLATE NOCASE ASC, id ASC`,
+        [collectionId]
+      )
+
+      return rows.map((row) => ({
+        id: row.id,
+        title: row.title,
+        collectionId: row.collection_id,
+        metadata: row.metadata,
+        createdAt: row.created_at,
+        updatedAt: row.updated_at,
+      }))
+    }
+
     return this.db
       .select()
       .from(items)
       .where(eq(items.collectionId, collectionId))
-      .orderBy(desc(items.updatedAt))
+      .orderBy(asc(items.title), asc(items.id))
   }
 
   async findCardSummariesByCollection(
@@ -147,7 +166,7 @@ export class ItemRepo {
         )
         WHERE ${filterSql}
         GROUP BY i.id
-        ORDER BY i.updated_at DESC
+        ORDER BY i.title COLLATE NOCASE ASC, i.id ASC
       `,
       params
     )
@@ -279,7 +298,7 @@ export class ItemRepo {
               ids.length === 1 ? eq(items.id, ids[0]!) : or(...ids.map((id) => eq(items.id, id)))!
             )
           )
-          .orderBy(desc(items.updatedAt))
+          .orderBy(asc(items.title), asc(items.id))
 
         return rows
       }
@@ -296,7 +315,7 @@ export class ItemRepo {
           or(like(items.title, pattern), like(items.metadata, pattern))
         )
       )
-      .orderBy(desc(items.updatedAt))
+      .orderBy(asc(items.title), asc(items.id))
   }
 
   /**
@@ -327,7 +346,7 @@ export class ItemRepo {
           .where(
             ids.length === 1 ? eq(items.id, ids[0]!) : or(...ids.map((id) => eq(items.id, id)))!
           )
-          .orderBy(desc(items.updatedAt))
+          .orderBy(asc(items.title), asc(items.id))
       }
     }
 
@@ -337,7 +356,7 @@ export class ItemRepo {
       .select()
       .from(items)
       .where(or(like(items.title, pattern), like(items.metadata, pattern)))
-      .orderBy(desc(items.updatedAt))
+      .orderBy(asc(items.title), asc(items.id))
       .limit(limit)
   }
 }

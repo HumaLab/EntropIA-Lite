@@ -174,6 +174,7 @@ describe('ItemRepo', () => {
       const result = await repo.findByCollection('col-1')
       expect(result).toEqual(items)
       expect(result).toHaveLength(2)
+      expect(selectResult.chain['orderBy']).toHaveBeenCalledOnce()
     })
   })
 
@@ -205,6 +206,9 @@ describe('ItemRepo', () => {
       expect(rawSelectMock).toHaveBeenCalledOnce()
       expect(rawSelectMock.mock.calls[0]?.[0]).toContain('COUNT(a.id) AS asset_count')
       expect(rawSelectMock.mock.calls[0]?.[0]).toContain('LEFT JOIN assets pa')
+      expect(rawSelectMock.mock.calls[0]?.[0]).toContain(
+        'ORDER BY i.title COLLATE NOCASE ASC, i.id ASC'
+      )
       expect(rawSelectMock.mock.calls[0]?.[1]).toEqual(['col-1'])
       expect(db.db.select).not.toHaveBeenCalled()
       expect(result).toEqual([
