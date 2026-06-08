@@ -53,6 +53,7 @@
   let itemsLoadRequestId = 0
   let itemAssetsLoadRequestId = 0
   let imageThumbnailLoadRequestId = 0
+  let activeCollectionId: string | null = null
 
   type ItemAssetMeta = {
     assetCount: number
@@ -240,6 +241,24 @@
   async function handleClearSearch() {
     searchQuery = ''
     await loadItems()
+  }
+
+  function resetCollectionState() {
+    itemsLoadRequestId++
+    itemAssetsLoadRequestId++
+    imageThumbnailLoadRequestId++
+    items = []
+    itemAssetMeta = new Map()
+    searchQuery = ''
+    error = null
+    importSummary = null
+    dragActive = false
+    showDeleteConfirm = false
+    pendingDeleteAssetId = null
+    pendingDeleteItemId = null
+    pendingDeleteFilename = null
+    deleting = false
+    deleteError = null
   }
 
   function notifyExplorerCollectionChanged(itemId?: string) {
@@ -625,8 +644,15 @@
     deleting = false
   }
 
+  $effect(() => {
+    if (collectionId === activeCollectionId) return
+
+    activeCollectionId = collectionId
+    resetCollectionState()
+    void loadItems()
+  })
+
   onMount(() => {
-    loadItems()
 
     getCurrentWebview()
       .onDragDropEvent((event: { payload: DragDropEvent }) => {

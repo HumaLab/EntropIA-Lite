@@ -343,6 +343,77 @@ describe('CollectionView consumer compatibility', () => {
       expect(screen.queryByText('Acta vieja')).not.toBeInTheDocument()
     })
   })
+
+  it('reloads and resets collection state when collectionId changes', async () => {
+    storeRef.current = {
+      items: {
+        findByCollection: vi.fn().mockImplementation(async (collectionId: string) =>
+          collectionId === 'col-2'
+            ? [
+                {
+                  id: 'item-2',
+                  title: 'Contrato nuevo',
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                  collectionId: 'col-2',
+                  metadata: null,
+                },
+              ]
+            : [
+                {
+                  id: 'item-1',
+                  title: 'Acta vieja',
+                  createdAt: Date.now(),
+                  updatedAt: Date.now(),
+                  collectionId: 'col-1',
+                  metadata: null,
+                },
+              ]
+        ),
+        searchByText: vi.fn().mockResolvedValue([
+          {
+            id: 'item-1',
+            title: 'Acta vieja',
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+            collectionId: 'col-1',
+            metadata: null,
+          },
+        ]),
+        create: vi.fn(),
+        update: vi.fn(),
+        delete: vi.fn(),
+        deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+      assets: {
+        create: vi.fn(),
+        findByItem: vi.fn().mockResolvedValue([]),
+        findById: vi.fn().mockResolvedValue(null),
+        deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+    }
+
+    const { rerender } = render(CollectionView, { collectionId: 'col-1' })
+
+    expect(await screen.findByText('Acta vieja')).toBeInTheDocument()
+
+    await fireEvent.input(screen.getByRole('searchbox'), { target: { value: 'acta' } })
+    await vi.advanceTimersByTimeAsync(300)
+
+    await waitFor(() => {
+      expect(storeRef.current.items.searchByText).toHaveBeenCalledWith('col-1', 'acta')
+    })
+
+    await rerender({ collectionId: 'col-2' })
+
+    expect(await screen.findByText('Contrato nuevo')).toBeInTheDocument()
+
+    await waitFor(() => {
+      expect(storeRef.current.items.findByCollection).toHaveBeenCalledWith('col-2')
+    })
+    expect(storeRef.current.items.searchByText).not.toHaveBeenCalledWith('col-2', 'acta')
+    expect(screen.queryByText('Acta vieja')).not.toBeInTheDocument()
+  })
 })
 
 describe('CollectionView import flow', () => {
