@@ -20,6 +20,13 @@ pub const DEFAULT_OPENROUTER_EMBEDDING_MODEL: &str = "baai/bge-m3";
 pub const OPENROUTER_EMBEDDING_DIMENSIONS: usize = 1024;
 const OPENROUTER_EMBEDDINGS_URL: &str = "https://openrouter.ai/api/v1/embeddings";
 
+// Chunking policy for embedding inputs.
+// BGE-M3 accepts up to 8192 tokens. We use a 28000-char window
+// (≈ 7000–9000 tokens) that stays under the hard limit while keeping
+// most documents as a single chunk. Texts shorter than this pass through untouched.
+const MAX_EMBEDDING_CHARS: usize = 28000;
+const CHUNK_OVERLAP_CHARS: usize = 400;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AssetEmbeddingCandidate {
     pub asset_id: String,
@@ -178,9 +185,51 @@ impl OpenRouterEmbeddingClient {
             return Err("OpenRouter embedding input is empty".to_string());
         }
 
+        let chunks = chunk_text(text);
+        if chunks.len() > 1 {
+            eprintln!(
+                "[nlp/embeddings] text exceeded {MAX_EMBEDDING_CHARS} chars, splitting into {} chunks",
+                chunks.len()
+            );
+        }
+
+        let mut accumulator: Option<Vec<f32>> = None;
+        for chunk in &chunks {
+            let vector = self.embed_single_chunk(chunk)?;
+            match accumulator.as_mut() {
+                Some(acc) => {
+                    for (i, value) in vector.iter().enumerate() {
+                        acc[i] += value;
+                    }
+                }
+                None => accumulator = Some(vector),
+            }
+        }
+
+        let mut averaged = accumulator
+            .ok_or_else(|| "OpenRouter embedding produced no vectors".to_string())?;
+        let n = chunks.len() as f32;
+        for value in averaged.iter_mut() {
+            *value /= n;
+        }
+
+        if averaged.len() != OPENROUTER_EMBEDDING_DIMENSIONS {
+            return Err(format!(
+                "OpenRouter embedding model '{}' returned {} dimensions; expected {} for {}",
+                self.model_name,
+                averaged.len(),
+                OPENROUTER_EMBEDDING_DIMENSIONS,
+                DEFAULT_OPENROUTER_EMBEDDING_MODEL,
+            ));
+        }
+
+        Ok(averaged)
+    }
+
+    fn embed_single_chunk(&self, chunk: &str) -> Result<Vec<f32>, String> {
         let request = EmbeddingRequest {
             model: self.model_name.as_str(),
-            input: text,
+            input: chunk,
         };
 
         let client = reqwest::blocking::Client::builder()
@@ -208,25 +257,64 @@ impl OpenRouterEmbeddingClient {
             .json()
             .map_err(|e| format!("Failed to parse OpenRouter embedding response: {e}"))?;
 
-        let vector = parsed
+        parsed
             .data
             .into_iter()
             .next()
             .map(|entry| entry.embedding)
-            .ok_or_else(|| "OpenRouter embedding response returned no vectors".to_string())?;
+            .ok_or_else(|| "OpenRouter embedding response returned no vectors".to_string())
+    }
+}
 
-        if vector.len() != OPENROUTER_EMBEDDING_DIMENSIONS {
-            return Err(format!(
-                "OpenRouter embedding model '{}' returned {} dimensions; expected {} for {}",
-                self.model_name,
-                vector.len(),
-                OPENROUTER_EMBEDDING_DIMENSIONS,
-                DEFAULT_OPENROUTER_EMBEDDING_MODEL,
-            ));
+/// Split text into embedding-sized chunks.
+///
+/// Texts shorter than `MAX_EMBEDDING_CHARS` are returned as a single chunk
+/// (zero overhead for the common case). Longer texts are split on sentence
+/// boundaries when possible, with a `CHUNK_OVERLAP_CHARS` overlap so the
+/// average embedding does not lose context at chunk edges.
+fn chunk_text(text: &str) -> Vec<String> {
+    let total = text.chars().count();
+    if total <= MAX_EMBEDDING_CHARS {
+        return vec![text.to_string()];
+    }
+
+    let mut chunks = Vec::new();
+    let mut start_byte = 0;
+    let chars: Vec<char> = text.chars().collect();
+    let total_chars = chars.len();
+
+    while start_byte < total_chars {
+        let mut end = (start_byte + MAX_EMBEDDING_CHARS).min(total_chars);
+
+        // Try to back off to a sentence boundary (newline or sentence end).
+        if end < total_chars {
+            let min_break = start_byte + (MAX_EMBEDDING_CHARS / 2);
+            while end > min_break {
+                let c = chars[end - 1];
+                if c == '\n' || c == '.' || c == '!' || c == '?' {
+                    break;
+                }
+                end -= 1;
+            }
         }
 
-        Ok(vector)
+        let chunk: String = chars[start_byte..end].iter().collect();
+        chunks.push(chunk);
+
+        if end >= total_chars {
+            break;
+        }
+
+        // Advance with overlap so the next chunk re-anchors on context.
+        let advance = end.saturating_sub(start_byte);
+        start_byte = if advance > CHUNK_OVERLAP_CHARS {
+            end - CHUNK_OVERLAP_CHARS
+        } else {
+            end
+        };
     }
+
+    chunks
 }
 
 pub fn config_from_settings(conn: &Connection) -> Result<EmbeddingConfig, String> {
