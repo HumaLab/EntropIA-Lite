@@ -16,6 +16,7 @@ use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::mpsc;
 
+use crate::nlp::chunking::chunk_text;
 use crate::nlp::text_provider;
 use crate::settings;
 
@@ -796,83 +797,169 @@ fn fn_now_millis() -> i64 {
         .as_millis() as i64
 }
 
-/// Store parsed LLM triples into the `triples` table for an item-level job.
-/// Deletes existing triples for the item before inserting new ones.
-fn store_triples_for_item(
+/// Delete all existing item-level triples (asset_id IS NULL).
+/// Called once at the start of a streaming triples job.
+fn clear_triples_for_item(
     conn: &rusqlite::Connection,
     item_id: &str,
-    raw_json: &str,
-    log_prefix: &str,
-) -> Result<usize, String> {
-    let mut triples = parse_triples_json(raw_json, log_prefix);
-    if let Ok(source_text) = text_provider::get_item_text(conn, item_id) {
-        restore_ordinal_tokens_from_source(&mut triples, &source_text);
-    }
-
-    // Delete old triples for this item (no asset_id filter => item-level)
+) -> Result<(), String> {
     conn.execute("DELETE FROM triples WHERE item_id = ?1", params![item_id])
         .map_err(|e| format!("Failed to delete old triples for item: {e}"))?;
-
-    let mut count = 0;
-    for triple in &triples {
-        conn.execute(
-            "INSERT INTO triples (id, item_id, subject, predicate, object, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![
-                fn_uuid_v4(),
-                item_id,
-                triple.subject,
-                triple.predicate,
-                triple.object,
-                fn_now_millis(),
-            ],
-        )
-        .map_err(|e| format!("Failed to insert triple: {e}"))?;
-        count += 1;
-    }
-    Ok(count)
+    Ok(())
 }
 
-/// Store parsed LLM triples into the `triples` table for an asset-level job.
-/// Deletes existing triples for the specific asset before inserting new ones.
-fn store_triples_for_asset(
+/// Delete all existing asset-level triples for a specific asset.
+fn clear_triples_for_asset(
     conn: &rusqlite::Connection,
     item_id: &str,
     asset_id: &str,
-    raw_json: &str,
-    log_prefix: &str,
-) -> Result<usize, String> {
-    let mut triples = parse_triples_json(raw_json, log_prefix);
-    if let Ok(source_text) = text_provider::get_asset_text(conn, asset_id) {
-        restore_ordinal_tokens_from_source(&mut triples, &source_text);
-    }
-
-    // Delete old triples for this specific asset only
+) -> Result<(), String> {
     conn.execute(
         "DELETE FROM triples WHERE item_id = ?1 AND asset_id = ?2",
         params![item_id, asset_id],
     )
     .map_err(|e| format!("Failed to delete old triples for asset: {e}"))?;
+    Ok(())
+}
 
+/// Insert a single item-level triple (no asset_id). Intended for the streaming
+/// pipeline, which calls this once per chunk per triple after the initial
+/// `clear_triples_for_item`.
+fn append_triple_for_item(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    triple: &LlmTriple,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO triples (id, item_id, subject, predicate, object, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            fn_uuid_v4(),
+            item_id,
+            triple.subject,
+            triple.predicate,
+            triple.object,
+            fn_now_millis(),
+        ],
+    )
+    .map_err(|e| format!("Failed to insert triple: {e}"))?;
+    Ok(())
+}
+
+/// Insert a single asset-level triple. See [`append_triple_for_item`].
+fn append_triple_for_asset(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    asset_id: &str,
+    triple: &LlmTriple,
+) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO triples (id, item_id, asset_id, subject, predicate, object, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            fn_uuid_v4(),
+            item_id,
+            asset_id,
+            triple.subject,
+            triple.predicate,
+            triple.object,
+            fn_now_millis(),
+        ],
+    )
+    .map_err(|e| format!("Failed to insert triple: {e}"))?;
+    Ok(())
+}
+
+/// Persist all triples from a single chunk in one transaction. Caller is
+/// responsible for clearing the destination rows beforehand and for
+/// deduplicating triples against the running accumulator (see
+/// [`run_streaming_triples_job`]). Returns the number of rows actually
+/// inserted.
+fn store_chunk_triples_for_item(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    triples: &[LlmTriple],
+) -> Result<usize, String> {
     let mut count = 0;
-    for triple in &triples {
-        conn.execute(
-            "INSERT INTO triples (id, item_id, asset_id, subject, predicate, object, created_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-            params![
-                fn_uuid_v4(),
-                item_id,
-                asset_id,
-                triple.subject,
-                triple.predicate,
-                triple.object,
-                fn_now_millis(),
-            ],
-        )
-        .map_err(|e| format!("Failed to insert triple: {e}"))?;
+    for triple in triples {
+        append_triple_for_item(conn, item_id, triple)?;
         count += 1;
     }
     Ok(count)
+}
+
+fn store_chunk_triples_for_asset(
+    conn: &rusqlite::Connection,
+    item_id: &str,
+    asset_id: &str,
+    triples: &[LlmTriple],
+) -> Result<usize, String> {
+    let mut count = 0;
+    for triple in triples {
+        append_triple_for_asset(conn, item_id, asset_id, triple)?;
+        count += 1;
+    }
+    Ok(count)
+}
+
+/// Parse a raw LLM response into triples, optionally restoring ordinal tokens
+/// against `source_text`. Used by the streaming pipeline to extract triples
+/// from a single chunk's response.
+fn parse_chunk_triples(raw_json: &str, source_text: &str, log_prefix: &str) -> Vec<LlmTriple> {
+    let mut triples = parse_triples_json(raw_json, log_prefix);
+    if !source_text.is_empty() {
+        restore_ordinal_tokens_from_source(&mut triples, source_text);
+    }
+    triples
+}
+
+/// Run the triples extraction pipeline as a streaming job. The network-bound
+/// portion (building requests and calling OpenRouter) happens here; the
+/// SQLite-bound portion (clear/insert/dedupe) is delegated to the caller via
+/// the returned [`StreamingTriplesResult`], so the caller can keep its
+/// `&Connection` alive across await points without violating `Send`.
+///
+/// Returns:
+/// - `requests`: one [`RemoteJobRequest`] per chunk.
+/// - `target`: tells the caller which `triples` rows to clear and where to
+///   insert the parsed triples.
+/// - `last_output_placeholder`: an empty string; the caller will populate
+///   it with the last chunk's raw response so we can keep the
+///   `llm_results` cache contract.
+struct StreamingTriplesTarget {
+    item_id: String,
+    asset_id: Option<String>,
+}
+
+fn build_streaming_triples_plan(
+    conn: &rusqlite::Connection,
+    job: &LlmJob,
+    params: &GenerationParams,
+) -> Result<(Vec<RemoteJobRequest>, StreamingTriplesTarget), String> {
+    let (text, item_id, asset_id) = match job {
+        LlmJob::ExtractTriples { item_id } => {
+            let text = text_provider::get_item_text(conn, item_id)?;
+            (text, item_id.clone(), None)
+        }
+        LlmJob::ExtractTriplesAsset { asset_id } => {
+            // For asset-level jobs we need the parent item_id for the row
+            // scoping, so resolve it up front while we still hold `&conn`.
+            let item_id = crate::nlp::lookup_item_id_for_asset(conn, asset_id)?
+                .ok_or_else(|| {
+                    format!("Asset {asset_id} has no parent item; cannot run triples streaming")
+                })?;
+            let text = text_provider::get_asset_text(conn, asset_id)?;
+            (text, item_id, Some(asset_id.clone()))
+        }
+        _ => return Err("build_streaming_triples_plan called for non-triples job".to_string()),
+    };
+
+    if text.is_empty() {
+        return Err("No text available for triple extraction".to_string());
+    }
+
+    let requests = build_triples_chunks_requests(conn, &text, params, job.target_id())?;
+    Ok((requests, StreamingTriplesTarget { item_id, asset_id }))
 }
 
 // ---------------------------------------------------------------------------
@@ -991,6 +1078,177 @@ impl LlmQueue {
 
                 eprintln!("{job_log_prefix} Running job '{job_name}' for {id} via remote API");
                 let client = OpenRouterClient::new(api_key, remote_model);
+
+                // Triples extraction has a dedicated streaming path that
+                // chunks long documents and accumulates triples across chunks
+                // (with cross-chunk dedup and incremental persistence). Other
+                // jobs go through the original single-request path.
+                let is_triples = matches!(
+                    &job,
+                    LlmJob::ExtractTriples { .. } | LlmJob::ExtractTriplesAsset { .. }
+                );
+
+                if is_triples {
+                    let params =
+                        model_params_from_settings(&conn, max_tokens_for(&job), job.job_name());
+                    // Build the streaming plan while holding the worker's
+                    // connection (read-only). Then open a dedicated connection
+                    // for the network-bound loop so we never cross an `.await`
+                    // while carrying a `&Connection` (rusqlite connections
+                    // are not `Send`).
+                    let plan = match build_streaming_triples_plan(&conn, &job, &params) {
+                        Ok(plan) => plan,
+                        Err(e) => {
+                            emit_error(&app_handle, &id, job_name, &e);
+                            continue;
+                        }
+                    };
+                    let (requests, target) = plan;
+                    let total_chunks = requests.len();
+
+                    let job_conn = match rusqlite::Connection::open(&db_path) {
+                        Ok(c) => {
+                            let _ = c.execute_batch(
+                                "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;",
+                            );
+                            c
+                        }
+                        Err(e) => {
+                            emit_error(
+                                &app_handle,
+                                &id,
+                                job_name,
+                                &format!("Failed to open DB for triples job: {e}"),
+                            );
+                            continue;
+                        }
+                    };
+
+                    // Clear destination rows once, before the first chunk.
+                    let clear_result = if target.asset_id.is_some() {
+                        clear_triples_for_asset(
+                            &job_conn,
+                            &target.item_id,
+                            target.asset_id.as_deref().unwrap(),
+                        )
+                    } else {
+                        clear_triples_for_item(&job_conn, &target.item_id)
+                    };
+                    if let Err(e) = clear_result {
+                        emit_error(&app_handle, &id, job_name, &e);
+                        continue;
+                    }
+
+                    // Network + persist loop. `&job_conn` does NOT cross
+                    // `.await` because persistence is wrapped in
+                    // `block_in_place` (which runs sync on the current thread)
+                    // while `client.generate_remote_job(...).await` is the
+                    // only `await` point.
+                    let mut accumulator: HashSet<(String, String, String)> = HashSet::new();
+                    let mut last_output = String::new();
+                    let mut chunk_error: Option<String> = None;
+                    for (index, request) in requests.iter().enumerate() {
+                        let raw_output = match generate_remote_job(&client, request).await {
+                            Ok(out) => out,
+                            Err(e) => {
+                                chunk_error = Some(format!("triples chunk {index} failed: {e}"));
+                                break;
+                            }
+                        };
+
+                        // Resolve the source text on the dedicated conn so
+                        // ordinal-token restoration sees the original document
+                        // window. For asset-level jobs we need the asset
+                        // text; for item-level, the item text.
+                        let source_text = if let Some(asset_id) = target.asset_id.as_deref() {
+                            text_provider::get_asset_text(&job_conn, asset_id)
+                                .unwrap_or_default()
+                        } else {
+                            text_provider::get_item_text(&job_conn, &target.item_id)
+                                .unwrap_or_default()
+                        };
+
+                        let chunk_triples =
+                            parse_chunk_triples(&raw_output, &source_text, &job_log_prefix);
+
+                        // Dedupe against the running accumulator.
+                        let mut new_triples: Vec<LlmTriple> = Vec::new();
+                        for triple in chunk_triples {
+                            let key = (
+                                triple.subject.to_lowercase(),
+                                triple.predicate.to_lowercase(),
+                                triple.object.to_lowercase(),
+                            );
+                            if accumulator.insert(key) {
+                                new_triples.push(triple);
+                            }
+                        }
+
+                        // Persist new triples for this chunk on the dedicated
+                        // connection (sync, no await).
+                        let stored_result: Result<usize, String> = if let Some(asset_id) =
+                            target.asset_id.as_deref()
+                        {
+                            store_chunk_triples_for_asset(
+                                &job_conn,
+                                &target.item_id,
+                                asset_id,
+                                &new_triples,
+                            )
+                        } else {
+                            store_chunk_triples_for_item(
+                                &job_conn,
+                                &target.item_id,
+                                &new_triples,
+                            )
+                        };
+                        if let Err(e) = stored_result {
+                            eprintln!(
+                                "{job_log_prefix} Warning: failed to persist triples chunk {index}: {e}"
+                            );
+                        } else {
+                            eprintln!(
+                                "{job_log_prefix} triples chunk {}/{}: new_after_dedupe={}, stored={}",
+                                index + 1,
+                                total_chunks,
+                                new_triples.len(),
+                                stored_result.unwrap_or(0)
+                            );
+                        }
+
+                        last_output = raw_output;
+
+                        let pct = if total_chunks <= 1 {
+                            90
+                        } else {
+                            10 + ((index + 1) * 80 / total_chunks)
+                        };
+                        emit_progress(&app_handle, &id, job_name, pct as u8);
+                    }
+
+                    if let Some(e) = chunk_error {
+                        emit_error(&app_handle, &id, job_name, &e);
+                        continue;
+                    }
+
+                    // Cache parity: persist the last chunk's raw response.
+                    if let Err(e) = persist_result(
+                        &job_conn,
+                        job.target_type(),
+                        &id,
+                        job_name,
+                        &last_output,
+                    ) {
+                        eprintln!(
+                            "{job_log_prefix} Warning: failed to persist result for {id}/{job_name}: {e}"
+                        );
+                    }
+
+                    emit_progress(&app_handle, &id, job_name, 100);
+                    emit_complete(&app_handle, &id, job_name, &last_output);
+                    continue;
+                }
+
                 let result = match prepare_remote_job_request(&conn, &job, client.n_ctx()) {
                     Ok(request) => match generate_remote_job(&client, &request).await {
                         Ok(output) if request.truncate_to_sentence_boundary => {
@@ -1009,31 +1267,6 @@ impl LlmQueue {
                             persist_result(&conn, job.target_type(), &id, job_name, &output)
                         {
                             eprintln!("{job_log_prefix} Warning: failed to persist result for {id}/{job_name}: {e}");
-                        }
-
-                        // Parse triples from LLM response and store in `triples` table
-                        // so the Semantic Triples section UI shows LLM-extracted triples.
-                        match &job {
-                            LlmJob::ExtractTriples { item_id } => {
-                                match store_triples_for_item(&conn, item_id, &output, &job_log_prefix) {
-                                    Ok(count) => eprintln!("{job_log_prefix} Stored {count} triples for item {item_id}"),
-                                    Err(e) => eprintln!("{job_log_prefix} Warning: failed to store triples for item {item_id}: {e}"),
-                                }
-                            }
-                            LlmJob::ExtractTriplesAsset { asset_id } => {
-                                // Resolve item_id from asset_id for the triples table
-                                match crate::nlp::lookup_item_id_for_asset(&conn, asset_id) {
-                                    Ok(Some(item_id)) => {
-                                        match store_triples_for_asset(&conn, &item_id, asset_id, &output, &job_log_prefix) {
-                                            Ok(count) => eprintln!("{job_log_prefix} Stored {count} triples for asset {asset_id}"),
-                                            Err(e) => eprintln!("{job_log_prefix} Warning: failed to store triples for asset {asset_id}: {e}"),
-                                        }
-                                    }
-                                    Ok(None) => eprintln!("{job_log_prefix} Warning: no item_id found for asset {asset_id}, skipping triples storage"),
-                                    Err(e) => eprintln!("{job_log_prefix} Warning: failed to lookup item_id for asset {asset_id}: {e}"),
-                                }
-                            }
-                            _ => {} // Other job types don't produce triples
                         }
 
                         emit_progress(&app_handle, &id, job_name, 100);
@@ -1697,6 +1930,50 @@ fn prepare_remote_job_request(
             ))
         }
     }
+}
+
+/// Build one [`RemoteJobRequest`] per chunk for the triples extraction
+/// pipelines (item and asset variants). Replaces the previous
+/// `truncate_text_for_context` strategy, which silently discarded the tail of
+/// long documents.
+///
+/// Returns a single-element vector for short inputs, so the worker can iterate
+/// uniformly. Each request includes a per-chunk prompt so the LLM only sees
+/// the chunk it's processing; the worker is responsible for accumulating,
+/// deduplicating and persisting the triples.
+fn build_triples_chunks_requests(
+    conn: &rusqlite::Connection,
+    text: &str,
+    params: &GenerationParams,
+    source_label: &str,
+) -> Result<Vec<RemoteJobRequest>, String> {
+    if text.is_empty() {
+        return Err("No text available for triple extraction".to_string());
+    }
+
+    let chunks = chunk_text(text);
+    if chunks.len() > 1 {
+        eprintln!(
+            "[llm/triples] text exceeded chunking threshold, splitting into {} chunks for {source_label}",
+            chunks.len()
+        );
+    }
+
+    let requests = chunks
+        .into_iter()
+        .map(|chunk| {
+            let prompt = prompt_from_settings(
+                conn,
+                PROMPT_TRIPLETS_KEY,
+                prompt::raw_extract_triples(&chunk.text),
+                &chunk.text,
+                "triplets",
+            );
+            RemoteJobRequest::text(prompt, params.clone(), false)
+        })
+        .collect();
+
+    Ok(requests)
 }
 
 #[cfg(test)]

@@ -11,17 +11,12 @@ use self::types::{sanitize_entity_value, Entity};
 #[allow(unused_imports)]
 pub use self::types::{EntitySource, EntityType};
 
-#[derive(Clone)]
-pub struct EntityExtractionBatch {
-    pub text: String,
-    pub entities: Vec<Entity>,
-}
-
 pub struct NerExtractionInput {
     pub text: String,
     pub protected_entities: Vec<Entity>,
 }
 
+#[allow(dead_code)] // Kept for the existing OpenRouter NER API shape.
 pub struct OpenRouterExtractionInput {
     pub text: String,
     pub protected_entities: Vec<Entity>,
@@ -206,22 +201,47 @@ pub fn apply_llm_review(
     Ok(final_entities)
 }
 
-pub fn persist_entities_for_item(
+/// Delete only the automatic (non-manual) entities for an item.
+///
+/// Exposed separately from [`persist_entities_for_item`] so the streaming NER
+/// pipeline can call it once at the start of a job and then `INSERT` new
+/// entities incrementally as each chunk completes, without losing manual
+/// edits made by the user.
+pub fn clear_automatic_entities_for_item(conn: &Connection, item_id: &str) -> Result<(), String> {
+    delete_automatic_entities(conn, item_id)
+}
+
+/// Delete only the automatic (non-manual) entities for an asset. See
+/// [`clear_automatic_entities_for_item`] for the rationale.
+pub fn clear_automatic_entities_for_asset(
+    conn: &Connection,
+    item_id: &str,
+    asset_id: &str,
+) -> Result<(), String> {
+    delete_automatic_entities_for_asset(conn, item_id, asset_id)
+}
+
+/// Append entities for an item without deleting any pre-existing rows.
+///
+/// Intended for the streaming NER pipeline: the worker calls
+/// [`clear_automatic_entities_for_item`] once, then `append_entities_for_item`
+/// after each chunk to persist partial results.
+pub fn append_entities_for_item(
     conn: &Connection,
     item_id: &str,
     entities: &[Entity],
 ) -> Result<(), String> {
-    delete_automatic_entities(conn, item_id)?;
     insert_entities_for_item(conn, item_id, entities)
 }
 
-pub fn persist_entities_for_asset(
+/// Append entities for an asset without deleting any pre-existing rows.
+/// See [`append_entities_for_item`] for the rationale.
+pub fn append_entities_for_asset(
     conn: &Connection,
     item_id: &str,
     asset_id: &str,
     entities: &[Entity],
 ) -> Result<(), String> {
-    delete_automatic_entities_for_asset(conn, item_id, asset_id)?;
     insert_entities_for_asset(conn, item_id, asset_id, entities)
 }
 

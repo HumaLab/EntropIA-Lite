@@ -2,6 +2,7 @@ use serde::Deserialize;
 
 use super::types::{sanitize_entity_value, Entity, EntitySource, EntityType};
 use super::{find_entity_span, is_suppressed_by_protected, normalize_entity_value};
+use crate::nlp::chunking::{chunk_text, MAX_CHARS as MAX_NLP_CHARS};
 
 pub const DEFAULT_OPENROUTER_NER_MODEL: &str = "google/gemma-4-26b-a4b-it";
 pub const OPENROUTER_NER_MODEL_SETTING_KEY: &str = "openrouter_ner_model";
@@ -84,6 +85,53 @@ pub async fn extract_entities_with_openrouter(
         .map_err(|error| openrouter_ner_unavailable(&error))?;
 
     parse_openrouter_entities(text, protected_entities, &raw, &model_name)
+}
+
+/// Extract entities from long `text` by chunking and aggregating per-chunk
+/// results. Each chunk is sent to OpenRouter separately and the returned
+/// entity offsets are rebased by the chunk's start position in the source
+/// document, so consumers can treat the aggregate as if it came from a single
+/// extraction pass.
+#[allow(dead_code)]
+pub async fn extract_entities_with_openrouter_chunked(
+    api_key: String,
+    model_name: String,
+    text: &str,
+    protected_entities: &[Entity],
+    prompt_template: Option<String>,
+    params: Option<crate::llm::openrouter::GenerationParams>,
+) -> Result<Vec<Entity>, String> {
+    let chunks = chunk_text(text);
+    if chunks.len() > 1 {
+        eprintln!(
+            "[nlp/ner] text exceeded {MAX_NLP_CHARS} chars, splitting into {} chunks",
+            chunks.len()
+        );
+    }
+
+    let mut all_entities = Vec::new();
+    for chunk in &chunks {
+        let mut entities = extract_entities_with_openrouter(
+            api_key.clone(),
+            model_name.clone(),
+            &chunk.text,
+            protected_entities,
+            prompt_template.clone(),
+            params.clone(),
+        )
+        .await?;
+
+        if chunk.start > 0 {
+            for entity in entities.iter_mut() {
+                entity.start_offset = entity.start_offset.saturating_add(chunk.start);
+                entity.end_offset = entity.end_offset.saturating_add(chunk.start);
+            }
+        }
+
+        all_entities.append(&mut entities);
+    }
+
+    Ok(all_entities)
 }
 
 pub fn parse_openrouter_entities(
