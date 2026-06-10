@@ -486,7 +486,7 @@
   .topbar__leading {
     grid-area: leading;
     display: grid;
-    grid-template-columns: 88px minmax(0, 1fr);
+    grid-template-columns: minmax(140px, auto) minmax(0, 1fr);
     align-items: center;
     gap: var(--space-3);
     min-width: 0;
@@ -496,17 +496,16 @@
     display: flex;
     align-items: center;
     min-width: 0;
+    flex-shrink: 0;
   }
 
   .topbar__app-title {
     min-width: 0;
-    overflow: hidden;
     color: var(--color-text-secondary);
-    font-size: var(--font-size-xs);
+    font-size: 11px;
     font-weight: var(--font-weight-semibold);
-    letter-spacing: 0.04em;
+    letter-spacing: 0.02em;
     text-transform: uppercase;
-    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
