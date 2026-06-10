@@ -739,7 +739,7 @@
                                     class="explorer__node-icon explorer__node-icon--item"
                                     aria-hidden="true"
                                   >
-                                    <ActionIcon name="file-text" size={14} />
+                                    <ActionIcon name={getAssetIcon(singleAsset.type)} size={14} />
                                   </span>
                                   <span class="explorer__node-main">{item.title}</span>
                                   <span class="explorer__asset-type">{singleAsset.type}</span>
