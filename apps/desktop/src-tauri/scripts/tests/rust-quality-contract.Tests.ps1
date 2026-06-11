@@ -1,51 +1,53 @@
 Set-StrictMode -Version Latest
 
-Describe "test bootstrap" {
-  BeforeAll {
-    function Assert-True {
-      param(
-        [bool]$Condition,
-        [string]$Message
-      )
+# File-level bootstrap. Pester v5 scopes BeforeAll to a single Describe, so
+# the dot-source and helper functions must live here to be available to every
+# Describe in the file.
 
-      if (-not $Condition) {
-        throw $Message
-      }
-    }
+function Assert-True {
+  param(
+    [bool]$Condition,
+    [string]$Message
+  )
 
-    function Assert-Equal {
-      param(
-        $Actual,
-        $Expected,
-        [string]$Message
-      )
-
-      if ($Actual -ne $Expected) {
-        throw "${Message}. Expected='$Expected' Actual='$Actual'"
-      }
-    }
-
-    function Assert-Match {
-      param(
-        [string]$Value,
-        [string]$Pattern,
-        [string]$Message
-      )
-
-      if ($Value -notmatch $Pattern) {
-        throw $Message
-      }
-    }
-
-    $script:TestRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-    $script:ScriptRoot = (Resolve-Path (Join-Path $script:TestRoot "..")).Path
-    $script:RustQualityContractPath = (Resolve-Path (Join-Path $script:ScriptRoot "rust-quality-contract.ps1")).Path
-    $script:RustCoveragePath = (Resolve-Path (Join-Path $script:ScriptRoot "rust-coverage.ps1")).Path
-
-    . $script:RustQualityContractPath
-    . $script:RustCoveragePath
+  if (-not $Condition) {
+    throw $Message
   }
+}
 
+function Assert-Equal {
+  param(
+    $Actual,
+    $Expected,
+    [string]$Message
+  )
+
+  if ($Actual -ne $Expected) {
+    throw "${Message}. Expected='$Expected' Actual='$Actual'"
+  }
+}
+
+function Assert-Match {
+  param(
+    [string]$Value,
+    [string]$Pattern,
+    [string]$Message
+  )
+
+  if ($Value -notmatch $Pattern) {
+    throw $Message
+  }
+}
+
+$script:TestRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+$script:ScriptRoot = (Resolve-Path (Join-Path $script:TestRoot "..")).Path
+$script:RustQualityContractPath = (Resolve-Path (Join-Path $script:ScriptRoot "rust-quality-contract.ps1")).Path
+$script:RustCoveragePath = (Resolve-Path (Join-Path $script:ScriptRoot "rust-coverage.ps1")).Path
+
+. $script:RustQualityContractPath
+. $script:RustCoveragePath
+
+Describe "test bootstrap" {
   It "exposes script-scoped bootstrap paths" {
     Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($script:RustQualityContractPath)) -Message "RustQualityContractPath should be script-scoped and non-empty"
     Assert-True -Condition (-not [string]::IsNullOrWhiteSpace($script:RustCoveragePath)) -Message "RustCoveragePath should be script-scoped and non-empty"
