@@ -884,7 +884,6 @@
 
 <div class="document-viewer" class:document-viewer--image={type === 'image'} bind:this={containerEl}>
   {#if type === 'image'}
-    <!-- svelte-ignore a11y_no_static_element_interactions — overlay needs pointer events -->
       <div class="document-viewer__toolbar-anchor">
         <AnnotationToolbar
           tool={annotationTool}

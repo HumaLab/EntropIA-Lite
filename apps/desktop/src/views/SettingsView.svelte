@@ -1,6 +1,40 @@
+<script module lang="ts">
+  /**
+   * Serializable snapshot of every user-editable settings value. Compared
+   * against the baseline captured at load/save time to detect unsaved edits.
+   */
+  export type SettingsSnapshotInput = {
+    apiKey: string
+    model: string
+    embeddingModel: string
+    assemblyAiApiKey: string
+    assemblyAiCollectionSpeakerLabels: boolean
+    glmOcrApiKey: string
+    ocrCorrectionPrompt: string
+    summaryPrompt: string
+    nerPrompt: string
+    tripletsPrompt: string
+    modelParamsByFlow: Record<string, Record<string, string>>
+  }
+
+  export function buildSettingsSnapshot(input: SettingsSnapshotInput): string {
+    return JSON.stringify(input)
+  }
+
+  /** Dirty = a baseline exists and the current snapshot differs from it. */
+  export function hasUnsavedSettingsChanges(
+    savedSnapshot: string | null,
+    currentSnapshot: string
+  ): boolean {
+    return savedSnapshot !== null && savedSnapshot !== currentSnapshot
+  }
+</script>
+
 <script lang="ts">
   import { onMount } from 'svelte'
   import { locale, t } from '$lib/i18n'
+  import { navigation } from '$lib/navigation'
+  import { registerEscapeInterceptor } from '$lib/keyboard'
   import { openExternalUrlFromClick } from '$lib/external-links'
   import {
     settingsGet,
@@ -17,7 +51,7 @@
     DEFAULT_MODEL_PARAMS_BY_FLOW,
     type ModelInfo,
   } from '$lib/settings'
-  import { ActionIcon, Button, Card, Input, TabButton, TabList } from '@entropia/ui'
+  import { ActionIcon, Button, Card, ConfirmDialog, Input, TabButton, TabList } from '@entropia/ui'
   import LogsTab from './LogsTab.svelte'
 
   let activeTab = $state<'api' | 'prompts' | 'modelParams' | 'logs'>('api')
@@ -134,11 +168,44 @@
   let saving = $state(false)
   let saveFeedback = $state<{ tone: 'success' | 'error'; text: string } | null>(null)
 
+  // Unsaved-changes guard: baseline snapshot captured after load/save.
+  let savedSnapshot = $state<string | null>(null)
+  let showDiscardConfirm = $state(false)
+
+  const currentSnapshot = $derived(
+    buildSettingsSnapshot({
+      apiKey,
+      model,
+      embeddingModel,
+      assemblyAiApiKey,
+      assemblyAiCollectionSpeakerLabels,
+      glmOcrApiKey,
+      ocrCorrectionPrompt,
+      summaryPrompt,
+      nerPrompt,
+      tripletsPrompt,
+      modelParamsByFlow,
+    })
+  )
+  const isDirty = $derived(hasUnsavedSettingsChanges(savedSnapshot, currentSnapshot))
+
   const activeLocale = $derived($locale)
 
   onMount(() => {
     void loadInitialSettings()
+    // Escape must not silently discard unsaved edits: when dirty, ask for
+    // confirmation instead of navigating back.
+    return registerEscapeInterceptor(() => {
+      if (!isDirty) return false
+      showDiscardConfirm = true
+      return true
+    })
   })
+
+  function handleDiscardConfirm() {
+    showDiscardConfirm = false
+    navigation.back()
+  }
 
   async function loadInitialSettings() {
     loadSettingsError = null
@@ -200,6 +267,7 @@
       for (const flow of MODEL_PARAM_FLOWS) {
         modelParamsByFlow[flow.id] = readModelParamsFromSettings(settingsMap, flow.id)
       }
+      savedSnapshot = currentSnapshot
     } catch (e) {
       loadSettingsError = e instanceof Error ? e.message : String(e)
     }
@@ -447,6 +515,7 @@
       if (apiKey.trim()) maskedApiKey = maskKey(apiKey)
       if (assemblyAiApiKey.trim()) maskedAssemblyAiApiKey = maskKey(assemblyAiApiKey, 5)
       if (glmOcrApiKey.trim()) maskedGlmOcrApiKey = maskKey(glmOcrApiKey, 0)
+      savedSnapshot = currentSnapshot
       saveFeedback = {
         tone: 'success',
         text: t('settings.saved'),
@@ -908,6 +977,19 @@
 
     {:else if activeTab === 'logs'}
     <LogsTab />
+    {/if}
+
+    {#if showDiscardConfirm}
+      <ConfirmDialog
+        title={t('settings.discardTitle')}
+        titleId="settings-discard-title"
+        message={t('settings.discardMessage')}
+        cancelLabel={t('settings.discardCancel')}
+        confirmLabel={t('settings.discardConfirm')}
+        variant="destructive"
+        oncancel={() => (showDiscardConfirm = false)}
+        onconfirm={handleDiscardConfirm}
+      />
     {/if}
   </div>
 {/key}

@@ -1,0 +1,637 @@
+# CI contract. Freezes the seven green quality gates
+# (pnpm lint / typecheck / vitest run / build + cargo fmt / clippy / cargo test).
+# The structure of this file is asserted by the Pester suites under
+# apps/desktop/src-tauri/scripts/tests. Keep both sides in sync.
+
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 9.15.4
+
+jobs:
+  rust-quality-report:
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run pnpm post-checkout forensics (rust-quality-report)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "rust-quality-report-post-checkout"
+
+      - name: Upload pnpm post-checkout forensics (rust-quality-report)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-rust-quality-report-post-checkout
+          path: .ci-evidence/pnpm-preinstall/rust-quality-report-post-checkout/
+
+      - uses: pnpm/action-setup@v6
+        id: pnpm_setup
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Run pnpm post-pnpm-setup forensics (rust-quality-report)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "rust-quality-report-post-pnpm-setup"
+
+      - name: Upload pnpm post-pnpm-setup forensics (rust-quality-report)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-rust-quality-report-post-pnpm-setup
+          path: .ci-evidence/pnpm-preinstall/rust-quality-report-post-pnpm-setup/
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          package-manager-cache: false
+
+      - name: Run pnpm post-setup-node forensics (rust-quality-report)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "rust-quality-report-post-setup-node"
+
+      - name: Upload pnpm post-setup-node forensics (rust-quality-report)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-rust-quality-report-post-setup-node
+          path: .ci-evidence/pnpm-preinstall/rust-quality-report-post-setup-node/
+
+      - name: Restore canonical lockfile (rust-quality-report)
+        shell: pwsh
+        run: git checkout -- pnpm-lock.yaml
+
+      - name: Run pnpm pre-install forensics (rust-quality-report)
+        shell: pwsh
+        run: |
+          ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 `
+            -JobName "rust-quality-report" `
+            -RequiredKeys @(
+              "node_version",
+              "pnpm_version",
+              "pnpm_exec_path",
+              "store_dir",
+              "virtual_store_dir",
+              "sha256",
+              "size_bytes",
+              "line_count",
+              "first_bytes_hex",
+              "has_bom",
+              "has_nul",
+              "has_yaml_multidoc_separator",
+              "git_blob_sha256",
+              "git_blob_first_bytes_hex",
+              "lockfile_comparison_status"
+            )
+
+      - name: Run pnpm pre-install classification (rust-quality-report)
+        shell: pwsh
+        run: |
+          ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-classify.ps1 `
+            -EvidencePaths @(".ci-evidence/pnpm-preinstall/rust-quality-report/preinstall-evidence.json") `
+            -OutputPath ".ci-evidence/pnpm-preinstall/rust-quality-report/classification.md"
+
+      - name: Run generic lockfile YAML parse (rust-quality-report)
+        shell: pwsh
+        run: |
+          $parserCommand = 'npm exec --yes --package=js-yaml@4.1.0 -- js-yaml pnpm-lock.yaml'
+          Write-Host "lockfile_yaml_parser=$parserCommand"
+          try {
+            Invoke-Expression $parserCommand | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "lockfile YAML parser exited with code $LASTEXITCODE"
+            }
+            Write-Host "lockfile_yaml_parse=ok"
+          }
+          catch {
+            Write-Host "lockfile_yaml_parse=error"
+            Write-Host "lockfile_yaml_parse_error=$($_.Exception.Message)"
+            exit 1
+          }
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          $pnpmBinDir = "${{ steps.pnpm_setup.outputs.bin_dest }}"
+          $pnpmExe = Join-Path $pnpmBinDir "pnpm"
+          Write-Host "pnpm_bin=$pnpmExe"
+          & $pnpmExe -v
+          node -v
+          npm -v
+          git checkout -- pnpm-lock.yaml
+          $lockfileSha256 = (Get-FileHash -Path pnpm-lock.yaml -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "lockfile_diag.sha256=$lockfileSha256"
+          $lockfileFirstLine = Get-Content -Path pnpm-lock.yaml -TotalCount 1
+          Write-Host "lockfile_diag.first_line_is_yaml_doc=$($lockfileFirstLine -eq '---')"
+          $workingBlob = (git hash-object pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "lockfile_diag.working_blob=$workingBlob"
+          $headBlob = (git rev-parse HEAD:pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "lockfile_diag.head_blob=$headBlob"
+          Write-Host "lockfile_diag.matches_head_blob=$($workingBlob -eq $headBlob)"
+          npm exec --package=pnpm@9.15.4 -- pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload pnpm pre-install forensics (rust-quality-report)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-rust-quality-report
+          path: .ci-evidence/pnpm-preinstall/rust-quality-report/
+
+      - name: Run Rust quality Pester suites
+        shell: pwsh
+        run: |
+          $pester = Get-Module -ListAvailable -Name Pester |
+            Where-Object { $_.Version -ge [version]"5.0.0" }
+          if (-not $pester) {
+            Install-Module -Name Pester -MinimumVersion 5.5.0 -Force -SkipPublisherCheck -Scope CurrentUser
+          }
+          $suitesRoot = "apps/desktop/src-tauri/scripts/tests"
+          Invoke-Pester -Output Detailed -CI -Path @(
+            (Join-Path $suitesRoot "rust-quality-contract.Tests.ps1"),
+            (Join-Path $suitesRoot "rust-verify-gate.Tests.ps1"),
+            (Join-Path $suitesRoot "ci-rust-quality-workflow.Tests.ps1"),
+            (Join-Path $suitesRoot "ci-pnpm-preinstall-forensics.Tests.ps1"),
+            (Join-Path $suitesRoot "lockfile-reset-workflow.Tests.ps1"),
+            (Join-Path $suitesRoot "pnpm-preinstall-classification.Tests.ps1"),
+            (Join-Path $suitesRoot "pnpm-preinstall-forensics-script.Tests.ps1")
+          )
+
+      - name: Install Rust toolchain from rust-toolchain.toml
+        shell: pwsh
+        run: |
+          $channel = (Select-String -Path rust-toolchain.toml -Pattern 'channel\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          Write-Host "rust_channel=$channel"
+          rustup toolchain install $channel --profile minimal
+          rustup component add llvm-tools-preview rustfmt clippy --toolchain $channel
+          rustup show active-toolchain
+          cargo --version
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri
+
+      - name: Cargo fmt gate
+        working-directory: apps/desktop/src-tauri
+        shell: pwsh
+        run: cargo fmt --check
+
+      - name: Cargo clippy gate
+        working-directory: apps/desktop/src-tauri
+        shell: pwsh
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Cargo test gate
+        working-directory: apps/desktop/src-tauri
+        shell: pwsh
+        run: cargo test
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
+
+      - name: Run rust quality report (coverage baseline)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/rust-quality-contract.ps1
+
+      - name: Upload rust quality artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: rust-quality-report-artifacts
+          path: |
+            apps/desktop/src-tauri/coverage-rust/lcov.info
+            apps/desktop/src-tauri/coverage-rust/summary.md
+
+  lint-typecheck:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run pnpm post-checkout forensics (lint-typecheck)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "lint-typecheck-post-checkout"
+
+      - name: Upload pnpm post-checkout forensics (lint-typecheck)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-lint-typecheck-post-checkout
+          path: .ci-evidence/pnpm-preinstall/lint-typecheck-post-checkout/
+
+      - uses: pnpm/action-setup@v6
+        id: pnpm_setup
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Run pnpm post-pnpm-setup forensics (lint-typecheck)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "lint-typecheck-post-pnpm-setup"
+
+      - name: Upload pnpm post-pnpm-setup forensics (lint-typecheck)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-lint-typecheck-post-pnpm-setup
+          path: .ci-evidence/pnpm-preinstall/lint-typecheck-post-pnpm-setup/
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Run pnpm post-setup-node forensics (lint-typecheck)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "lint-typecheck-post-setup-node"
+
+      - name: Upload pnpm post-setup-node forensics (lint-typecheck)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-lint-typecheck-post-setup-node
+          path: .ci-evidence/pnpm-preinstall/lint-typecheck-post-setup-node/
+
+      - name: Restore canonical lockfile (lint-typecheck)
+        shell: pwsh
+        run: git checkout -- pnpm-lock.yaml
+
+      - name: Run pnpm pre-install forensics (lint-typecheck)
+        shell: pwsh
+        run: |
+          ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 `
+            -JobName "lint-typecheck" `
+            -RequiredKeys @(
+              "node_version",
+              "pnpm_version",
+              "pnpm_exec_path",
+              "store_dir",
+              "virtual_store_dir",
+              "sha256",
+              "size_bytes",
+              "line_count",
+              "first_bytes_hex",
+              "has_bom",
+              "has_nul",
+              "has_yaml_multidoc_separator",
+              "git_blob_sha256",
+              "git_blob_first_bytes_hex",
+              "lockfile_comparison_status"
+            )
+
+      - name: Run pnpm pre-install classification (lint-typecheck)
+        shell: pwsh
+        run: |
+          ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-classify.ps1 `
+            -EvidencePaths @(".ci-evidence/pnpm-preinstall/lint-typecheck/preinstall-evidence.json") `
+            -OutputPath ".ci-evidence/pnpm-preinstall/lint-typecheck/classification.md"
+
+      - name: Run generic lockfile YAML parse (lint-typecheck)
+        shell: pwsh
+        run: |
+          $parserCommand = 'npm exec --yes --package=js-yaml@4.1.0 -- js-yaml pnpm-lock.yaml'
+          Write-Host "lockfile_yaml_parser=$parserCommand"
+          try {
+            Invoke-Expression $parserCommand | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "lockfile YAML parser exited with code $LASTEXITCODE"
+            }
+            Write-Host "lockfile_yaml_parse=ok"
+          }
+          catch {
+            Write-Host "lockfile_yaml_parse=error"
+            Write-Host "lockfile_yaml_parse_error=$($_.Exception.Message)"
+            exit 1
+          }
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          $pnpmBinDir = "${{ steps.pnpm_setup.outputs.bin_dest }}"
+          $pnpmExe = Join-Path $pnpmBinDir "pnpm"
+          Write-Host "pnpm_bin=$pnpmExe"
+          & $pnpmExe -v
+          node -v
+          npm -v
+          git checkout -- pnpm-lock.yaml
+          $lockfileSha256 = (Get-FileHash -Path pnpm-lock.yaml -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "lockfile_diag.sha256=$lockfileSha256"
+          $lockfileFirstLine = Get-Content -Path pnpm-lock.yaml -TotalCount 1
+          Write-Host "lockfile_diag.first_line_is_yaml_doc=$($lockfileFirstLine -eq '---')"
+          $workingBlob = (git hash-object pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "lockfile_diag.working_blob=$workingBlob"
+          $headBlob = (git rev-parse HEAD:pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "lockfile_diag.head_blob=$headBlob"
+          Write-Host "lockfile_diag.matches_head_blob=$($workingBlob -eq $headBlob)"
+          npm exec --package=pnpm@9.15.4 -- pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload pnpm pre-install forensics (lint-typecheck)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-lint-typecheck
+          path: .ci-evidence/pnpm-preinstall/lint-typecheck/
+
+      - name: Lint gate
+        shell: pwsh
+        run: pnpm lint
+
+      - name: Typecheck gate
+        shell: pwsh
+        run: pnpm typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run pnpm post-checkout forensics (test)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "test-post-checkout"
+
+      - name: Upload pnpm post-checkout forensics (test)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-test-post-checkout
+          path: .ci-evidence/pnpm-preinstall/test-post-checkout/
+
+      - uses: pnpm/action-setup@v6
+        id: pnpm_setup
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Run pnpm post-pnpm-setup forensics (test)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "test-post-pnpm-setup"
+
+      - name: Upload pnpm post-pnpm-setup forensics (test)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-test-post-pnpm-setup
+          path: .ci-evidence/pnpm-preinstall/test-post-pnpm-setup/
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Run pnpm post-setup-node forensics (test)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "test-post-setup-node"
+
+      - name: Upload pnpm post-setup-node forensics (test)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-test-post-setup-node
+          path: .ci-evidence/pnpm-preinstall/test-post-setup-node/
+
+      - name: Restore canonical lockfile (test)
+        shell: pwsh
+        run: git checkout -- pnpm-lock.yaml
+
+      - name: Run pnpm pre-install forensics (test)
+        shell: pwsh
+        run: |
+          ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 `
+            -JobName "test" `
+            -RequiredKeys @(
+              "node_version",
+              "pnpm_version",
+              "pnpm_exec_path",
+              "store_dir",
+              "virtual_store_dir",
+              "sha256",
+              "size_bytes",
+              "line_count",
+              "first_bytes_hex",
+              "has_bom",
+              "has_nul",
+              "has_yaml_multidoc_separator",
+              "git_blob_sha256",
+              "git_blob_first_bytes_hex",
+              "lockfile_comparison_status"
+            )
+
+      - name: Run pnpm pre-install classification (test)
+        shell: pwsh
+        run: |
+          ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-classify.ps1 `
+            -EvidencePaths @(".ci-evidence/pnpm-preinstall/test/preinstall-evidence.json") `
+            -OutputPath ".ci-evidence/pnpm-preinstall/test/classification.md"
+
+      - name: Run generic lockfile YAML parse (test)
+        shell: pwsh
+        run: |
+          $parserCommand = 'npm exec --yes --package=js-yaml@4.1.0 -- js-yaml pnpm-lock.yaml'
+          Write-Host "lockfile_yaml_parser=$parserCommand"
+          try {
+            Invoke-Expression $parserCommand | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "lockfile YAML parser exited with code $LASTEXITCODE"
+            }
+            Write-Host "lockfile_yaml_parse=ok"
+          }
+          catch {
+            Write-Host "lockfile_yaml_parse=error"
+            Write-Host "lockfile_yaml_parse_error=$($_.Exception.Message)"
+            exit 1
+          }
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          $pnpmBinDir = "${{ steps.pnpm_setup.outputs.bin_dest }}"
+          $pnpmExe = Join-Path $pnpmBinDir "pnpm"
+          Write-Host "pnpm_bin=$pnpmExe"
+          & $pnpmExe -v
+          node -v
+          npm -v
+          git checkout -- pnpm-lock.yaml
+          $lockfileSha256 = (Get-FileHash -Path pnpm-lock.yaml -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "lockfile_diag.sha256=$lockfileSha256"
+          $lockfileFirstLine = Get-Content -Path pnpm-lock.yaml -TotalCount 1
+          Write-Host "lockfile_diag.first_line_is_yaml_doc=$($lockfileFirstLine -eq '---')"
+          $workingBlob = (git hash-object pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "lockfile_diag.working_blob=$workingBlob"
+          $headBlob = (git rev-parse HEAD:pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "lockfile_diag.head_blob=$headBlob"
+          Write-Host "lockfile_diag.matches_head_blob=$($workingBlob -eq $headBlob)"
+          npm exec --package=pnpm@9.15.4 -- pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload pnpm pre-install forensics (test)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-test
+          path: .ci-evidence/pnpm-preinstall/test/
+
+      - name: Vitest gate
+        shell: pwsh
+        run: pnpm test:run
+
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Run pnpm post-checkout forensics (build)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "build-post-checkout"
+
+      - name: Upload pnpm post-checkout forensics (build)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-build-post-checkout
+          path: .ci-evidence/pnpm-preinstall/build-post-checkout/
+
+      - uses: pnpm/action-setup@v6
+        id: pnpm_setup
+        with:
+          version: ${{ env.PNPM_VERSION }}
+          run_install: false
+
+      - name: Run pnpm post-pnpm-setup forensics (build)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "build-post-pnpm-setup"
+
+      - name: Upload pnpm post-pnpm-setup forensics (build)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-build-post-pnpm-setup
+          path: .ci-evidence/pnpm-preinstall/build-post-pnpm-setup/
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Run pnpm post-setup-node forensics (build)
+        shell: pwsh
+        run: ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 -JobName "build-post-setup-node"
+
+      - name: Upload pnpm post-setup-node forensics (build)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-build-post-setup-node
+          path: .ci-evidence/pnpm-preinstall/build-post-setup-node/
+
+      - name: Restore canonical lockfile (build)
+        shell: pwsh
+        run: git checkout -- pnpm-lock.yaml
+
+      - name: Run pnpm pre-install forensics (build)
+        shell: pwsh
+        run: |
+          ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-forensics.ps1 `
+            -JobName "build" `
+            -RequiredKeys @(
+              "node_version",
+              "pnpm_version",
+              "pnpm_exec_path",
+              "store_dir",
+              "virtual_store_dir",
+              "sha256",
+              "size_bytes",
+              "line_count",
+              "first_bytes_hex",
+              "has_bom",
+              "has_nul",
+              "has_yaml_multidoc_separator",
+              "git_blob_sha256",
+              "git_blob_first_bytes_hex",
+              "lockfile_comparison_status"
+            )
+
+      - name: Run pnpm pre-install classification (build)
+        shell: pwsh
+        run: |
+          ./apps/desktop/src-tauri/scripts/ci/pnpm-preinstall-classify.ps1 `
+            -EvidencePaths @(".ci-evidence/pnpm-preinstall/build/preinstall-evidence.json") `
+            -OutputPath ".ci-evidence/pnpm-preinstall/build/classification.md"
+
+      - name: Run generic lockfile YAML parse (build)
+        shell: pwsh
+        run: |
+          $parserCommand = 'npm exec --yes --package=js-yaml@4.1.0 -- js-yaml pnpm-lock.yaml'
+          Write-Host "lockfile_yaml_parser=$parserCommand"
+          try {
+            Invoke-Expression $parserCommand | Out-Null
+            if ($LASTEXITCODE -ne 0) {
+              throw "lockfile YAML parser exited with code $LASTEXITCODE"
+            }
+            Write-Host "lockfile_yaml_parse=ok"
+          }
+          catch {
+            Write-Host "lockfile_yaml_parse=error"
+            Write-Host "lockfile_yaml_parse_error=$($_.Exception.Message)"
+            exit 1
+          }
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          $pnpmBinDir = "${{ steps.pnpm_setup.outputs.bin_dest }}"
+          $pnpmExe = Join-Path $pnpmBinDir "pnpm"
+          Write-Host "pnpm_bin=$pnpmExe"
+          & $pnpmExe -v
+          node -v
+          npm -v
+          git checkout -- pnpm-lock.yaml
+          $lockfileSha256 = (Get-FileHash -Path pnpm-lock.yaml -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "lockfile_diag.sha256=$lockfileSha256"
+          $lockfileFirstLine = Get-Content -Path pnpm-lock.yaml -TotalCount 1
+          Write-Host "lockfile_diag.first_line_is_yaml_doc=$($lockfileFirstLine -eq '---')"
+          $workingBlob = (git hash-object pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "lockfile_diag.working_blob=$workingBlob"
+          $headBlob = (git rev-parse HEAD:pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "lockfile_diag.head_blob=$headBlob"
+          Write-Host "lockfile_diag.matches_head_blob=$($workingBlob -eq $headBlob)"
+          npm exec --package=pnpm@9.15.4 -- pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload pnpm pre-install forensics (build)
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pnpm-preinstall-build
+          path: .ci-evidence/pnpm-preinstall/build/
+
+      - name: Build gate
+        shell: pwsh
+        run: pnpm build

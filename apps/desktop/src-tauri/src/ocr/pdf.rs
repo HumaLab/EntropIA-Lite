@@ -1,12 +1,28 @@
 //! PDF page rendering for OCR fallback.
 //!
 //! `render_pdf_pages_to_png_files()` rasterizes every page of a PDF to PNG
-//! files via `pdfium-render`, binding the engine and parsing the document once
-//! for the whole batch. It powers the scanned-PDF import flow.
+//! files via `pdfium-render`, parsing the document once for the whole batch.
+//! It powers the scanned-PDF import flow.
 //!
 //! Thumbnails:
 //! - `render_pdf_thumbnail()` renders the first page at 400px width, suitable for
 //!   card previews in the collection view.
+//!
+//! # Pdfium render thread (serialization point)
+//!
+//! PDFium (the C library) is NOT thread-safe, and `pdfium-render` 0.8 without
+//! its `sync` feature marks the `Pdfium` struct `!Send + !Sync`. Additionally,
+//! the crate's default `thread_safe` feature holds a process-global lock from
+//! `FPDF_InitLibrary` until `FPDF_DestroyLibrary` — i.e. for as long as a
+//! `Pdfium` instance is alive — so exactly ONE long-lived instance may exist.
+//!
+//! All Pdfium work therefore goes through a single dedicated actor thread
+//! (`pdfium-render`, spawned lazily via [`PDF_ACTOR`]): it binds/initializes
+//! the engine once per app lifetime (on the first request) and processes
+//! render/probe requests strictly in arrival order. That receive loop is the
+//! serialization point for every PDF operation in the app. The public entry
+//! points below keep their original blocking signatures and simply forward to
+//! the actor over a channel, so callers are unchanged.
 //!
 //! # Pdfium native library resolution
 //!
@@ -22,9 +38,11 @@
 //! handler) to cache the resolved path. If never called, falls back to the
 //! current directory + system library (original pdfium-render behavior).
 
+use super::pdf_probe::DocumentProfile;
 use pdfium_render::prelude::*;
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
+use std::sync::mpsc as std_mpsc;
 use std::sync::{Mutex, OnceLock};
 use tauri::path::BaseDirectory;
 use tauri::Manager;
@@ -175,10 +193,15 @@ fn strip_windows_prefix(path: PathBuf) -> PathBuf {
 /// Uses the cached DLL path if `init_pdfium_path()` was called, otherwise
 /// falls back to current directory + system library (original behavior).
 ///
+/// Only the render actor thread may call this (plus the no-panic unit test):
+/// while the returned instance is alive, `pdfium-render`'s `thread_safe`
+/// marshall holds a process-global lock, so creating a second instance
+/// anywhere else would block forever.
+///
 /// # Errors
 /// Returns `Err` with a human-readable message if the Pdfium native
 /// library cannot be loaded (missing DLL/so/dylib, wrong architecture, etc.).
-pub(super) fn get_pdfium() -> Result<Pdfium, String> {
+fn get_pdfium() -> Result<Pdfium, String> {
     let cached_path = PDFIUM_PATH
         .get()
         .and_then(|cache| cache.lock().ok().and_then(|path| path.clone()));
@@ -245,6 +268,148 @@ fn dll_name_display() -> &'static str {
     }
 }
 
+/// A request for the Pdfium render actor. Each variant carries its inputs by
+/// value plus a oneshot-style response channel the actor replies on.
+enum PdfRequest {
+    RenderPages {
+        bytes: Vec<u8>,
+        out_dir: PathBuf,
+        filename_prefix: String,
+        respond: std_mpsc::Sender<Result<Vec<PathBuf>, String>>,
+    },
+    RenderThumbnail {
+        bytes: Vec<u8>,
+        respond: std_mpsc::Sender<Result<Vec<u8>, String>>,
+    },
+    ProfileDocument {
+        bytes: Vec<u8>,
+        respond: std_mpsc::Sender<Result<DocumentProfile, String>>,
+    },
+}
+
+const PDF_ACTOR_UNAVAILABLE: &str =
+    "PDF render thread is not available (it exited unexpectedly); restart EntropIA Lite";
+
+/// Sender half of the render actor's request channel. The actor thread is
+/// spawned lazily on first use and lives for the rest of the app lifetime.
+static PDF_ACTOR: OnceLock<std_mpsc::Sender<PdfRequest>> = OnceLock::new();
+
+fn pdf_actor() -> &'static std_mpsc::Sender<PdfRequest> {
+    PDF_ACTOR.get_or_init(|| {
+        let (sender, receiver) = std_mpsc::channel::<PdfRequest>();
+        std::thread::Builder::new()
+            .name("pdfium-render".to_string())
+            .stack_size(8 * 1024 * 1024)
+            .spawn(move || run_pdf_actor(receiver))
+            .expect("Failed to spawn Pdfium render thread");
+        sender
+    })
+}
+
+/// Actor loop: owns the only `Pdfium` instance in the process and serves
+/// requests strictly in arrival order — this is the serialization point for
+/// all PDF work.
+fn run_pdf_actor(receiver: std_mpsc::Receiver<PdfRequest>) {
+    // The engine slot starts empty; the first request binds Pdfium. On bind
+    // failure the slot stays empty so the next request retries (e.g. when the
+    // DLL path could not be resolved yet). After the first success the same
+    // engine serves every request until the app exits.
+    let mut engine: Option<PdfiumEngine> = None;
+    while let Ok(request) = receiver.recv() {
+        handle_pdf_request(&mut engine, bind_pdfium_engine, request);
+    }
+}
+
+/// Dispatch one request to the matching engine operation and reply on its
+/// response channel. Generic over the engine so routing is unit-testable
+/// without the Pdfium native library.
+fn handle_pdf_request<E: PdfEngineOps>(
+    engine: &mut Option<E>,
+    bind: impl FnOnce() -> Result<E, String>,
+    request: PdfRequest,
+) {
+    match request {
+        PdfRequest::RenderPages {
+            bytes,
+            out_dir,
+            filename_prefix,
+            respond,
+        } => {
+            let result = run_engine_operation(engine, bind, |engine| {
+                engine.render_pages(&bytes, &out_dir, &filename_prefix)
+            });
+            let _ = respond.send(result);
+        }
+        PdfRequest::RenderThumbnail { bytes, respond } => {
+            let result =
+                run_engine_operation(engine, bind, |engine| engine.render_thumbnail(&bytes));
+            let _ = respond.send(result);
+        }
+        PdfRequest::ProfileDocument { bytes, respond } => {
+            let result =
+                run_engine_operation(engine, bind, |engine| engine.profile_document(&bytes));
+            let _ = respond.send(result);
+        }
+    }
+}
+
+/// Bind the engine on first use, then run `operation` against it. A panic
+/// inside the operation must not kill the render thread: it is converted into
+/// an error for this request and the actor keeps serving subsequent ones.
+fn run_engine_operation<E, T>(
+    engine: &mut Option<E>,
+    bind: impl FnOnce() -> Result<E, String>,
+    operation: impl FnOnce(&E) -> Result<T, String>,
+) -> Result<T, String> {
+    if engine.is_none() {
+        *engine = Some(bind()?);
+    }
+    let bound = engine.as_ref().expect("engine bound above");
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| operation(bound)))
+        .unwrap_or_else(|_| Err("PDF operation panicked; the document may be corrupt".to_string()))
+}
+
+/// The operations the render actor can perform. Implemented by the real
+/// Pdfium-backed engine and by fakes in unit tests.
+trait PdfEngineOps {
+    fn render_pages(
+        &self,
+        bytes: &[u8],
+        out_dir: &Path,
+        filename_prefix: &str,
+    ) -> Result<Vec<PathBuf>, String>;
+    fn render_thumbnail(&self, bytes: &[u8]) -> Result<Vec<u8>, String>;
+    fn profile_document(&self, bytes: &[u8]) -> Result<DocumentProfile, String>;
+}
+
+/// The real engine: wraps the app's single long-lived `Pdfium` instance.
+struct PdfiumEngine {
+    pdfium: Pdfium,
+}
+
+fn bind_pdfium_engine() -> Result<PdfiumEngine, String> {
+    get_pdfium().map(|pdfium| PdfiumEngine { pdfium })
+}
+
+impl PdfEngineOps for PdfiumEngine {
+    fn render_pages(
+        &self,
+        bytes: &[u8],
+        out_dir: &Path,
+        filename_prefix: &str,
+    ) -> Result<Vec<PathBuf>, String> {
+        render_pdf_pages_with_engine(&self.pdfium, bytes, out_dir, filename_prefix)
+    }
+
+    fn render_thumbnail(&self, bytes: &[u8]) -> Result<Vec<u8>, String> {
+        render_pdf_thumbnail_with_engine(&self.pdfium, bytes)
+    }
+
+    fn profile_document(&self, bytes: &[u8]) -> Result<DocumentProfile, String> {
+        super::pdf_probe::profile_pdf_with_engine(&self.pdfium, bytes)
+    }
+}
+
 /// Returns `true` if the text contains at least `MIN_ALPHANUM_CHARS` valid
 /// UTF-8 alphanumeric characters. Used to decide whether native PDF text is
 /// rich enough or we should fall back to OCR.
@@ -256,11 +421,13 @@ fn is_quality_text(text: &str) -> bool {
 
 /// Render every page of a PDF to PNG files on disk.
 ///
-/// Binds the Pdfium engine and parses the document ONCE, then iterates the
-/// pages — avoiding the cost of re-initializing the engine and re-parsing the
-/// document for each page. Each page is rendered at 300 DPI equivalent
-/// (target width 2550px) and written to
+/// Parses the document ONCE on the render actor thread (the engine itself is
+/// bound once per app lifetime), then iterates the pages. Each page is
+/// rendered at 300 DPI equivalent (target width 2550px) and written to
 /// `{out_dir}/{filename_prefix}_page_{n}.png` (1-based page numbers).
+///
+/// Blocks until the render actor replies; call from a blocking-safe context
+/// (worker thread or `spawn_blocking`).
 ///
 /// Returns the written file paths in page order.
 ///
@@ -274,9 +441,45 @@ pub fn render_pdf_pages_to_png_files(
     out_dir: &Path,
     filename_prefix: &str,
 ) -> Result<Vec<PathBuf>, String> {
+    let (respond, response) = std_mpsc::channel();
+    pdf_actor()
+        .send(PdfRequest::RenderPages {
+            bytes: bytes.to_vec(),
+            out_dir: out_dir.to_path_buf(),
+            filename_prefix: filename_prefix.to_string(),
+            respond,
+        })
+        .map_err(|_| PDF_ACTOR_UNAVAILABLE.to_string())?;
+    response
+        .recv()
+        .map_err(|_| PDF_ACTOR_UNAVAILABLE.to_string())?
+}
+
+/// Profile a PDF on the render actor thread. Blocking wrapper used by
+/// `pdf_probe::profile_pdf_bytes` so its public signature stays unchanged.
+pub(super) fn profile_pdf_via_actor(bytes: &[u8]) -> Result<DocumentProfile, String> {
+    let (respond, response) = std_mpsc::channel();
+    pdf_actor()
+        .send(PdfRequest::ProfileDocument {
+            bytes: bytes.to_vec(),
+            respond,
+        })
+        .map_err(|_| PDF_ACTOR_UNAVAILABLE.to_string())?;
+    response
+        .recv()
+        .map_err(|_| PDF_ACTOR_UNAVAILABLE.to_string())?
+}
+
+/// Implementation of [`render_pdf_pages_to_png_files`]; runs on the render
+/// actor thread with the already-bound engine.
+fn render_pdf_pages_with_engine(
+    pdfium: &Pdfium,
+    bytes: &[u8],
+    out_dir: &Path,
+    filename_prefix: &str,
+) -> Result<Vec<PathBuf>, String> {
     use std::io::Write;
 
-    let pdfium = get_pdfium()?;
     let document = pdfium
         .load_pdf_from_byte_slice(bytes, None)
         .map_err(|e| format!("Failed to load PDF: {e}"))?;
@@ -331,13 +534,28 @@ pub fn render_pdf_pages_to_png_files(
 /// suitable for use as an `<img>` src via `convertFileSrc`.
 ///
 /// Uses `pdfium-render` with a target width of 400px (roughly 50 DPI equivalent),
-/// yielding small files that load fast in the UI.
+/// yielding small files that load fast in the UI. Blocks until the render
+/// actor replies; call from a blocking-safe context.
 pub fn render_pdf_thumbnail(bytes: &[u8]) -> Result<Vec<u8>, String> {
     if bytes.is_empty() {
         return Err("PDF bytes are empty".to_string());
     }
 
-    let pdfium = get_pdfium()?;
+    let (respond, response) = std_mpsc::channel();
+    pdf_actor()
+        .send(PdfRequest::RenderThumbnail {
+            bytes: bytes.to_vec(),
+            respond,
+        })
+        .map_err(|_| PDF_ACTOR_UNAVAILABLE.to_string())?;
+    response
+        .recv()
+        .map_err(|_| PDF_ACTOR_UNAVAILABLE.to_string())?
+}
+
+/// Implementation of [`render_pdf_thumbnail`]; runs on the render actor
+/// thread with the already-bound engine.
+fn render_pdf_thumbnail_with_engine(pdfium: &Pdfium, bytes: &[u8]) -> Result<Vec<u8>, String> {
     let document = pdfium
         .load_pdf_from_byte_slice(bytes, None)
         .map_err(|e| format!("Failed to load PDF for thumbnail: {e}"))?;
@@ -546,5 +764,167 @@ mod tests {
             name.contains("pdfium") || name.contains("Pdfium"),
             "dll_name_display should contain 'pdfium', got: {name}"
         );
+    }
+
+    // ---- Render actor request routing (no Pdfium binary required) ----
+
+    /// Fake engine so routing can be exercised without the native library.
+    #[derive(Default)]
+    struct FakeEngine {
+        panic_on_thumbnail: bool,
+    }
+
+    impl PdfEngineOps for FakeEngine {
+        fn render_pages(
+            &self,
+            _bytes: &[u8],
+            out_dir: &Path,
+            filename_prefix: &str,
+        ) -> Result<Vec<PathBuf>, String> {
+            Ok(vec![out_dir.join(format!("{filename_prefix}_page_1.png"))])
+        }
+
+        fn render_thumbnail(&self, bytes: &[u8]) -> Result<Vec<u8>, String> {
+            if self.panic_on_thumbnail {
+                panic!("fake thumbnail panic");
+            }
+            Ok(bytes.to_vec())
+        }
+
+        fn profile_document(&self, _bytes: &[u8]) -> Result<DocumentProfile, String> {
+            Ok(crate::ocr::pdf_probe::summarize_document(Vec::new()))
+        }
+    }
+
+    #[test]
+    fn pdf_request_routing_dispatches_each_variant_to_matching_operation() {
+        let mut engine: Option<FakeEngine> = None;
+
+        let (respond, thumbnail_response) = std_mpsc::channel();
+        handle_pdf_request(
+            &mut engine,
+            || Ok(FakeEngine::default()),
+            PdfRequest::RenderThumbnail {
+                bytes: vec![1, 2, 3],
+                respond,
+            },
+        );
+        assert_eq!(
+            thumbnail_response.recv().expect("thumbnail response"),
+            Ok(vec![1, 2, 3])
+        );
+
+        let (respond, pages_response) = std_mpsc::channel();
+        handle_pdf_request(
+            &mut engine,
+            || Ok(FakeEngine::default()),
+            PdfRequest::RenderPages {
+                bytes: vec![1],
+                out_dir: PathBuf::from("out"),
+                filename_prefix: "doc".to_string(),
+                respond,
+            },
+        );
+        assert_eq!(
+            pages_response.recv().expect("pages response"),
+            Ok(vec![PathBuf::from("out").join("doc_page_1.png")])
+        );
+
+        let (respond, profile_response) = std_mpsc::channel();
+        handle_pdf_request(
+            &mut engine,
+            || Ok(FakeEngine::default()),
+            PdfRequest::ProfileDocument {
+                bytes: vec![1],
+                respond,
+            },
+        );
+        let profile = profile_response
+            .recv()
+            .expect("profile response")
+            .expect("profile result");
+        assert!(profile.pages.is_empty());
+    }
+
+    #[test]
+    fn pdf_request_routing_retries_bind_after_failure() {
+        let mut engine: Option<FakeEngine> = None;
+
+        let (respond, response) = std_mpsc::channel();
+        handle_pdf_request(
+            &mut engine,
+            || Err("no native library".to_string()),
+            PdfRequest::RenderThumbnail {
+                bytes: vec![1],
+                respond,
+            },
+        );
+        assert_eq!(
+            response.recv().expect("response"),
+            Err("no native library".to_string())
+        );
+        assert!(engine.is_none(), "failed bind must not cache an engine");
+
+        let (respond, response) = std_mpsc::channel();
+        handle_pdf_request(
+            &mut engine,
+            || Ok(FakeEngine::default()),
+            PdfRequest::RenderThumbnail {
+                bytes: vec![1],
+                respond,
+            },
+        );
+        assert!(
+            response.recv().expect("response").is_ok(),
+            "next request must retry the bind"
+        );
+        assert!(engine.is_some(), "successful bind is cached");
+    }
+
+    #[test]
+    fn pdf_request_routing_binds_engine_exactly_once() {
+        let mut engine: Option<FakeEngine> = None;
+        let binds = std::cell::Cell::new(0_u32);
+
+        for _ in 0..3 {
+            let (respond, response) = std_mpsc::channel();
+            handle_pdf_request(
+                &mut engine,
+                || {
+                    binds.set(binds.get() + 1);
+                    Ok(FakeEngine::default())
+                },
+                PdfRequest::RenderThumbnail {
+                    bytes: vec![1],
+                    respond,
+                },
+            );
+            assert!(response.recv().expect("response").is_ok());
+        }
+
+        assert_eq!(binds.get(), 1, "engine binds exactly once across requests");
+    }
+
+    #[test]
+    fn pdf_request_routing_survives_a_panicking_operation() {
+        let mut engine = Some(FakeEngine {
+            panic_on_thumbnail: true,
+        });
+
+        let (respond, response) = std_mpsc::channel();
+        handle_pdf_request(
+            &mut engine,
+            || unreachable!("engine is already bound"),
+            PdfRequest::RenderThumbnail {
+                bytes: vec![1],
+                respond,
+            },
+        );
+
+        let result = response
+            .recv()
+            .expect("actor must reply even when the operation panics");
+        assert!(result.is_err(), "panic becomes an error for that request");
+        assert!(engine.is_some(), "engine survives the panic");
     }
 }

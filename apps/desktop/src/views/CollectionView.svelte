@@ -18,6 +18,7 @@
     deletePdfThumbnail,
   } from '$lib/file-import'
   import { appDataDir, join } from '@tauri-apps/api/path'
+  import { invoke } from '@tauri-apps/api/core'
   import { stat } from '@tauri-apps/plugin-fs'
   import { exportCollectionById } from '$lib/export'
   import {
@@ -27,7 +28,7 @@
   import { ConfirmDialog, ItemCard, SearchBar, Button } from '@entropia/ui'
   import { onMount, onDestroy } from 'svelte'
   import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
-  import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+  import { listen } from '@tauri-apps/api/event'
   import type { Item, Asset, CollectionItemCardSummary } from '@entropia/store'
 
   let { collectionId }: { collectionId: string } = $props()
@@ -404,7 +405,7 @@
 
     if (classified.length === 0) {
       if (rejected.length > 0) {
-        error = `Unsupported format: ${rejected.join(', ')}`
+        error = t('collection.error.unsupportedFormat', { files: rejected.join(', ') })
         importSummary = {
           imported: 0,
           skipped: rejected.length,
@@ -417,28 +418,31 @@
     }
 
     // Create one item per file, copy file, create asset.
-    const createdItemIds: string[] = []
-    let importError: string | null = null
+    // Failures are collected per file so every error stays visible in the
+    // import summary; one bad file no longer aborts the remaining imports.
+    const createdItems: Array<{ id: string; title: string }> = []
+    const importErrors: string[] = []
 
     for (const file of classified) {
+      const title = file.name.replace(/\.[^.]+$/, '')
       let itemId: string
       try {
         const item = await store.items.create({
-          title: file.name.replace(/\.[^.]+$/, ''),
+          title,
           collectionId,
           metadata: null,
         })
         itemId = item.id
       } catch (e) {
-        importError = formatImportStageError(baseErrorMessage, 'creating item', e)
-        break
+        importErrors.push(formatImportStageError(baseErrorMessage, 'creating item', e))
+        continue
       }
 
       try {
         const imported = await importSingleFile(file.sourcePath, collectionId, itemId)
         await store.items.update(itemId, { metadata: buildImportedItemMetadata(imported) })
         await finalizeImportedItem(itemId, imported)
-        createdItemIds.push(itemId)
+        createdItems.push({ id: itemId, title })
       } catch (e) {
         // Clean up the item if file copy failed
         try {
@@ -446,18 +450,32 @@
         } catch {
           // ignore cleanup errors
         }
-        importError = formatImportStageError(baseErrorMessage, `importing ${file.name}`, e)
-        break
+        importErrors.push(formatImportStageError(baseErrorMessage, `importing ${file.name}`, e))
       }
     }
 
     await loadItems()
     notifyExplorerCollectionChanged()
 
-    // Navigate to the last created item
-    if (createdItemIds.length > 0) {
-      const lastItemId = createdItemIds[createdItemIds.length - 1]!
-      const lastFile = classified[classified.length - 1]!
+    const hasFailures = importErrors.length > 0 || rejected.length > 0
+    const lastCreated = createdItems.at(-1) ?? null
+
+    importSummary = {
+      imported: createdItems.length,
+      skipped: rejected.length,
+      errors: importErrors,
+      rejected,
+      lastItemTitle: hasFailures ? null : (lastCreated?.title ?? null),
+    }
+
+    if (importErrors.length > 0 && createdItems.length === 0) {
+      error = importErrors[0]!
+    }
+
+    // Auto-open the last created item only when everything succeeded. With
+    // any failure we stay in the collection so the summary and the per-file
+    // errors remain visible instead of being lost behind navigation.
+    if (!hasFailures && lastCreated) {
       navigation.navigate({
         name: 'item',
         collectionId,
@@ -465,22 +483,9 @@
           navigation.current.name === 'collection'
             ? (navigation.current as { collectionName: string }).collectionName
             : '',
-        itemId: lastItemId,
-        itemTitle: lastFile.name.replace(/\.[^.]+$/, ''),
+        itemId: lastCreated.id,
+        itemTitle: lastCreated.title,
       })
-    }
-
-    importSummary = {
-      imported: createdItemIds.length,
-      skipped: rejected.length,
-      errors: importError ? [importError] : [],
-      rejected,
-      lastItemTitle:
-        createdItemIds.length > 0 ? classified[createdItemIds.length - 1]!.name.replace(/\.[^.]+$/, '') : null,
-    }
-
-    if (importError && createdItemIds.length === 0) {
-      error = importError
     }
   }
 
@@ -592,7 +597,14 @@
     // Use the cached path — do NOT depend on a DB lookup
     if (assetPath) {
       try {
-        await deleteAssetFile(assetPath)
+        if (meta.primaryAssetType === 'image') {
+          // Image edits write versioned siblings (photo_v2.png…) next to the
+          // current file — the backend command deletes the whole family so
+          // older versions don't leak on disk forever.
+          await invoke('delete_asset_files', { assetPath })
+        } else {
+          await deleteAssetFile(assetPath)
+        }
       } catch (e) {
         // Log but continue — file deletion should not block UI update
         console.warn('[CollectionView] File deletion warning:', e)
@@ -755,12 +767,21 @@
   {#if importing || importSummary}
     <section class="import-summary" aria-live="polite" aria-label={t('collection.importSummary.title')}>
       <div class="import-summary__header">
-        <strong>
-          {importing ? t('collection.importSummary.importingTitle') : t('collection.importSummary.title')}
-        </strong>
+        <div class="import-summary__heading">
+          <strong>
+            {importing ? t('collection.importSummary.importingTitle') : t('collection.importSummary.title')}
+          </strong>
+          {#if !importing && importSummary}
+            <Button variant="secondary" size="sm" onclick={() => (importSummary = null)}>
+              {t('collection.importSummary.dismiss')}
+            </Button>
+          {/if}
+        </div>
         <span>
           {#if importing}
             {t('collection.importSummary.importingDescription')}
+          {:else if importSummary && (importSummary.errors.length > 0 || importSummary.skipped > 0)}
+            {t('collection.importSummary.partialFailure')}
           {:else if importSummary?.lastItemTitle}
             {t('collection.importSummary.openedLast', { title: importSummary.lastItemTitle })}
           {:else}
@@ -791,9 +812,13 @@
           </p>
         {/if}
         {#if importSummary.errors.length > 0}
-          <p class="import-summary__detail import-summary__detail--error">
-            {importSummary.errors[0]}
-          </p>
+          <ul class="import-summary__errors">
+            {#each importSummary.errors as importErrorLine, index (index)}
+              <li class="import-summary__detail import-summary__detail--error">
+                {importErrorLine}
+              </li>
+            {/each}
+          </ul>
         {/if}
       {/if}
     </section>
@@ -932,8 +957,22 @@
     color: var(--color-text-secondary);
   }
 
+  .import-summary__heading {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+  }
+
   .import-summary__header strong {
     color: var(--color-text-primary);
+  }
+
+  .import-summary__errors {
+    display: grid;
+    gap: var(--space-1);
+    margin: 0;
+    padding-left: var(--space-4);
   }
 
   .import-summary__counts {

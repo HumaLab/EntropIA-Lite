@@ -201,48 +201,42 @@ pub fn apply_llm_review(
     Ok(final_entities)
 }
 
-/// Delete only the automatic (non-manual) entities for an item.
+/// Atomically replace the automatic (non-manual) entities for an item.
 ///
-/// Exposed separately from [`persist_entities_for_item`] so the streaming NER
-/// pipeline can call it once at the start of a job and then `INSERT` new
-/// entities incrementally as each chunk completes, without losing manual
-/// edits made by the user.
-pub fn clear_automatic_entities_for_item(conn: &Connection, item_id: &str) -> Result<(), String> {
-    delete_automatic_entities(conn, item_id)
-}
-
-/// Delete only the automatic (non-manual) entities for an asset. See
-/// [`clear_automatic_entities_for_item`] for the rationale.
-pub fn clear_automatic_entities_for_asset(
-    conn: &Connection,
-    item_id: &str,
-    asset_id: &str,
-) -> Result<(), String> {
-    delete_automatic_entities_for_asset(conn, item_id, asset_id)
-}
-
-/// Append entities for an item without deleting any pre-existing rows.
-///
-/// Intended for the streaming NER pipeline: the worker calls
-/// [`clear_automatic_entities_for_item`] once, then `append_entities_for_item`
-/// after each chunk to persist partial results.
-pub fn append_entities_for_item(
-    conn: &Connection,
+/// The NER worker accumulates the parsed entities from every chunk in memory
+/// and only then calls this swap: clear + append run inside one transaction,
+/// so any failure — including a job that died mid-LLM before reaching this
+/// point — leaves the previously persisted entities untouched. Manual edits
+/// made by the user are never deleted.
+pub fn replace_automatic_entities_for_item(
+    conn: &mut Connection,
     item_id: &str,
     entities: &[Entity],
 ) -> Result<(), String> {
-    insert_entities_for_item(conn, item_id, entities)
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Failed to start entity swap transaction: {e}"))?;
+    delete_automatic_entities(&tx, item_id)?;
+    insert_entities_for_item(&tx, item_id, entities)?;
+    tx.commit()
+        .map_err(|e| format!("Failed to commit entity swap transaction: {e}"))
 }
 
-/// Append entities for an asset without deleting any pre-existing rows.
-/// See [`append_entities_for_item`] for the rationale.
-pub fn append_entities_for_asset(
-    conn: &Connection,
+/// Atomically replace the automatic (non-manual) entities for an asset.
+/// See [`replace_automatic_entities_for_item`] for the rationale.
+pub fn replace_automatic_entities_for_asset(
+    conn: &mut Connection,
     item_id: &str,
     asset_id: &str,
     entities: &[Entity],
 ) -> Result<(), String> {
-    insert_entities_for_asset(conn, item_id, asset_id, entities)
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Failed to start entity swap transaction: {e}"))?;
+    delete_automatic_entities_for_asset(&tx, item_id, asset_id)?;
+    insert_entities_for_asset(&tx, item_id, asset_id, entities)?;
+    tx.commit()
+        .map_err(|e| format!("Failed to commit entity swap transaction: {e}"))
 }
 
 fn insert_entities_for_item(
@@ -398,10 +392,12 @@ pub(crate) fn openrouter_generation_params(
         .and_then(|value| value.trim().parse::<f32>().ok())
         .filter(|value| value.is_finite() && *value >= 0.0 && *value <= 2.0)
         .unwrap_or(0.3);
+    // Empty/whitespace/invalid settings fall back to the NER default; a valid
+    // user-provided number is respected as-is.
     let max_tokens = crate::settings::get_setting(conn, "llm_ner_max_tokens")
         .and_then(|value| value.trim().parse::<i32>().ok())
         .filter(|value| *value >= 1 && *value <= 32_000)
-        .unwrap_or(1024);
+        .unwrap_or(openrouter::DEFAULT_NER_MAX_TOKENS);
     let top_p = crate::settings::get_setting(conn, "llm_ner_top_p")
         .and_then(|value| value.trim().parse::<f32>().ok())
         .filter(|value| value.is_finite() && *value >= 0.0 && *value <= 1.0);
@@ -614,5 +610,245 @@ mod tests {
         assert!(prompt.contains("MISC"));
         assert!(prompt.contains("JSON"));
         assert!(prompt.contains("No inventes entidades"));
+    }
+
+    #[test]
+    fn openrouter_ner_parses_spanish_alias_keys() {
+        let text = "Don Manuel Belgrano llegó a Buenos Aires con el Cabildo.";
+        let raw = r#"[
+          {"entidad":"Manuel Belgrano","tipo":"PER","confianza":0.9},
+          {"valor":"Buenos Aires","categoria":"LUGAR"},
+          {"nombre":"Cabildo","clase":"ORG","score":0.8}
+        ]"#;
+
+        let entities = parse_openrouter_entities(text, &[], raw, "google/gemma-4-26b-a4b-it")
+            .expect("Spanish/synonym keys should parse");
+
+        assert_eq!(entities.len(), 3);
+        assert_eq!(entities[0].entity_type, EntityType::Person);
+        assert_eq!(entities[0].value, "Manuel Belgrano");
+        assert!((entities[0].confidence - 0.9).abs() < f32::EPSILON);
+        assert_eq!(entities[1].entity_type, EntityType::Place);
+        assert_eq!(entities[2].entity_type, EntityType::Organization);
+        assert!((entities[2].confidence - 0.8).abs() < f32::EPSILON);
+    }
+
+    #[test]
+    fn openrouter_ner_maps_accented_and_lowercase_type_labels() {
+        let raw = r#"[
+          {"value":"Cabildo","type":"institución"},
+          {"value":"Primera Junta","type":"ORGANIZACIÓN"},
+          {"value":"Belgrano","type":"personas"},
+          {"value":"Buenos Aires","type":"lugares"},
+          {"value":"25 de mayo","type":"fechas"}
+        ]"#;
+
+        let entities = parse_openrouter_entities("texto", &[], raw, "google/gemma-4-26b-a4b-it")
+            .expect("accented and lowercase labels should parse");
+
+        assert_eq!(entities.len(), 5);
+        let types: Vec<_> = entities
+            .iter()
+            .map(|entity| (entity.value.as_str(), entity.entity_type.clone()))
+            .collect();
+        assert!(types.contains(&("Cabildo", EntityType::Organization)));
+        assert!(types.contains(&("Primera Junta", EntityType::Organization)));
+        assert!(types.contains(&("Belgrano", EntityType::Person)));
+        assert!(types.contains(&("Buenos Aires", EntityType::Place)));
+        assert!(types.contains(&("25 de mayo", EntityType::Date)));
+    }
+
+    #[test]
+    fn openrouter_ner_salvages_truncated_array_response() {
+        // A max_tokens-truncated array: the third object is cut mid-string.
+        let raw = r#"[{"value":"Manuel Belgrano","type":"PER","confidence":0.97},{"value":"Buenos Aires","type":"LOC","confidence":0.9},{"value":"Cabil"#;
+
+        let entities = parse_openrouter_entities(
+            "Manuel Belgrano viajó a Buenos Aires.",
+            &[],
+            raw,
+            "google/gemma-4-26b-a4b-it",
+        )
+        .expect("truncated array should salvage the complete objects");
+
+        assert_eq!(entities.len(), 2);
+        assert_eq!(entities[0].value, "Manuel Belgrano");
+        assert_eq!(entities[1].value, "Buenos Aires");
+    }
+
+    #[test]
+    fn openrouter_ner_salvage_respects_braces_inside_strings() {
+        // The trailing object is cut inside a string that contains a '}' — the
+        // salvage must not treat it as a closing brace.
+        let raw = r#"[{"value":"Belgrano","type":"PER"},{"value":"abc } def"#;
+
+        let entities =
+            parse_openrouter_entities("Belgrano.", &[], raw, "google/gemma-4-26b-a4b-it")
+                .expect("salvage should cut at the last complete object");
+
+        assert_eq!(entities.len(), 1);
+        assert_eq!(entities[0].value, "Belgrano");
+    }
+
+    #[test]
+    fn openrouter_ner_plain_empty_array_is_ok() {
+        let entities = parse_openrouter_entities("texto", &[], "[]", "google/gemma-4-26b-a4b-it")
+            .expect("empty array should parse");
+
+        assert!(entities.is_empty());
+    }
+
+    // ── Generation params ──────────────────────────────────────────────────────
+
+    fn setup_settings_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory sqlite should open");
+        conn.execute_batch("CREATE TABLE app_settings(key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+            .expect("settings table should be created");
+        conn
+    }
+
+    #[test]
+    fn openrouter_generation_params_defaults_max_tokens_when_setting_blank() {
+        let conn = setup_settings_db();
+        conn.execute(
+            "INSERT INTO app_settings(key, value) VALUES ('llm_ner_max_tokens', '')",
+            [],
+        )
+        .expect("setting insert should succeed");
+
+        let params = openrouter_generation_params(&conn).expect("params should resolve");
+        assert_eq!(params.max_tokens, openrouter::DEFAULT_NER_MAX_TOKENS);
+        assert_eq!(params.max_tokens, 4096);
+    }
+
+    #[test]
+    fn openrouter_generation_params_respects_valid_max_tokens() {
+        let conn = setup_settings_db();
+        conn.execute(
+            "INSERT INTO app_settings(key, value) VALUES ('llm_ner_max_tokens', '2048')",
+            [],
+        )
+        .expect("setting insert should succeed");
+
+        let params = openrouter_generation_params(&conn).expect("params should resolve");
+        assert_eq!(params.max_tokens, 2048);
+    }
+
+    // ── Transactional entity swap ──────────────────────────────────────────────
+
+    fn setup_entities_db() -> Connection {
+        let conn = Connection::open_in_memory().expect("in-memory db should open");
+        conn.execute_batch(
+            r#"
+            CREATE TABLE entities (
+              id TEXT PRIMARY KEY,
+              item_id TEXT NOT NULL,
+              asset_id TEXT,
+              entity_type TEXT NOT NULL,
+              value TEXT NOT NULL,
+              start_offset INTEGER NOT NULL,
+              end_offset INTEGER NOT NULL,
+              confidence REAL NOT NULL,
+              source TEXT,
+              model_name TEXT,
+              created_at INTEGER NOT NULL
+            );
+            "#,
+        )
+        .expect("entities schema should be created");
+        conn
+    }
+
+    fn llm_entity(value: &str) -> Entity {
+        Entity {
+            entity_type: EntityType::Person,
+            value: value.to_string(),
+            start_offset: 0,
+            end_offset: 0,
+            confidence: 0.95,
+            source: EntitySource::Llm,
+            model_name: Some("test-model".to_string()),
+        }
+    }
+
+    fn seed_entity(
+        conn: &Connection,
+        item_id: &str,
+        asset_id: Option<&str>,
+        value: &str,
+        source: &str,
+    ) {
+        conn.execute(
+            "INSERT INTO entities(id, item_id, asset_id, entity_type, value, start_offset, end_offset, confidence, source, model_name, created_at)
+             VALUES (?1, ?2, ?3, 'person', ?4, 0, 0, 0.9, ?5, NULL, 1)",
+            params![uuid::Uuid::new_v4().to_string(), item_id, asset_id, value, source],
+        )
+        .expect("seed entity should insert");
+    }
+
+    fn entity_values(conn: &Connection, item_id: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT value FROM entities WHERE item_id = ?1 ORDER BY value")
+            .expect("query should prepare");
+        stmt.query_map(params![item_id], |row| row.get::<_, String>(0))
+            .expect("query should run")
+            .collect::<Result<Vec<_>, _>>()
+            .expect("rows should collect")
+    }
+
+    #[test]
+    fn replace_automatic_entities_for_item_swaps_and_keeps_manual_rows() {
+        let mut conn = setup_entities_db();
+        seed_entity(&conn, "item-1", None, "Vieja", "llm");
+        seed_entity(&conn, "item-1", None, "Manual", "manual");
+
+        replace_automatic_entities_for_item(&mut conn, "item-1", &[llm_entity("Nueva")])
+            .expect("swap should succeed");
+
+        assert_eq!(entity_values(&conn, "item-1"), vec!["Manual", "Nueva"]);
+    }
+
+    #[test]
+    fn replace_automatic_entities_for_item_failure_leaves_existing_rows_untouched() {
+        let mut conn = setup_entities_db();
+        conn.execute_batch(
+            "CREATE UNIQUE INDEX idx_entities_unique ON entities(item_id, value, entity_type);",
+        )
+        .expect("unique index should be created");
+        seed_entity(&conn, "item-1", None, "Vieja", "llm");
+
+        let result = replace_automatic_entities_for_item(
+            &mut conn,
+            "item-1",
+            &[llm_entity("Duplicada"), llm_entity("Duplicada")],
+        );
+
+        assert!(result.is_err(), "duplicate insert should fail the swap");
+        assert_eq!(
+            entity_values(&conn, "item-1"),
+            vec!["Vieja"],
+            "a failed swap must roll back and keep the previous entities"
+        );
+    }
+
+    #[test]
+    fn replace_automatic_entities_for_asset_only_touches_that_asset() {
+        let mut conn = setup_entities_db();
+        seed_entity(&conn, "item-1", Some("asset-a"), "ViejaA", "llm");
+        seed_entity(&conn, "item-1", Some("asset-b"), "ViejaB", "llm");
+        seed_entity(&conn, "item-1", Some("asset-a"), "ManualA", "manual");
+
+        replace_automatic_entities_for_asset(
+            &mut conn,
+            "item-1",
+            "asset-a",
+            &[llm_entity("NuevaA")],
+        )
+        .expect("asset swap should succeed");
+
+        assert_eq!(
+            entity_values(&conn, "item-1"),
+            vec!["ManualA", "NuevaA", "ViejaB"]
+        );
     }
 }

@@ -2,6 +2,7 @@ import { render, screen, fireEvent, waitFor, within } from '@testing-library/sve
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import ItemView from './ItemView.svelte'
 import { navigation } from '$lib/navigation'
+import { setupKeyboardShortcuts } from '$lib/keyboard'
 
 const {
   nlpEventHandlers,
@@ -781,6 +782,58 @@ describe('ItemView asset-level embedding and similarity', () => {
 
     expect(screen.queryByRole('button', { name: /EMBED/i })).not.toBeInTheDocument()
     expect(embedAssetMock).not.toHaveBeenCalled()
+  })
+
+  it('shows done · 0 on the NER chip when the completed run persisted zero entities', async () => {
+    await openAnalysis(
+      createStore({
+        assetsRows: [
+          {
+            id: 'asset-ner-1',
+            itemId: 'item-1',
+            path: 'docs/acta-1.pdf',
+            type: 'pdf',
+            createdAt: 1,
+          },
+        ],
+      })
+    )
+
+    nlpEventHandlers.get('nlp:complete')?.({
+      payload: { item_id: 'item-1', asset_id: 'asset-ner-1', job: 'ner', entity_count: 0 },
+    })
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('button', { name: /^NER/ })).getByText('done · 0')
+      ).toBeInTheDocument()
+    })
+  })
+
+  it('shows a plain done NER chip when the completed run persisted entities', async () => {
+    await openAnalysis(
+      createStore({
+        assetsRows: [
+          {
+            id: 'asset-ner-2',
+            itemId: 'item-1',
+            path: 'docs/acta-2.pdf',
+            type: 'pdf',
+            createdAt: 1,
+          },
+        ],
+      })
+    )
+
+    nlpEventHandlers.get('nlp:complete')?.({
+      payload: { item_id: 'item-1', asset_id: 'asset-ner-2', job: 'ner', entity_count: 12 },
+    })
+
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('button', { name: /^NER/ })).getByText('done')
+      ).toBeInTheDocument()
+    })
   })
 
   it('shows metadata labels and existing metadata values in the metadata tab', async () => {
@@ -2769,5 +2822,155 @@ describe('ItemView processing labels by asset type', () => {
     expect(embedAssetMock).not.toHaveBeenCalled()
     expect(indexFtsMock).not.toHaveBeenCalled()
     expect(extractEntitiesForAssetMock).not.toHaveBeenCalled()
+  })
+})
+
+describe('ItemView right panel tab persistence', () => {
+  const imageAsset = {
+    id: 'asset-image-1',
+    itemId: 'item-1',
+    path: 'docs/photo-a.jpg',
+    type: 'image' as const,
+    createdAt: 1,
+  }
+
+  function mockRotateInvoke() {
+    invokeMock.mockImplementation(async (command: string, args?: unknown) => {
+      if (command === 'rotate_image_degrees') {
+        const path = (args as { path: string }).path
+        return {
+          path: path === 'docs/photo-a.jpg' ? 'docs/photo-a_v2.png' : 'docs/photo-a_v3.png',
+          width: 206,
+          height: 111,
+          format_changed: true,
+          previous_path: path,
+        }
+      }
+      if (command === 'llm_get_results') return []
+      if (command === 'llm_get_result') return null
+      if (command === 'llm_is_available') return true
+      if (command === 'db_select') return []
+      return null
+    })
+  }
+
+  it('keeps the active right panel tab after an image edit of the same asset', async () => {
+    storeRef.current = createStore({ assetsRows: [imageAsset] })
+    mockRotateInvoke()
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    await screen.findByTestId('mock-document-viewer')
+    await fireEvent.click(await screen.findByRole('tab', { name: /^Texto$/ }))
+    expect(screen.getByRole('tab', { name: /^Texto$/ })).toHaveAttribute('aria-selected', 'true')
+
+    await fireEvent.click(screen.getByRole('button', { name: /report image dimensions/i }))
+    await fireEvent.click(screen.getByRole('button', { name: /commit fine rotation/i }))
+
+    await waitFor(() => {
+      expect(storeRef.current.assets.updatePath).toHaveBeenCalledWith(
+        'asset-image-1',
+        'docs/photo-a_v2.png'
+      )
+    })
+
+    // The asset object was replaced (new versioned path) but its ID did not
+    // change, so the right panel tab must NOT reset to notes.
+    expect(screen.getByRole('tab', { name: /^Texto$/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: 'Notas' })).toHaveAttribute('aria-selected', 'false')
+  })
+
+  it('still resets the right panel tab to notes when switching to a different asset', async () => {
+    storeRef.current = createStore({
+      assetsRows: [
+        imageAsset,
+        {
+          id: 'asset-image-2',
+          itemId: 'item-1',
+          path: 'docs/photo-b.jpg',
+          type: 'image' as const,
+          createdAt: 2,
+        },
+      ],
+    })
+
+    render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+
+    expect(await screen.findByText(/1\s*\/\s*2/)).toBeInTheDocument()
+    await fireEvent.click(await screen.findByRole('tab', { name: /^Texto$/ }))
+    expect(screen.getByRole('tab', { name: /^Texto$/ })).toHaveAttribute('aria-selected', 'true')
+
+    await fireEvent.click(screen.getByRole('button', { name: /Página siguiente/i }))
+
+    await waitFor(() => {
+      expect(screen.getByRole('tab', { name: 'Notas' })).toHaveAttribute('aria-selected', 'true')
+    })
+  })
+})
+
+describe('ItemView Escape behavior', () => {
+  const imageAsset = {
+    id: 'asset-image-1',
+    itemId: 'item-1',
+    path: 'docs/photo-a.jpg',
+    type: 'image' as const,
+    createdAt: 1,
+  }
+
+  function resetNavigationToItem() {
+    navigation.resetToPath([
+      { name: 'collections' },
+      { name: 'collection', id: 'col-1', collectionName: 'Colección 1' },
+      {
+        name: 'item',
+        collectionId: 'col-1',
+        collectionName: 'Colección 1',
+        itemId: 'item-1',
+        itemTitle: 'Acta histórica',
+      },
+    ])
+  }
+
+  it('Escape cancels an active crop mode and only navigates back once idle', async () => {
+    storeRef.current = createStore({ assetsRows: [imageAsset] })
+    resetNavigationToItem()
+    const cleanupKeyboard = setupKeyboardShortcuts()
+
+    try {
+      render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+      await screen.findByTestId('mock-document-viewer')
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Crop tool' }))
+      expect(screen.getByTestId('viewer-edit-tool')).toHaveTextContent('crop')
+
+      await fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.getByTestId('viewer-edit-tool')).toHaveTextContent('none')
+      expect(navigation.current.name).toBe('item')
+
+      await fireEvent.keyDown(window, { key: 'Escape' })
+      expect(navigation.current.name).toBe('collection')
+    } finally {
+      cleanupKeyboard()
+    }
+  })
+
+  it('Escape cancels annotation drawing mode without navigating', async () => {
+    storeRef.current = createStore({ assetsRows: [imageAsset] })
+    resetNavigationToItem()
+    const cleanupKeyboard = setupKeyboardShortcuts()
+
+    try {
+      render(ItemView, { itemId: 'item-1', collectionId: 'col-1' })
+      await screen.findByTestId('mock-document-viewer')
+
+      await fireEvent.click(screen.getByRole('button', { name: 'Rectangle tool' }))
+      expect(screen.getByTestId('viewer-annotation-tool')).toHaveTextContent('rectangle')
+
+      await fireEvent.keyDown(window, { key: 'Escape' })
+      expect(screen.getByTestId('viewer-annotation-tool')).toHaveTextContent('select')
+      expect(navigation.current.name).toBe('item')
+    } finally {
+      cleanupKeyboard()
+    }
   })
 })

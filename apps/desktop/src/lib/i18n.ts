@@ -69,6 +69,11 @@ const es = {
   'settings.saved': 'Configuración guardada. Ya podés usar esta preferencia en toda la app.',
   'settings.loadError': 'No se pudo cargar la configuración guardada: {error}',
   'settings.retryLoad': 'Reintentar carga',
+  'settings.discardTitle': 'Descartar cambios',
+  'settings.discardMessage':
+    'Tenés cambios sin guardar en la configuración. ¿Querés descartarlos y volver?',
+  'settings.discardConfirm': 'Descartar',
+  'settings.discardCancel': 'Seguir editando',
   'settings.languageTitle': 'Idioma de la interfaz',
   'settings.languageDescription':
     'Elegí el idioma de la UI. El contenido del usuario no se traduce.',
@@ -247,6 +252,9 @@ const es = {
   'collection.importSummary.skipped': 'Omitidos',
   'collection.importSummary.errors': 'Errores',
   'collection.importSummary.skippedFiles': 'Omitidos: {files}',
+  'collection.importSummary.partialFailure':
+    'Algunos archivos no se pudieron importar. Revisá el detalle antes de continuar.',
+  'collection.importSummary.dismiss': 'Cerrar resumen',
   'item.loading': 'Cargando...',
   'item.assetPanel': 'Panel del asset',
   'item.documentTab': 'Documento',
@@ -686,6 +694,10 @@ const en: Record<keyof typeof es | ExtraI18nKey, string> = {
   'settings.saved': 'Settings saved. You can now use this preference across the app.',
   'settings.loadError': 'Could not load saved settings: {error}',
   'settings.retryLoad': 'Retry loading',
+  'settings.discardTitle': 'Discard changes',
+  'settings.discardMessage': 'You have unsaved settings changes. Discard them and go back?',
+  'settings.discardConfirm': 'Discard',
+  'settings.discardCancel': 'Keep editing',
   'settings.languageTitle': 'Interface language',
   'settings.languageDescription': 'Choose the UI language. User content is never translated.',
   'settings.languageLabel': 'Language',
@@ -864,6 +876,9 @@ const en: Record<keyof typeof es | ExtraI18nKey, string> = {
   'collection.importSummary.skipped': 'Skipped',
   'collection.importSummary.errors': 'Errors',
   'collection.importSummary.skippedFiles': 'Skipped: {files}',
+  'collection.importSummary.partialFailure':
+    'Some files could not be imported. Review the details before continuing.',
+  'collection.importSummary.dismiss': 'Dismiss summary',
   'item.loading': 'Loading...',
   'item.assetPanel': 'Asset panel',
   'item.documentTab': 'Document',

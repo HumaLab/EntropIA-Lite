@@ -1,5 +1,5 @@
 use pdfium_render::prelude::{
-    PdfPageIndex, PdfPageObjectCommon, PdfPageObjectType, PdfPageObjectsCommon,
+    PdfPageIndex, PdfPageObjectCommon, PdfPageObjectType, PdfPageObjectsCommon, Pdfium,
 };
 use serde::Serialize;
 
@@ -39,8 +39,20 @@ pub struct DocumentProfile {
     pub should_render_as_images: bool,
 }
 
+/// Profile every page of a PDF document.
+///
+/// All Pdfium work serializes through the dedicated render thread owned by
+/// `super::pdf`; this blocking wrapper keeps the original public signature.
 pub fn profile_pdf_bytes(bytes: &[u8]) -> Result<DocumentProfile, String> {
-    let pdfium = super::pdf::get_pdfium()?;
+    super::pdf::profile_pdf_via_actor(bytes)
+}
+
+/// Build the per-page profile with the already-bound Pdfium engine. Called by
+/// the render actor only — never bind Pdfium outside that thread.
+pub(super) fn profile_pdf_with_engine(
+    pdfium: &Pdfium,
+    bytes: &[u8],
+) -> Result<DocumentProfile, String> {
     let document = pdfium
         .load_pdf_from_byte_slice(bytes, None)
         .map_err(|e| format!("Failed to load PDF for profile: {e}"))?;

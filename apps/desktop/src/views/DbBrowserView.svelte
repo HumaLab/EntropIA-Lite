@@ -537,7 +537,7 @@
               </tr>
             </thead>
             <tbody>
-              {#each rows as row}
+              {#each rows as row, rowIndex (rowIndex)}
                 <tr>
                   {#each columns as column (column.name)}
                     {@const cell = resolveCellContent(row[column.name])}
@@ -621,7 +621,6 @@
     {@const copyExpandedLabel = translate('dbBrowser.copyExpandedAria', {
       column: activeExpandedCell.columnName,
     })}
-    <!-- svelte-ignore a11y_click_events_have_key_events -->
     <div class="modal-overlay" onclick={closeExpandedCell} role="presentation">
       <div
         class="modal db-browser-modal"

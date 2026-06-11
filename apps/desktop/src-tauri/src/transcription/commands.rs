@@ -2,7 +2,8 @@
 use super::{TranscriptionJob, TranscriptionQueue};
 use crate::db::state::AppDbState;
 use crate::nlp::NlpQueue;
-use tauri::{AppHandle, State};
+use std::path::Path;
+use tauri::{AppHandle, Manager, State};
 
 #[tauri::command]
 pub async fn test_assemblyai_connection(
@@ -168,7 +169,27 @@ pub async fn transcribe_dictation(
     .await
     .map_err(|e| format!("Dictation task failed: {e}"))?;
 
-    let cleanup_result = super::cleanup_temp_audio_file(&audio_path);
+    // Only delete the recording when it lives inside the app data dir or the
+    // OS temp dir — never delete arbitrary user files from an IPC-supplied
+    // path. An out-of-scope path skips cleanup with a log instead of erroring
+    // the whole transcription.
+    let app_data_dir = app_handle.path().app_data_dir().ok();
+    let cleanup_result = if is_safe_dictation_cleanup_path(
+        &audio_path,
+        app_data_dir.as_deref(),
+        &std::env::temp_dir(),
+    ) {
+        super::cleanup_temp_audio_file(&audio_path)
+    } else {
+        crate::app_logs::warn(
+            &app_handle,
+            "transcription",
+            format!(
+                "Limpieza temporal omitida: la ruta está fuera de los directorios permitidos: {audio_path}"
+            ),
+        );
+        Ok(())
+    };
 
     match (transcription_result, cleanup_result) {
         (Ok(result), Ok(())) => Ok(result.text.trim().to_string()),
@@ -201,5 +222,69 @@ pub async fn transcribe_dictation(
                 "{error}\nTemporary file cleanup failed: {cleanup_error}"
             ))
         }
+    }
+}
+
+/// True when the dictation audio path resolves inside the app data dir or the
+/// OS temp dir — the only locations the frontend writes dictation recordings
+/// to, and therefore the only locations this command is allowed to delete from.
+fn is_safe_dictation_cleanup_path(
+    audio_path: &str,
+    app_data_dir: Option<&Path>,
+    temp_dir: &Path,
+) -> bool {
+    let within = |root: &Path| crate::path_utils::ensure_within_dir(audio_path, root).is_ok();
+    app_data_dir.is_some_and(within) || within(temp_dir)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn dictation_cleanup_allows_app_data_and_temp_dir_paths() {
+        let app_data = tempfile::tempdir().expect("tempdir app data");
+        let temp = tempfile::tempdir().expect("tempdir temp");
+        let app_data_file = app_data.path().join("dictation.wav");
+        let temp_file = temp.path().join("dictation.wav");
+        std::fs::write(&app_data_file, b"audio").expect("write app data file");
+        std::fs::write(&temp_file, b"audio").expect("write temp file");
+
+        assert!(is_safe_dictation_cleanup_path(
+            &app_data_file.to_string_lossy(),
+            Some(app_data.path()),
+            temp.path(),
+        ));
+        assert!(is_safe_dictation_cleanup_path(
+            &temp_file.to_string_lossy(),
+            Some(app_data.path()),
+            temp.path(),
+        ));
+        // Missing app data dir still allows temp-dir paths.
+        assert!(is_safe_dictation_cleanup_path(
+            &temp_file.to_string_lossy(),
+            None,
+            temp.path(),
+        ));
+    }
+
+    #[test]
+    fn dictation_cleanup_rejects_paths_outside_allowed_dirs() {
+        let app_data = tempfile::tempdir().expect("tempdir app data");
+        let temp = tempfile::tempdir().expect("tempdir temp");
+        let outside = tempfile::tempdir().expect("tempdir outside");
+        let outside_file = outside.path().join("document.wav");
+        std::fs::write(&outside_file, b"audio").expect("write outside file");
+
+        assert!(!is_safe_dictation_cleanup_path(
+            &outside_file.to_string_lossy(),
+            Some(app_data.path()),
+            temp.path(),
+        ));
+        assert!(!is_safe_dictation_cleanup_path(
+            "",
+            Some(app_data.path()),
+            temp.path(),
+        ));
     }
 }

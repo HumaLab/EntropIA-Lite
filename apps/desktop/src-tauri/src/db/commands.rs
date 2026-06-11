@@ -522,10 +522,31 @@ fn validate_sql_execute(sql: &str) -> Result<(), String> {
     Ok(())
 }
 
+/// Validate a multi-statement batch per statement: split on `;`, normalize
+/// each statement, and check its LEADING keyword against the denylist used by
+/// the single-statement validators. Substring matching is intentionally
+/// avoided — a literal like `'please attach the file'` inside an INSERT must
+/// not be rejected, while real ATTACH/DETACH/VACUUM/PRAGMA statements stay
+/// blocked.
+///
+/// Limitation: the `;` split is NOT string-literal aware. A literal that
+/// itself contains a semicolon followed by a denylisted keyword (e.g.
+/// `'…;pragma …'`) is split mid-literal and the fragment after the `;` is
+/// checked as if it started a statement, rejecting the batch. This fails
+/// CLOSED — a legitimate batch may be falsely rejected, never the reverse.
+///
+/// Caller contract: batch callers must only interpolate semicolon-free
+/// escaped identifiers/values (today: UUIDs) into batch SQL, which keeps the
+/// false positive unreachable. Free-form user text must go through the
+/// parameterized single-statement commands instead.
 fn validate_sql_batch(sql: &str) -> Result<(), String> {
-    let normalized = normalize_sql(sql);
-    for forbidden in ["attach ", "detach ", "vacuum ", "pragma "] {
-        if normalized.contains(forbidden) {
+    for statement in sql.split(';') {
+        let normalized = normalize_sql(statement);
+        if normalized.is_empty() {
+            continue;
+        }
+        let leading_keyword = normalized.split(' ').next().unwrap_or("");
+        if matches!(leading_keyword, "attach" | "detach" | "vacuum" | "pragma") {
             return Err("Restricted SQL statement in db_execute_batch".to_string());
         }
     }
@@ -642,6 +663,48 @@ mod tests {
             response.rows[0]["name"],
             serde_json::Value::String("100% algodón".to_string())
         );
+    }
+
+    #[test]
+    fn validate_sql_batch_allows_denylist_words_inside_literals() {
+        // Substring false positives: denylist words inside string literals or
+        // identifiers must not block legitimate statements.
+        assert!(validate_sql_batch(
+            "INSERT INTO notes (id, content) VALUES ('n-1', 'please attach the file');"
+        )
+        .is_ok());
+        assert!(validate_sql_batch(
+            "UPDATE items SET title = 'vacuum cleaner manual' WHERE id = 'item-1';
+             DELETE FROM notes WHERE content LIKE '%pragma%';"
+        )
+        .is_ok());
+    }
+
+    #[test]
+    fn validate_sql_batch_blocks_restricted_leading_keywords() {
+        assert!(validate_sql_batch("ATTACH DATABASE 'evil.db' AS evil;").is_err());
+        assert!(validate_sql_batch("detach evil;").is_err());
+        assert!(validate_sql_batch("PRAGMA journal_mode=DELETE;").is_err());
+        assert!(validate_sql_batch("VACUUM").is_err());
+        // Restricted statements hidden after legitimate ones stay blocked.
+        assert!(validate_sql_batch(
+            "DELETE FROM notes WHERE id = 'n-1'; ATTACH DATABASE 'evil.db' AS evil;"
+        )
+        .is_err());
+        assert!(validate_sql_batch("DELETE FROM notes; \n  pragma temp_store = 2").is_err());
+    }
+
+    #[test]
+    fn validate_sql_batch_allows_multi_statement_dml() {
+        assert!(validate_sql_batch(
+            "BEGIN;
+             DELETE FROM assets WHERE item_id = 'item-1';
+             DELETE FROM items WHERE id = 'item-1';
+             COMMIT;"
+        )
+        .is_ok());
+        assert!(validate_sql_batch("").is_ok());
+        assert!(validate_sql_batch(";;").is_ok());
     }
 
     #[test]

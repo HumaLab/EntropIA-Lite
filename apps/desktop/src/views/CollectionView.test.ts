@@ -616,6 +616,113 @@ describe('CollectionView import flow', () => {
     })
   })
 
+  it('stays in the collection and shows dismissible per-file errors when an import partially fails', async () => {
+    const okPath = 'C:\\tmp\\photo.png'
+    const brokenPath = 'C:\\tmp\\broken.png'
+    fileImportRef.pickFiles.mockResolvedValue([okPath, brokenPath])
+    fileImportRef.classifyFiles.mockReturnValue({
+      classified: [
+        { sourcePath: okPath, name: 'photo.png', type: 'image' },
+        { sourcePath: brokenPath, name: 'broken.png', type: 'image' },
+      ],
+      rejected: [],
+    })
+    storeRef.current.items.create = vi
+      .fn()
+      .mockResolvedValueOnce({ id: 'item-ok' })
+      .mockResolvedValueOnce({ id: 'item-broken' })
+    fileImportRef.importSingleFile.mockImplementation(async (sourcePath: string) => {
+      if (sourcePath === brokenPath) throw new Error('disk full')
+      return {
+        originalName: 'photo.png',
+        originalPath: sourcePath,
+        destPath: 'C:\\app-data\\assets\\col-1\\item-ok\\photo.png',
+        type: 'image',
+        size: 123,
+        originalMetadata: {
+          originalName: 'photo.png',
+          originalPath: sourcePath,
+          importedAt: '2026-06-02T00:00:00.000Z',
+          sizeBytes: 123,
+        },
+      }
+    })
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Importar documento/ }))
+
+    await waitFor(() => {
+      expect(
+        screen.getByText(/importing broken\.png.*disk full/)
+      ).toBeInTheDocument()
+    })
+
+    // Both files were attempted; the failed item was cleaned up.
+    expect(fileImportRef.importSingleFile).toHaveBeenCalledTimes(2)
+    expect(storeRef.current.items.delete).toHaveBeenCalledWith('item-broken')
+
+    // Partial failure → no auto-navigation, summary stays visible.
+    expect(navigationRef.navigate).not.toHaveBeenCalled()
+    expect(
+      screen.getByText('Algunos archivos no se pudieron importar. Revisá el detalle antes de continuar.')
+    ).toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Cerrar resumen' }))
+
+    await waitFor(() => {
+      expect(screen.queryByRole('region', { name: 'Resumen de importación' })).not.toBeInTheDocument()
+    })
+  })
+
+  it('keeps importing remaining files and lists every per-file error', async () => {
+    fileImportRef.pickFiles.mockResolvedValue(['C:\\tmp\\a.png', 'C:\\tmp\\b.png', 'C:\\tmp\\c.png'])
+    fileImportRef.classifyFiles.mockReturnValue({
+      classified: [
+        { sourcePath: 'C:\\tmp\\a.png', name: 'a.png', type: 'image' },
+        { sourcePath: 'C:\\tmp\\b.png', name: 'b.png', type: 'image' },
+        { sourcePath: 'C:\\tmp\\c.png', name: 'c.png', type: 'image' },
+      ],
+      rejected: [],
+    })
+    let createCount = 0
+    storeRef.current.items.create = vi.fn().mockImplementation(async () => ({
+      id: `item-${++createCount}`,
+    }))
+    fileImportRef.importSingleFile.mockImplementation(async (sourcePath: string) => {
+      if (sourcePath.endsWith('a.png')) throw new Error('copy failed a')
+      if (sourcePath.endsWith('b.png')) throw new Error('copy failed b')
+      return {
+        originalName: 'c.png',
+        originalPath: sourcePath,
+        destPath: 'C:\\app-data\\assets\\col-1\\item-3\\c.png',
+        type: 'image',
+        size: 1,
+        originalMetadata: {
+          originalName: 'c.png',
+          originalPath: sourcePath,
+          importedAt: '2026-06-02T00:00:00.000Z',
+          sizeBytes: 1,
+        },
+      }
+    })
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: /Importar documento/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText(/importing a\.png.*copy failed a/)).toBeInTheDocument()
+      expect(screen.getByText(/importing b\.png.*copy failed b/)).toBeInTheDocument()
+    })
+
+    // The third file still imported despite the earlier failures.
+    expect(storeRef.current.assets.create).toHaveBeenCalledWith(
+      expect.objectContaining({ itemId: 'item-3' })
+    )
+    expect(navigationRef.navigate).not.toHaveBeenCalled()
+  })
+
   it('imports dropped paths through the same item/asset workflow', async () => {
     const sourcePath = 'C:\\tmp\\photo.png'
     mockImageImport(sourcePath)
@@ -819,6 +926,53 @@ describe('CollectionView asset deletion', () => {
       expect(deleteAssetFile).toHaveBeenCalled()
       // findById should NOT be called — path comes from cache
       expect(storeRef.current.assets.findById).not.toHaveBeenCalled()
+    })
+  })
+
+  it('routes image asset deletion through delete_asset_files to remove versioned siblings', async () => {
+    const { invoke } = await import('@tauri-apps/api/core')
+    const { deleteAssetFile } = await import('$lib/file-import')
+    vi.mocked(invoke).mockClear()
+    vi.mocked(deleteAssetFile).mockClear()
+
+    const imageAsset: AssetRow = {
+      id: 'asset-img-1',
+      itemId: 'item-1',
+      path: '/app-data/assets/col-1/item-1/uuid_foto_v3.png',
+      type: 'image',
+      size: 2048,
+      createdAt: Date.now(),
+    }
+    storeRef.current = createStore(
+      [
+        {
+          id: 'item-1',
+          title: 'Acta',
+          createdAt: Date.now(),
+          updatedAt: Date.now(),
+          collectionId: 'col-1',
+          metadata: null,
+        },
+      ],
+      [imageAsset]
+    )
+
+    await renderAndWaitForItems()
+
+    const deleteBtn = screen.getByRole('button', { name: 'Delete Acta' })
+    await fireEvent.click(deleteBtn)
+
+    const confirmBtn = screen.getByRole('button', { name: 'Eliminar asset' })
+    await fireEvent.click(confirmBtn)
+
+    await waitFor(() => {
+      // Image files go through the backend GC so edited versions
+      // (foto_v2.png, foto_v3.png, …) are deleted together.
+      expect(invoke).toHaveBeenCalledWith('delete_asset_files', { assetPath: imageAsset.path })
+      // The plain single-file deletion must NOT be used for images.
+      expect(deleteAssetFile).not.toHaveBeenCalled()
+      // DB cascade is preserved: last asset → entire item removed.
+      expect(storeRef.current.items.deleteWithCascade).toHaveBeenCalledWith('item-1')
     })
   })
 })

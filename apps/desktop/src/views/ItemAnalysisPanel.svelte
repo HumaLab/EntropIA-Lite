@@ -110,7 +110,7 @@
           onclick={onExtractEntities}
         >
           {translate('item.nerAction')}
-          <StatusBadge variant={getJobStatusBadgeVariant(nlpState.ner)} size="sm" class="nlp-badge">{nlpState.ner}</StatusBadge>
+          <StatusBadge variant={getJobStatusBadgeVariant(nlpState.ner)} size="sm" class="nlp-badge">{nlpState.ner === 'done' && nlpState.entityCount === 0 ? `${nlpState.ner} · 0` : nlpState.ner}</StatusBadge>
         </button>
 
         <button
@@ -170,7 +170,7 @@
                 onNewEntityTypeChange(event.currentTarget.value as EditableEntityType)
               }}
             >
-              {#each EDITABLE_ENTITY_TYPES as type}
+              {#each EDITABLE_ENTITY_TYPES as type (type)}
                 <option value={type}>{type.toUpperCase()}</option>
               {/each}
             </select>

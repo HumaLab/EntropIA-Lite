@@ -4,10 +4,11 @@
 //! browser cache invalidation and support undo. The previous file is
 //! kept on disk so undo can restore it by pointing the asset path back.
 
+use crate::path_utils::{ensure_within_dir, validate_existing_file};
 use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, GenericImageView, ImageBuffer, Pixel, Rgb, Rgba, RgbaImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// Result of an image edit operation. Returned to the frontend so it can
 /// update asset paths and dimensions, and maintain an undo history.
@@ -70,6 +71,24 @@ fn next_version_path(path: &str, force_extension: Option<&str>) -> String {
     }
 }
 
+/// Resolve the app data directory used to scope-check asset paths.
+fn resolve_app_data_dir(app_handle: &tauri::AppHandle) -> Result<PathBuf, String> {
+    use tauri::Manager;
+    app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {e}"))
+}
+
+/// Validate an image-edit source path at the IPC boundary: it must be an
+/// existing file inside the app data directory (imported assets are always
+/// copied under `{app_data_dir}/assets/…` by the frontend import flow).
+fn validate_source_image_path(path: &str, app_data_dir: &Path) -> Result<(), String> {
+    let canonical = validate_existing_file(path)?;
+    ensure_within_dir(&canonical, app_data_dir)?;
+    Ok(())
+}
+
 /// JPEG quality used when re-encoding edited images. `DynamicImage::save`
 /// uses the image crate's default of 75, which compounds visible generational
 /// loss when edits are chained (each edit re-encodes the previous output).
@@ -101,7 +120,10 @@ pub async fn crop_image(
     y: u32,
     width: u32,
     height: u32,
+    app_handle: tauri::AppHandle,
 ) -> Result<ImageEditResult, String> {
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    validate_source_image_path(&path, &app_data_dir)?;
     tokio::task::spawn_blocking(move || crop_image_file(path, x, y, width, height))
         .await
         .map_err(|e| format!("Image crop task panicked: {e}"))?
@@ -150,7 +172,13 @@ fn crop_image_file(
 /// - `"left"` = 90° counter-clockwise (270° CW)
 /// - `"right"` = 90° clockwise
 #[tauri::command]
-pub async fn rotate_image(path: String, direction: String) -> Result<ImageEditResult, String> {
+pub async fn rotate_image(
+    path: String,
+    direction: String,
+    app_handle: tauri::AppHandle,
+) -> Result<ImageEditResult, String> {
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    validate_source_image_path(&path, &app_data_dir)?;
     tokio::task::spawn_blocking(move || rotate_image_file(path, direction))
         .await
         .map_err(|e| format!("Image rotation task panicked: {e}"))?
@@ -187,7 +215,13 @@ fn rotate_image_file(path: String, direction: String) -> Result<ImageEditResult,
 /// Saves the result as a NEW PNG versioned file with an expanded transparent
 /// canvas so corners are not clipped by the rotation.
 #[tauri::command]
-pub async fn rotate_image_degrees(path: String, degrees: f32) -> Result<ImageEditResult, String> {
+pub async fn rotate_image_degrees(
+    path: String,
+    degrees: f32,
+    app_handle: tauri::AppHandle,
+) -> Result<ImageEditResult, String> {
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    validate_source_image_path(&path, &app_data_dir)?;
     tokio::task::spawn_blocking(move || rotate_image_degrees_file(path, degrees))
         .await
         .map_err(|e| format!("Fine image rotation task panicked: {e}"))?
@@ -275,7 +309,10 @@ pub async fn erase_region(
     width: u32,
     height: u32,
     fill: String,
+    app_handle: tauri::AppHandle,
 ) -> Result<ImageEditResult, String> {
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    validate_source_image_path(&path, &app_data_dir)?;
     tokio::task::spawn_blocking(move || erase_region_file(path, x, y, width, height, fill))
         .await
         .map_err(|e| format!("Image erase task panicked: {e}"))?
@@ -364,6 +401,139 @@ fn erase_region_file(
         format_changed: needs_conversion,
         previous_path: path,
     })
+}
+
+/// Delete an asset file AND its versioned edit siblings.
+///
+/// Image edits always write a NEW versioned file (`photo.jpg` → `photo_v2.jpg`
+/// → `photo_v3.png` …) and keep the previous versions on disk for undo, so
+/// deleting only the asset's current file leaks the older versions forever.
+///
+/// Conservative family match — only files in the same directory whose name
+/// matches exactly `^{base}(_v\d+)?\.{image-ext}$`, where `base` is the given
+/// file's stem with any `_vN` suffix stripped and `{image-ext}` is ANY known
+/// raster image extension ([`ASSET_IMAGE_EXTENSIONS`]). Matching every image
+/// extension — not just the current file's — is required because
+/// format-converting edits change the extension across versions (a fine
+/// rotation turns `photo.jpg` into `photo_v2.png`, and the DB then points at
+/// the `.png`). `photo_final.png` is NOT part of the `photo` family.
+///
+/// Returns the number of files deleted. The given file may already be gone
+/// (its siblings are still cleaned up); a missing directory deletes nothing.
+#[tauri::command]
+pub async fn delete_asset_files(
+    asset_path: String,
+    app_handle: tauri::AppHandle,
+) -> Result<u32, String> {
+    let app_data_dir = resolve_app_data_dir(&app_handle)?;
+    tokio::task::spawn_blocking(move || delete_asset_file_family(&asset_path, &app_data_dir))
+        .await
+        .map_err(|e| format!("Asset deletion task panicked: {e}"))?
+}
+
+/// Strip a trailing `_v{digits}` version suffix from a file stem.
+/// Mirrors the suffix produced by [`next_version_path`].
+fn strip_version_suffix(stem: &str) -> &str {
+    if let Some(idx) = stem.rfind("_v") {
+        let suffix = &stem[idx + 2..];
+        if !suffix.is_empty() && suffix.bytes().all(|b| b.is_ascii_digit()) {
+            return &stem[..idx];
+        }
+    }
+    stem
+}
+
+/// Raster image extensions the app can ingest (frontend import flow, see
+/// `SUPPORTED_IMAGES` in `apps/desktop/src/lib/file-import.ts`) or produce
+/// via the `image` crate. Used to match an asset's whole version family,
+/// whatever format each version was saved in.
+const ASSET_IMAGE_EXTENSIONS: &[&str] =
+    &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff", "gif"];
+
+/// True when `file_name` matches exactly `^{base}(_v\d+)?\.{image-ext}$`,
+/// where `{image-ext}` is any extension in [`ASSET_IMAGE_EXTENSIONS`].
+/// Extensions compare case-insensitively; stems compare exactly so families
+/// with shared prefixes (`photo` vs `photo_final`) never overlap. The match
+/// deliberately spans ALL known image extensions: format-converting edits
+/// (e.g. fine rotation forces PNG output) leave older versions on disk with
+/// a different extension than the asset's current file.
+fn file_belongs_to_asset_family(file_name: &str, base: &str) -> bool {
+    let candidate = Path::new(file_name);
+    let Some(stem) = candidate.file_stem().and_then(|s| s.to_str()) else {
+        return false;
+    };
+    let Some(ext) = candidate.extension().and_then(|e| e.to_str()) else {
+        return false;
+    };
+
+    if !ASSET_IMAGE_EXTENSIONS
+        .iter()
+        .any(|known| ext.eq_ignore_ascii_case(known))
+    {
+        return false;
+    }
+
+    if stem == base {
+        return true;
+    }
+
+    let Some(version) = stem
+        .strip_prefix(base)
+        .and_then(|rest| rest.strip_prefix("_v"))
+    else {
+        return false;
+    };
+    !version.is_empty() && version.bytes().all(|b| b.is_ascii_digit())
+}
+
+fn delete_asset_file_family(asset_path: &str, app_data_dir: &Path) -> Result<u32, String> {
+    if asset_path.trim().is_empty() {
+        return Err("Asset path must not be empty".to_string());
+    }
+
+    let canonical = ensure_within_dir(asset_path, app_data_dir)?;
+    if canonical.exists() && !canonical.is_file() {
+        return Err(format!("Asset path is not a file: {asset_path}"));
+    }
+
+    let Some(parent) = canonical.parent() else {
+        return Err(format!("Asset path has no parent directory: {asset_path}"));
+    };
+    let stem = canonical
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| format!("Asset path has no file name: {asset_path}"))?;
+    let base = strip_version_suffix(stem);
+
+    if !parent.is_dir() {
+        return Ok(0);
+    }
+
+    let mut deleted = 0u32;
+    for entry in
+        std::fs::read_dir(parent).map_err(|e| format!("Failed to read asset directory: {e}"))?
+    {
+        let entry = entry.map_err(|e| format!("Failed to read asset directory entry: {e}"))?;
+        let entry_path = entry.path();
+        if !entry_path.is_file() {
+            continue;
+        }
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        if file_belongs_to_asset_family(file_name, base) {
+            std::fs::remove_file(&entry_path).map_err(|e| {
+                format!(
+                    "Failed to delete asset file '{}': {e}",
+                    entry_path.display()
+                )
+            })?;
+            deleted += 1;
+        }
+    }
+
+    Ok(deleted)
 }
 
 #[cfg(test)]
@@ -486,5 +656,190 @@ mod tests {
         assert!(result.path.ends_with("sample_v2.png"));
         let erased = image::open(&result.path).expect("open erased");
         assert_eq!(erased.get_pixel(1, 1)[3], 0);
+    }
+
+    #[test]
+    fn validate_source_image_path_accepts_files_inside_app_data_dir() {
+        let app_data = tempfile::tempdir().expect("tempdir");
+        let item_dir = app_data.path().join("assets").join("col-1").join("item-1");
+        std::fs::create_dir_all(&item_dir).expect("create item dir");
+        let file_path = item_dir.join("photo.png");
+        std::fs::write(&file_path, b"data").expect("write file");
+
+        assert!(validate_source_image_path(&file_path.to_string_lossy(), app_data.path()).is_ok());
+    }
+
+    #[test]
+    fn validate_source_image_path_rejects_missing_outside_and_directories() {
+        let app_data = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("tempdir outside");
+        let outside_file = outside.path().join("photo.png");
+        std::fs::write(&outside_file, b"data").expect("write outside file");
+        let inside_dir = app_data.path().join("assets");
+        std::fs::create_dir_all(&inside_dir).expect("create inside dir");
+
+        assert!(validate_source_image_path("", app_data.path()).is_err());
+        assert!(validate_source_image_path(
+            &app_data.path().join("missing.png").to_string_lossy(),
+            app_data.path()
+        )
+        .is_err());
+        assert!(
+            validate_source_image_path(&outside_file.to_string_lossy(), app_data.path()).is_err()
+        );
+        assert!(
+            validate_source_image_path(&inside_dir.to_string_lossy(), app_data.path()).is_err()
+        );
+    }
+
+    #[test]
+    fn strip_version_suffix_strips_only_numeric_versions() {
+        assert_eq!(strip_version_suffix("photo"), "photo");
+        assert_eq!(strip_version_suffix("photo_v2"), "photo");
+        assert_eq!(strip_version_suffix("photo_v12"), "photo");
+        assert_eq!(strip_version_suffix("photo_v2_final"), "photo_v2_final");
+        assert_eq!(strip_version_suffix("photo_vX"), "photo_vX");
+        assert_eq!(strip_version_suffix("photo_v"), "photo_v");
+    }
+
+    #[test]
+    fn file_belongs_to_asset_family_matches_exact_family_only() {
+        // Family members: base and _vN versions, in ANY known image format
+        // (format-converting edits change the extension across versions).
+        assert!(file_belongs_to_asset_family("photo.jpg", "photo"));
+        assert!(file_belongs_to_asset_family("photo_v2.jpg", "photo"));
+        assert!(file_belongs_to_asset_family("photo_v3.png", "photo"));
+        assert!(file_belongs_to_asset_family("photo_v10.PNG", "photo"));
+        assert!(file_belongs_to_asset_family("photo.webp", "photo"));
+        assert!(file_belongs_to_asset_family("photo.jpeg", "photo"));
+        assert!(file_belongs_to_asset_family("photo_v2.TIFF", "photo"));
+
+        // Near-miss prefixes must NOT match.
+        assert!(!file_belongs_to_asset_family("photo_final.png", "photo"));
+        assert!(!file_belongs_to_asset_family("photography.jpg", "photo"));
+        assert!(!file_belongs_to_asset_family("photo_v2x.jpg", "photo"));
+        assert!(!file_belongs_to_asset_family("photo_vX.jpg", "photo"));
+
+        // Non-image extensions must NOT match.
+        assert!(!file_belongs_to_asset_family("photo.pdf", "photo"));
+        assert!(!file_belongs_to_asset_family("photo.json", "photo"));
+        assert!(!file_belongs_to_asset_family("photo", "photo"));
+    }
+
+    #[test]
+    fn delete_asset_file_family_removes_versioned_siblings_only() {
+        let app_data = tempfile::tempdir().expect("tempdir");
+        let item_dir = app_data.path().join("assets").join("col-1").join("item-1");
+        std::fs::create_dir_all(&item_dir).expect("create item dir");
+
+        let family = [
+            "photo.jpg",
+            "photo_v2.jpg",
+            "photo_v3.jpg",
+            "photo_v4.png",
+            "photo.webp",
+        ];
+        let survivors = [
+            "photo_final.png",
+            "photography.jpg",
+            "photo_v2x.jpg",
+            "photo.pdf",
+            "other.png",
+        ];
+        for name in family.iter().chain(survivors.iter()) {
+            std::fs::write(item_dir.join(name), b"data").expect("write file");
+        }
+
+        let deleted = delete_asset_file_family(
+            &item_dir.join("photo_v3.jpg").to_string_lossy(),
+            app_data.path(),
+        )
+        .expect("delete family");
+
+        assert_eq!(deleted, family.len() as u32);
+        for name in family {
+            assert!(!item_dir.join(name).exists(), "{name} should be deleted");
+        }
+        for name in survivors {
+            assert!(item_dir.join(name).exists(), "{name} should survive");
+        }
+    }
+
+    #[test]
+    fn delete_asset_file_family_removes_original_format_after_conversion() {
+        // Regression: a fine rotation converts photo.jpg → photo_v2.png and
+        // the DB path moves to the .png. Deleting via the CURRENT .png path
+        // must still remove the original-format .jpg (the largest file).
+        let app_data = tempfile::tempdir().expect("tempdir");
+        let item_dir = app_data.path().join("assets").join("col-1").join("item-1");
+        std::fs::create_dir_all(&item_dir).expect("create item dir");
+        std::fs::write(item_dir.join("photo.jpg"), b"data").expect("write original");
+        std::fs::write(item_dir.join("photo_v2.png"), b"data").expect("write converted v2");
+        std::fs::write(item_dir.join("photo_final.png"), b"data").expect("write near miss");
+        std::fs::write(item_dir.join("photography.jpg"), b"data").expect("write near miss");
+
+        let deleted = delete_asset_file_family(
+            &item_dir.join("photo_v2.png").to_string_lossy(),
+            app_data.path(),
+        )
+        .expect("delete family");
+
+        assert_eq!(deleted, 2);
+        assert!(
+            !item_dir.join("photo.jpg").exists(),
+            "original-format file must not leak after a format-converting edit"
+        );
+        assert!(!item_dir.join("photo_v2.png").exists());
+        assert!(item_dir.join("photo_final.png").exists());
+        assert!(item_dir.join("photography.jpg").exists());
+    }
+
+    #[test]
+    fn delete_asset_file_family_cleans_siblings_when_given_file_is_gone() {
+        let app_data = tempfile::tempdir().expect("tempdir");
+        let item_dir = app_data.path().join("assets").join("col-1").join("item-1");
+        std::fs::create_dir_all(&item_dir).expect("create item dir");
+        std::fs::write(item_dir.join("scan.png"), b"data").expect("write base");
+        std::fs::write(item_dir.join("scan_v2.png"), b"data").expect("write v2");
+
+        // The DB-referenced version was already removed; siblings remain.
+        let deleted = delete_asset_file_family(
+            &item_dir.join("scan_v3.png").to_string_lossy(),
+            app_data.path(),
+        )
+        .expect("delete family");
+
+        assert_eq!(deleted, 2);
+        assert!(!item_dir.join("scan.png").exists());
+        assert!(!item_dir.join("scan_v2.png").exists());
+    }
+
+    #[test]
+    fn delete_asset_file_family_rejects_paths_outside_app_data_dir() {
+        let app_data = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("tempdir outside");
+        let outside_file = outside.path().join("photo.jpg");
+        std::fs::write(&outside_file, b"data").expect("write outside file");
+
+        let result = delete_asset_file_family(&outside_file.to_string_lossy(), app_data.path());
+
+        assert!(result.is_err());
+        assert!(outside_file.exists());
+    }
+
+    #[test]
+    fn delete_asset_file_family_rejects_empty_and_handles_missing_dir() {
+        let app_data = tempfile::tempdir().expect("tempdir");
+
+        assert!(delete_asset_file_family("", app_data.path()).is_err());
+
+        let missing = app_data
+            .path()
+            .join("assets")
+            .join("ghost")
+            .join("photo.jpg");
+        let deleted = delete_asset_file_family(&missing.to_string_lossy(), app_data.path())
+            .expect("missing dir should be a no-op");
+        assert_eq!(deleted, 0);
     }
 }

@@ -15,10 +15,22 @@ use base64::Engine;
 use glm_ocr::{GlmOcrLayoutDetail, GlmOcrResponse};
 use provider::LayoutCategory;
 use serde::Serialize;
+use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify, Semaphore};
 
 const OCRH_SETTING_GLM_OCR_API_KEY: &str = "glm_ocr_api_key";
+
+/// Maximum number of OCR jobs processed concurrently.
+///
+/// GLM-OCR jobs are network-bound (a multi-MB base64 upload followed by remote
+/// parsing), so overlapping a few requests hides most of the request latency.
+/// Three permits keep peak memory bounded — each in-flight job holds its file
+/// bytes plus a ~1.33x base64 copy — and stay polite to the upstream API.
+/// Pdfium work needs no permit here: it serializes through the dedicated
+/// render thread in `pdf.rs`.
+const MAX_CONCURRENT_OCR_JOBS: usize = 3;
 
 #[derive(Clone, Serialize)]
 pub struct OcrProgressPayload {
@@ -121,50 +133,156 @@ impl OcrQueue {
         mut receiver: mpsc::Receiver<OcrJob>,
         app_handle: AppHandle,
     ) {
-        std::thread::Builder::new()
-            .name("ocr-worker".to_string())
-            .stack_size(8 * 1024 * 1024)
-            .spawn(move || {
-                pdf::init_pdfium_path(&app_handle);
-                let mut conn = match rusqlite::Connection::open(&db_path) {
-                    Ok(c) => {
-                        let _ = c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
-                        // Other connections (UI, NLP, LLM workers) write to the same
-                        // DB; wait for locks instead of failing with SQLITE_BUSY.
-                        let _ = c.busy_timeout(std::time::Duration::from_secs(5));
-                        c
-                    }
-                    Err(e) => {
-                        eprintln!("[OCR] Failed to open worker DB connection: {e}");
-                        while let Some(job) = receiver.blocking_recv() {
-                            emit_error(
-                                &app_handle,
-                                job.asset_id,
-                                format!("Failed to open OCR DB connection: {e}"),
-                            );
-                        }
-                        return;
-                    }
-                };
+        tauri::async_runtime::spawn(async move {
+            pdf::init_pdfium_path(&app_handle);
+            eprintln!(
+                "[OCR] EntropIA Lite OCR worker ready; GLM-OCR remote only \
+                 (up to {MAX_CONCURRENT_OCR_JOBS} concurrent jobs)"
+            );
 
-                eprintln!("[OCR] EntropIA Lite OCR worker ready; GLM-OCR remote only");
-                while let Some(job) = receiver.blocking_recv() {
-                    let asset_id = job.asset_id.clone();
-                    let result =
-                        tauri::async_runtime::block_on(process_job(&conn, &job, &app_handle));
+            let semaphore = Arc::new(Semaphore::new(MAX_CONCURRENT_OCR_JOBS));
+            let in_flight = Arc::new(InFlightAssets::default());
 
-                    match result {
-                        Ok(output) => complete_job(&mut conn, &app_handle, &asset_id, output),
-                        Err(error) => emit_error(&app_handle, asset_id, error),
-                    }
-                }
-            })
-            .expect("Failed to spawn OCR worker thread");
+            // Dispatcher: pulls jobs in FIFO order and spawns one task per
+            // job, never blocking on gating itself — a duplicate enqueue of
+            // an asset whose job is still running must not stall the queue
+            // for unrelated assets (head-of-line blocking). When the queue
+            // sender drops on app shutdown, `recv()` returns `None` and the
+            // dispatcher exits — same cancel-on-shutdown behavior as before.
+            while let Some(job) = receiver.recv().await {
+                let semaphore = Arc::clone(&semaphore);
+                let in_flight = Arc::clone(&in_flight);
+                let db_path = db_path.clone();
+                let app_handle = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    // Acquire the per-asset gate FIRST, then a concurrency
+                    // permit: a duplicate-asset task parked on the gate holds
+                    // no permit, so it can never starve other assets. The
+                    // gate still guarantees the same asset is never processed
+                    // by two jobs concurrently; the token's and permit's
+                    // Drops release both even if the job task panics.
+                    let _token = in_flight.begin(&job.asset_id).await;
+                    let _permit = semaphore
+                        .acquire_owned()
+                        .await
+                        .expect("OCR semaphore is never closed");
+                    run_job(&db_path, &job, &app_handle).await;
+                });
+            }
+        });
     }
 }
 
-fn complete_job(
-    conn: &mut rusqlite::Connection,
+/// Process one OCR job end to end with its own SQLite connection.
+///
+/// Each concurrent job opens a dedicated connection (same WAL/foreign-keys
+/// pragmas and busy timeout as the old single worker connection): rusqlite
+/// connections must never be shared across concurrent tasks. All blocking
+/// rusqlite work (open, settings read, persistence) runs on the blocking
+/// pool — with `busy_timeout` = 5s a contended database would otherwise pin
+/// a shared async worker thread for seconds.
+async fn run_job(db_path: &std::path::Path, job: &OcrJob, app_handle: &AppHandle) {
+    let asset_id = job.asset_id.clone();
+
+    let setup_db_path = db_path.to_path_buf();
+    let setup = tokio::task::spawn_blocking(move || {
+        open_worker_connection(&setup_db_path).map(|conn| {
+            let api_key = get_glm_ocr_api_key(&conn);
+            (conn, api_key)
+        })
+    })
+    .await
+    .map_err(|e| format!("OCR DB setup task panicked: {e}"))
+    .and_then(|result| result);
+
+    let (conn, api_key) = match setup {
+        Ok(pair) => pair,
+        Err(e) => {
+            eprintln!("[OCR] Failed to open worker DB connection: {e}");
+            emit_error(
+                app_handle,
+                asset_id,
+                format!("Failed to open OCR DB connection: {e}"),
+            );
+            return;
+        }
+    };
+
+    match process_job(&api_key, job, app_handle).await {
+        Ok(output) => complete_job(conn, app_handle, &asset_id, output).await,
+        Err(error) => emit_error(app_handle, asset_id, error),
+    }
+}
+
+fn open_worker_connection(db_path: &std::path::Path) -> Result<rusqlite::Connection, String> {
+    let conn = rusqlite::Connection::open(db_path).map_err(|e| e.to_string())?;
+    let _ = conn.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+    // Other connections (UI, NLP, LLM workers and sibling OCR jobs) write to
+    // the same DB; wait for locks instead of failing with SQLITE_BUSY.
+    let _ = conn.busy_timeout(std::time::Duration::from_secs(5));
+    Ok(conn)
+}
+
+/// Tracks assets with an OCR job currently in flight so the same asset is
+/// never processed by two concurrent jobs: extractions/layouts are keyed by
+/// `asset_id`, and racing jobs could interleave progress/complete events.
+#[derive(Default)]
+struct InFlightAssets {
+    assets: Mutex<HashSet<String>>,
+    released: Notify,
+}
+
+impl InFlightAssets {
+    /// Try to mark `asset_id` as in flight. Returns a token that releases the
+    /// asset on drop, or `None` if a job for the asset is already running.
+    fn try_begin(self: &Arc<Self>, asset_id: &str) -> Option<InFlightToken> {
+        let mut assets = self.assets.lock().expect("in-flight asset set poisoned");
+        assets.insert(asset_id.to_string()).then(|| InFlightToken {
+            registry: Arc::clone(self),
+            asset_id: asset_id.to_string(),
+        })
+    }
+
+    /// Mark `asset_id` as in flight, waiting until any previous job for the
+    /// same asset releases its token.
+    async fn begin(self: &Arc<Self>, asset_id: &str) -> InFlightToken {
+        loop {
+            let released = self.released.notified();
+            tokio::pin!(released);
+            // Register for the release notification BEFORE checking the set,
+            // so a token dropped between the check and the `.await` below
+            // still wakes this waiter.
+            released.as_mut().enable();
+            if let Some(token) = self.try_begin(asset_id) {
+                return token;
+            }
+            released.await;
+        }
+    }
+
+    fn finish(&self, asset_id: &str) {
+        let mut assets = self.assets.lock().expect("in-flight asset set poisoned");
+        assets.remove(asset_id);
+        drop(assets);
+        self.released.notify_waiters();
+    }
+}
+
+/// RAII guard for an in-flight asset: releasing on drop keeps the set correct
+/// even if a job task panics or is cancelled.
+struct InFlightToken {
+    registry: Arc<InFlightAssets>,
+    asset_id: String,
+}
+
+impl Drop for InFlightToken {
+    fn drop(&mut self) {
+        self.registry.finish(&self.asset_id);
+    }
+}
+
+async fn complete_job(
+    conn: rusqlite::Connection,
     app_handle: &AppHandle,
     asset_id: &str,
     output: ProcessedOcrOutput,
@@ -172,27 +290,46 @@ fn complete_job(
     let method = output.ocr.method.clone();
     let text_content = output.ocr.text.clone();
 
-    if let Err(e) = persist_output(
-        conn,
-        asset_id,
-        &text_content,
-        &method,
-        output.layout.as_ref(),
-    ) {
-        crate::app_logs::error(
-            app_handle,
-            "ocr",
-            format!("No se pudo guardar extracción de {asset_id}: {e}"),
-        );
-        emit_error(
-            app_handle,
-            asset_id.to_string(),
-            format!("No se pudo guardar la extracción en la base de datos: {e}"),
-        );
-        return;
-    }
+    // Persistence and the item lookup are blocking rusqlite calls; run them
+    // on the blocking pool. `ocr:complete` is emitted only after the
+    // persistence transaction commits — that ordering contract is tested.
+    let persist_asset_id = asset_id.to_string();
+    let persist_text = text_content.clone();
+    let persist_method = method.clone();
+    let layout = output.layout;
+    let persisted = tokio::task::spawn_blocking(move || {
+        let mut conn = conn;
+        persist_output(
+            &mut conn,
+            &persist_asset_id,
+            &persist_text,
+            &persist_method,
+            layout.as_ref(),
+        )?;
+        Ok::<_, String>(lookup_item_id_for_asset(&conn, &persist_asset_id))
+    })
+    .await
+    .map_err(|e| format!("OCR persistence task panicked: {e}"))
+    .and_then(|result| result);
 
-    match lookup_item_id_for_asset(conn, asset_id) {
+    let item_lookup = match persisted {
+        Ok(lookup) => lookup,
+        Err(e) => {
+            crate::app_logs::error(
+                app_handle,
+                "ocr",
+                format!("No se pudo guardar extracción de {asset_id}: {e}"),
+            );
+            emit_error(
+                app_handle,
+                asset_id.to_string(),
+                format!("No se pudo guardar la extracción en la base de datos: {e}"),
+            );
+            return;
+        }
+    };
+
+    match item_lookup {
         Ok(Some(item_id)) => {
             let nlp_queue = app_handle.state::<NlpQueue>();
             let _ = nlp_queue.submit(NlpJob::IndexFts {
@@ -271,7 +408,7 @@ pub(super) fn ensure_selected_cloud_key(conn: &rusqlite::Connection) -> Result<(
 }
 
 async fn process_job(
-    conn: &rusqlite::Connection,
+    api_key: &str,
     job: &OcrJob,
     app_handle: &AppHandle,
 ) -> Result<ProcessedOcrOutput, String> {
@@ -280,7 +417,6 @@ async fn process_job(
     let bytes = tokio::fs::read(&job.asset_path)
         .await
         .map_err(|e| format!("Failed to read {}: {e}", job.asset_path))?;
-    let api_key = get_glm_ocr_api_key(conn);
     if api_key.is_empty() {
         return Err("EntropIA Lite requiere GLM-OCR remoto para OCR.".to_string());
     }
@@ -290,7 +426,7 @@ async fn process_job(
     } else {
         "glm_ocr"
     };
-    process_with_glm_ocr_provider(&bytes, &job.asset_id, app_handle, &api_key, method).await
+    process_with_glm_ocr_provider(&bytes, &job.asset_id, app_handle, api_key, method).await
 }
 
 fn encode_bytes_for_glm_ocr(bytes: &[u8]) -> Result<String, String> {
@@ -931,6 +1067,101 @@ mod tests {
             extractions, 0,
             "extraction must roll back when layout save fails"
         );
+    }
+
+    #[test]
+    fn in_flight_try_begin_blocks_duplicates_until_release() {
+        let registry = Arc::new(InFlightAssets::default());
+
+        let token = registry.try_begin("asset-1").expect("first begin succeeds");
+        assert!(
+            registry.try_begin("asset-1").is_none(),
+            "same asset must not run concurrently"
+        );
+        assert!(
+            registry.try_begin("asset-2").is_some(),
+            "other assets are unaffected"
+        );
+
+        drop(token);
+        assert!(
+            registry.try_begin("asset-1").is_some(),
+            "asset is available again after the token is released"
+        );
+    }
+
+    #[tokio::test]
+    async fn in_flight_begin_waits_for_previous_job_to_release() {
+        let registry = Arc::new(InFlightAssets::default());
+        let first = registry.begin("asset-1").await;
+
+        let waiter_registry = Arc::clone(&registry);
+        let mut waiter = tokio::spawn(async move {
+            let _token = waiter_registry.begin("asset-1").await;
+        });
+
+        let still_waiting =
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut waiter).await;
+        assert!(
+            still_waiting.is_err(),
+            "a duplicate-asset job must wait while the first is in flight"
+        );
+
+        drop(first);
+        tokio::time::timeout(std::time::Duration::from_secs(5), waiter)
+            .await
+            .expect("duplicate job should start once the first releases")
+            .expect("waiter task should not panic");
+    }
+
+    #[tokio::test]
+    async fn pending_duplicate_does_not_starve_other_assets() {
+        // Mirrors the job-task acquisition order (per-asset gate FIRST, then
+        // a concurrency permit): a duplicate parked on the gate must hold no
+        // permit, so jobs for unrelated assets keep flowing.
+        let semaphore = Arc::new(Semaphore::new(2));
+        let registry = Arc::new(InFlightAssets::default());
+
+        // Job 1: asset-1 in flight, holding its gate and one permit.
+        let first_token = registry.begin("asset-1").await;
+        let first_permit = Arc::clone(&semaphore)
+            .acquire_owned()
+            .await
+            .expect("semaphore open");
+
+        // Job 2: duplicate of asset-1 — parks on the gate, holds NO permit.
+        let dup_registry = Arc::clone(&registry);
+        let dup_semaphore = Arc::clone(&semaphore);
+        let mut duplicate = tokio::spawn(async move {
+            let _token = dup_registry.begin("asset-1").await;
+            let _permit = dup_semaphore.acquire_owned().await.expect("semaphore open");
+        });
+        let parked =
+            tokio::time::timeout(std::time::Duration::from_millis(50), &mut duplicate).await;
+        assert!(
+            parked.is_err(),
+            "duplicate must wait while asset-1 is in flight"
+        );
+
+        // Job 3: a DIFFERENT asset must acquire its gate and a permit even
+        // though a duplicate is pending (the old dispatcher blocked here).
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let _token = registry.begin("asset-2").await;
+            let _permit = Arc::clone(&semaphore)
+                .acquire_owned()
+                .await
+                .expect("semaphore open");
+        })
+        .await
+        .expect("a pending duplicate must not starve other assets");
+
+        // Once job 1 releases, the duplicate proceeds.
+        drop(first_permit);
+        drop(first_token);
+        tokio::time::timeout(std::time::Duration::from_secs(5), duplicate)
+            .await
+            .expect("duplicate should run once the first job releases")
+            .expect("duplicate task should not panic");
     }
 
     #[test]

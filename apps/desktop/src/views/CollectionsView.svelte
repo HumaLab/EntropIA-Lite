@@ -68,7 +68,7 @@
     if (!newName.trim()) return
     try {
       const store = getStore()
-      const collection = await store.collections.create({
+      await store.collections.create({
         name: newName.trim(),
         description: newDescription.trim() || null,
       })

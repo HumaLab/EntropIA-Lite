@@ -1,5 +1,5 @@
 <script lang="ts">
-  import type { MapViewerProps, MapMarker } from './MapViewer.types'
+  import type { MapViewerProps } from './MapViewer.types'
   import { onMount, onDestroy, tick } from 'svelte'
   import L from 'leaflet'
   import 'leaflet/dist/leaflet.css'

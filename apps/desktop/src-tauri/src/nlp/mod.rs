@@ -40,6 +40,10 @@ pub struct NlpCompletePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub asset_id: Option<String>,
     pub job: String,
+    /// Number of entities persisted by NER jobs. `None` for non-NER jobs (and
+    /// for NER jobs skipped for lack of text), so other consumers are unaffected.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub entity_count: Option<usize>,
 }
 
 #[derive(Clone, Serialize)]
@@ -318,12 +322,21 @@ impl NlpQueue {
                         // Run the streaming NER job inside an async block so we can
                         // use `?` for early-return without polluting the outer
                         // match arm type. `job_conn` lives only inside this block.
+                        // Returns the number of persisted entities, or `None` when
+                        // the job was skipped for lack of text.
                         let item_id_for_job = item_id.clone();
                         let app_handle_for_job = app_handle.clone();
-                        let job_result: Result<(), String> = async {
-                            let (input, job_conn) = match (result, job_conn) {
+                        let job_result: Result<Option<usize>, String> = async {
+                            let (input, mut job_conn) = match (result, job_conn) {
                                 (Ok(Some(input)), Some(c)) => (input, c),
-                                (Ok(None), _) => return Ok(()),
+                                (Ok(None), _) => {
+                                    crate::app_logs::warn(
+                                        &app_handle_for_job,
+                                        "nlp",
+                                        format!("ner omitido para item_id={item_id_for_job}: sin texto para analizar"),
+                                    );
+                                    return Ok(None);
+                                }
                                 (Err(error), _) => {
                                     return Err(format!("NER extraction failed: {error}"));
                                 }
@@ -333,64 +346,63 @@ impl NlpQueue {
                             let config = ner_fallback_config(&job_conn).openrouter?;
                             let (api_key, model_name, prompt_template, params) = config;
 
-                            // Clear stale automatic entities once, then stream-append
-                            // per chunk. A crash mid-job still leaves the user with
-                            // whatever entities were already extracted.
+                            // Accumulate the entities from every chunk in memory
+                            // first; a chunk failure aborts here and leaves the
+                            // previously stored entities untouched.
+                            let entities = collect_ner_entities_for_chunks(
+                                &app_handle_for_job,
+                                &item_id_for_job,
+                                None,
+                                &input,
+                                api_key,
+                                model_name,
+                                prompt_template,
+                                params,
+                            )
+                            .await?;
+
+                            // Swap (clear + append) in one transaction only after
+                            // every chunk parsed successfully.
                             tokio::task::block_in_place(|| {
-                                ner::clear_automatic_entities_for_item(&job_conn, &item_id_for_job)
-                            })?;
-
-                            let chunks = chunking::chunk_text(&input.text);
-                            let total_chunks = chunks.len();
-                            for (index, chunk) in chunks.iter().enumerate() {
-                                let entities = run_openrouter_ner_for_chunk(
-                                    api_key.clone(),
-                                    model_name.clone(),
-                                    chunk,
-                                    &input.protected_entities,
-                                    prompt_template.clone(),
-                                    params.clone(),
-                                )
-                                .await?;
-
-                                let pct = if total_chunks <= 1 {
-                                    90
-                                } else {
-                                    10 + ((index + 1) * 80 / total_chunks)
-                                };
-
-                                if let Err(e) = tokio::task::block_in_place(|| {
-                                    ner::append_entities_for_item(
-                                        &job_conn,
-                                        &item_id_for_job,
-                                        &entities,
-                                    )
-                                }) {
-                                    eprintln!("[nlp/ner] chunk persist failed: {e}");
-                                }
-                                emit_progress(
-                                    &app_handle_for_job,
+                                ner::replace_automatic_entities_for_item(
+                                    &mut job_conn,
                                     &item_id_for_job,
-                                    "ner",
-                                    pct as u8,
+                                    &entities,
+                                )
+                            })
+                            .map_err(|e| {
+                                crate::app_logs::warn(
+                                    &app_handle_for_job,
+                                    "nlp",
+                                    format!("ner persistencia falló para item_id={item_id_for_job}: {e}"),
                                 );
-                            }
-                            Ok(())
+                                e
+                            })?;
+                            Ok(Some(entities.len()))
                         }
                         .await;
 
                         match job_result {
-                            Ok(()) => {
+                            Ok(entity_count) => {
                                 emit_progress(&app_handle, &item_id, "ner", 100);
-                                emit_complete(&app_handle, &item_id, "ner");
-                                // Auto-trigger geocoding for place entities
-                                if let Err(e) = crate::geo::enqueue_geocoding_for_item(
-                                    &app_handle.state::<crate::geo::GeoQueue>(),
+                                emit_complete_payload(
+                                    &app_handle,
                                     &item_id,
-                                ) {
-                                    eprintln!(
-                                        "[geo] Failed to auto-enqueue geocoding after NER: {e}"
-                                    );
+                                    None,
+                                    "ner",
+                                    entity_count,
+                                );
+                                // Auto-trigger geocoding for place entities, only
+                                // after a successful swap (skipped jobs persist nothing).
+                                if entity_count.is_some() {
+                                    if let Err(e) = crate::geo::enqueue_geocoding_for_item(
+                                        &app_handle.state::<crate::geo::GeoQueue>(),
+                                        &item_id,
+                                    ) {
+                                        eprintln!(
+                                            "[geo] Failed to auto-enqueue geocoding after NER: {e}"
+                                        );
+                                    }
                                 }
                             }
                             Err(e) => emit_error(&app_handle, &item_id, "ner", &e),
@@ -455,7 +467,7 @@ impl NlpQueue {
                             let item_id_for_job = item_id.clone();
                             let app_handle_for_job = app_handle.clone();
                             let db_path_for_job = db_path.clone();
-                            let job_result: Result<(), String> = async {
+                            let job_result: Result<Option<usize>, String> = async {
                                 let input = match prepared {
                                     Ok(input) => input,
                                     Err(error) => {
@@ -463,7 +475,12 @@ impl NlpQueue {
                                     }
                                 };
                                 if input.text.trim().is_empty() {
-                                    return Ok(());
+                                    crate::app_logs::warn(
+                                        &app_handle_for_job,
+                                        "nlp",
+                                        format!("ner omitido para item_id={item_id_for_job}: sin texto para analizar"),
+                                    );
+                                    return Ok(None);
                                 }
 
                                 let (api_key, model_name, prompt_template, params) =
@@ -474,61 +491,45 @@ impl NlpQueue {
                                         }
                                     };
 
-                                let job_conn = rusqlite::Connection::open(&db_path_for_job)
+                                let mut job_conn = rusqlite::Connection::open(&db_path_for_job)
                                     .map_err(|e| e.to_string())?;
                                 let _ = job_conn.execute_batch(
                                     "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;",
                                 );
 
-                                // Clear stale automatic entities once, then
-                                // stream-append per chunk.
+                                // Accumulate the entities from every chunk in memory
+                                // first; a chunk failure aborts here and leaves the
+                                // previously stored entities untouched.
+                                let entities = collect_ner_entities_for_chunks(
+                                    &app_handle_for_job,
+                                    &item_id_for_job,
+                                    None,
+                                    &input,
+                                    api_key,
+                                    model_name,
+                                    prompt_template,
+                                    params,
+                                )
+                                .await?;
+
+                                // Swap (clear + append) in one transaction only after
+                                // every chunk parsed successfully.
                                 tokio::task::block_in_place(|| {
-                                    ner::clear_automatic_entities_for_item(
-                                        &job_conn,
+                                    ner::replace_automatic_entities_for_item(
+                                        &mut job_conn,
                                         &item_id_for_job,
+                                        &entities,
                                     )
-                                })?;
-
-                            let chunks = chunking::chunk_text(&input.text);
-                            let total_chunks = chunks.len();
-                            eprintln!(
-                                "[nlp/ner] text exceeded chunking threshold, splitting into {total_chunks} chunks (text_len={})",
-                                input.text.chars().count()
-                            );
-                                for (index, chunk) in chunks.iter().enumerate() {
-                                    let entities = run_openrouter_ner_for_chunk(
-                                        api_key.clone(),
-                                        model_name.clone(),
-                                        chunk,
-                                        &input.protected_entities,
-                                        prompt_template.clone(),
-                                        params.clone(),
-                                    )
-                                    .await?;
-
-                                    let pct = if total_chunks <= 1 {
-                                        90
-                                    } else {
-                                        10 + ((index + 1) * 80 / total_chunks)
-                                    };
-
-                                    if let Err(e) = tokio::task::block_in_place(|| {
-                                        ner::append_entities_for_item(
-                                            &job_conn,
-                                            &item_id_for_job,
-                                            &entities,
-                                        )
-                                    }) {
-                                        eprintln!("[nlp/ner] chunk persist failed: {e}");
-                                    }
-                                    emit_progress(
+                                })
+                                .map_err(|e| {
+                                    crate::app_logs::warn(
                                         &app_handle_for_job,
-                                        &item_id_for_job,
-                                        "ner",
-                                        pct as u8,
+                                        "nlp",
+                                        format!("ner persistencia falló para item_id={item_id_for_job}: {e}"),
                                     );
-                                }
-                                Ok(())
+                                    e
+                                })?;
+                                Ok(Some(entities.len()))
                             }
                             .await;
 
@@ -537,14 +538,22 @@ impl NlpQueue {
                                 pending.remove(&item_id);
                             }
                             match job_result {
-                                Ok(()) => {
+                                Ok(entity_count) => {
                                     emit_progress(&app_handle, &item_id, "ner", 100);
-                                    emit_complete(&app_handle, &item_id, "ner");
-                                    if let Err(e) = crate::geo::enqueue_geocoding_for_item(
-                                        &app_handle.state::<crate::geo::GeoQueue>(),
+                                    emit_complete_payload(
+                                        &app_handle,
                                         &item_id,
-                                    ) {
-                                        eprintln!("[geo] Failed to auto-enqueue geocoding after NER (enrich): {e}");
+                                        None,
+                                        "ner",
+                                        entity_count,
+                                    );
+                                    if entity_count.is_some() {
+                                        if let Err(e) = crate::geo::enqueue_geocoding_for_item(
+                                            &app_handle.state::<crate::geo::GeoQueue>(),
+                                            &item_id,
+                                        ) {
+                                            eprintln!("[geo] Failed to auto-enqueue geocoding after NER (enrich): {e}");
+                                        }
                                     }
                                 }
                                 Err(e) => emit_error(&app_handle, &item_id, "ner", &e),
@@ -637,7 +646,7 @@ impl NlpQueue {
                         let item_id_for_job = item_id.clone();
                         let asset_id_for_job = asset_id.clone();
                         let app_handle_for_job = app_handle.clone();
-                        let job_result: Result<(), String> = async {
+                        let job_result: Result<Option<usize>, String> = async {
                             let input = match result {
                                 Ok(input) => input,
                                 Err(error) => {
@@ -647,79 +656,79 @@ impl NlpQueue {
                                 }
                             };
                             if input.text.trim().is_empty() {
-                                return Ok(());
+                                crate::app_logs::warn(
+                                    &app_handle_for_job,
+                                    "nlp",
+                                    format!("ner omitido para item_id={item_id_for_job} asset_id={asset_id_for_job}: sin texto para analizar"),
+                                );
+                                return Ok(None);
                             }
 
                             // Open a dedicated connection so the network-bound
                             // loop below does not touch the (non-Send) worker
                             // connection across await points.
-                            let job_conn =
+                            let mut job_conn =
                                 rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
                             let _ = job_conn
                                 .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
 
-                            // Clear stale automatic entities for this asset only,
-                            // then stream-append per chunk.
-                            tokio::task::block_in_place(|| {
-                                ner::clear_automatic_entities_for_asset(
-                                    &job_conn,
-                                    &item_id_for_job,
-                                    &asset_id_for_job,
-                                )
-                            })?;
-
                             let config = ner_fallback_config(&job_conn).openrouter?;
                             let (api_key, model_name, prompt_template, params) = config;
 
-                            let chunks = chunking::chunk_text(&input.text);
-                            let total_chunks = chunks.len();
-                            for (index, chunk) in chunks.iter().enumerate() {
-                                let entities = run_openrouter_ner_for_chunk(
-                                    api_key.clone(),
-                                    model_name.clone(),
-                                    chunk,
-                                    &input.protected_entities,
-                                    prompt_template.clone(),
-                                    params.clone(),
-                                )
-                                .await?;
+                            // Accumulate the entities from every chunk in memory
+                            // first; a chunk failure aborts here and leaves the
+                            // previously stored entities untouched.
+                            let entities = collect_ner_entities_for_chunks(
+                                &app_handle_for_job,
+                                &item_id_for_job,
+                                Some(&asset_id_for_job),
+                                &input,
+                                api_key,
+                                model_name,
+                                prompt_template,
+                                params,
+                            )
+                            .await?;
 
-                                let pct = if total_chunks <= 1 {
-                                    90
-                                } else {
-                                    10 + ((index + 1) * 80 / total_chunks)
-                                };
-
-                                if let Err(e) = tokio::task::block_in_place(|| {
-                                    ner::append_entities_for_asset(
-                                        &job_conn,
-                                        &item_id_for_job,
-                                        &asset_id_for_job,
-                                        &entities,
-                                    )
-                                }) {
-                                    eprintln!("[nlp/ner] chunk persist failed: {e}");
-                                }
-                                emit_asset_progress(
-                                    &app_handle_for_job,
+                            // Swap the automatic entities for this asset only
+                            // (clear + append in one transaction) after every
+                            // chunk parsed successfully.
+                            tokio::task::block_in_place(|| {
+                                ner::replace_automatic_entities_for_asset(
+                                    &mut job_conn,
                                     &item_id_for_job,
                                     &asset_id_for_job,
-                                    "ner",
-                                    pct as u8,
+                                    &entities,
+                                )
+                            })
+                            .map_err(|e| {
+                                crate::app_logs::warn(
+                                    &app_handle_for_job,
+                                    "nlp",
+                                    format!("ner persistencia falló para item_id={item_id_for_job} asset_id={asset_id_for_job}: {e}"),
                                 );
-                            }
-                            Ok(())
+                                e
+                            })?;
+                            Ok(Some(entities.len()))
                         }
                         .await;
                         match job_result {
-                            Ok(()) => {
+                            Ok(entity_count) => {
                                 emit_asset_progress(&app_handle, &item_id, &asset_id, "ner", 100);
-                                emit_asset_complete(&app_handle, &item_id, &asset_id, "ner");
-                                if let Err(e) = crate::geo::enqueue_geocoding_for_item(
-                                    &app_handle.state::<crate::geo::GeoQueue>(),
+                                emit_complete_payload(
+                                    &app_handle,
                                     &item_id,
-                                ) {
-                                    eprintln!("[geo] Failed to auto-enqueue geocoding after asset NER: {e}");
+                                    Some(&asset_id),
+                                    "ner",
+                                    entity_count,
+                                );
+                                if entity_count.is_some() {
+                                    if let Err(e) = crate::geo::enqueue_geocoding_for_item(
+                                        &app_handle.state::<crate::geo::GeoQueue>(),
+                                        &item_id,
+                                    ) {
+                                        eprintln!("[geo] Failed to auto-enqueue geocoding after asset NER: {e}");
+                                    }
                                 }
                             }
                             Err(e) => emit_asset_error(&app_handle, &item_id, &asset_id, "ner", &e),
@@ -821,6 +830,15 @@ pub(crate) fn ensure_nlp_runtime_ready(app_handle: &AppHandle) -> Result<(), Str
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 
+/// Log identifier for an item-level or asset-level job. Including the asset_id
+/// when present lets app_logs distinguish item NER from asset NER runs.
+fn log_target(item_id: &str, asset_id: Option<&str>) -> String {
+    match asset_id {
+        Some(asset_id) => format!("item_id={item_id} asset_id={asset_id}"),
+        None => format!("item_id={item_id}"),
+    }
+}
+
 fn emit_progress(app_handle: &AppHandle, item_id: &str, job: &str, pct: u8) {
     emit_progress_payload(app_handle, item_id, None, job, pct);
 }
@@ -840,7 +858,10 @@ fn emit_progress_payload(
         crate::app_logs::info(
             app_handle,
             "nlp",
-            format!("{job} item_id={item_id} progreso={pct}%"),
+            format!(
+                "{job} {target} progreso={pct}%",
+                target = log_target(item_id, asset_id)
+            ),
         );
     }
     let _ = app_handle.emit(
@@ -855,25 +876,33 @@ fn emit_progress_payload(
 }
 
 fn emit_complete(app_handle: &AppHandle, item_id: &str, job: &str) {
-    emit_complete_payload(app_handle, item_id, None, job);
+    emit_complete_payload(app_handle, item_id, None, job, None);
 }
 
 fn emit_asset_complete(app_handle: &AppHandle, item_id: &str, asset_id: &str, job: &str) {
-    emit_complete_payload(app_handle, item_id, Some(asset_id), job);
+    emit_complete_payload(app_handle, item_id, Some(asset_id), job, None);
 }
 
-fn emit_complete_payload(app_handle: &AppHandle, item_id: &str, asset_id: Option<&str>, job: &str) {
-    crate::app_logs::info(
-        app_handle,
-        "nlp",
-        format!("{job} completado para item_id={item_id}"),
-    );
+fn emit_complete_payload(
+    app_handle: &AppHandle,
+    item_id: &str,
+    asset_id: Option<&str>,
+    job: &str,
+    entity_count: Option<usize>,
+) {
+    let target = log_target(item_id, asset_id);
+    let message = match entity_count {
+        Some(count) => format!("{job} completado ({count} entidades) para {target}"),
+        None => format!("{job} completado para {target}"),
+    };
+    crate::app_logs::info(app_handle, "nlp", message);
     let _ = app_handle.emit(
         "nlp:complete",
         NlpCompletePayload {
             item_id: item_id.to_string(),
             asset_id: asset_id.map(str::to_string),
             job: job.to_string(),
+            entity_count,
         },
     );
 }
@@ -896,7 +925,10 @@ fn emit_error_payload(
     crate::app_logs::error(
         app_handle,
         "nlp",
-        format!("{job} falló para item_id={item_id}: {error}"),
+        format!(
+            "{job} falló para {target}: {error}",
+            target = log_target(item_id, asset_id)
+        ),
     );
     let _ = app_handle.emit(
         "nlp:error",
@@ -938,6 +970,55 @@ async fn run_openrouter_ner_for_chunk(
         }
     }
     Ok(entities)
+}
+
+/// Fetch and parse NER entities for every chunk of `input`, accumulating the
+/// results in memory. Entity lists are small, so the worker only persists once
+/// the whole job succeeded: any chunk error propagates here and leaves the
+/// previously stored entities untouched (write-then-swap).
+// The OpenRouter call site needs every generation knob; bundling them into a
+// struct would obscure the wiring with `run_openrouter_ner_for_chunk`.
+#[allow(clippy::too_many_arguments)]
+async fn collect_ner_entities_for_chunks(
+    app_handle: &AppHandle,
+    item_id: &str,
+    asset_id: Option<&str>,
+    input: &ner::NerExtractionInput,
+    api_key: String,
+    model_name: String,
+    prompt_template: Option<String>,
+    params: Option<crate::llm::openrouter::GenerationParams>,
+) -> Result<Vec<ner::types::Entity>, String> {
+    let chunks = chunking::chunk_text(&input.text);
+    let total_chunks = chunks.len();
+    if total_chunks > 1 {
+        eprintln!(
+            "[nlp/ner] text exceeded chunking threshold, splitting into {total_chunks} chunks (text_len={})",
+            input.text.chars().count()
+        );
+    }
+
+    let mut all_entities = Vec::new();
+    for (index, chunk) in chunks.iter().enumerate() {
+        let entities = run_openrouter_ner_for_chunk(
+            api_key.clone(),
+            model_name.clone(),
+            chunk,
+            &input.protected_entities,
+            prompt_template.clone(),
+            params.clone(),
+        )
+        .await?;
+        all_entities.extend(entities);
+
+        let pct = if total_chunks <= 1 {
+            90
+        } else {
+            10 + ((index + 1) * 80 / total_chunks)
+        };
+        emit_progress_payload(app_handle, item_id, asset_id, "ner", pct as u8);
+    }
+    Ok(all_entities)
 }
 
 struct NerFallbackConfig {

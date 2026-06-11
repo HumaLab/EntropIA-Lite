@@ -189,3 +189,11 @@ inicio_nuevo.md
 
 # LLM diagnostic tool (dev-only, not part of app build)
 tools/llm-diag/
+
+# Local-only: opencode IDE config
+opencode.json
+
+# Local-only: audit plan artifacts (Quarto output)
+AUDIT_AND_PLAN.html
+AUDIT_AND_PLAN.md
+AUDIT_AND_PLAN_files/

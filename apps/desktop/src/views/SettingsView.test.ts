@@ -1,7 +1,13 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/svelte'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import SettingsView from './SettingsView.svelte'
+import SettingsView, {
+  buildSettingsSnapshot,
+  hasUnsavedSettingsChanges,
+  type SettingsSnapshotInput,
+} from './SettingsView.svelte'
 import { locale } from '$lib/i18n'
+import { navigation } from '$lib/navigation'
+import { setupKeyboardShortcuts } from '$lib/keyboard'
 
 const {
   invokeMock,
@@ -356,5 +362,160 @@ describe('SettingsView', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Reintentar carga' }))
 
     expect(await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)).toBeInTheDocument()
+  })
+})
+
+describe('settings dirty detection helpers', () => {
+  const baseInput: SettingsSnapshotInput = {
+    apiKey: '',
+    model: 'anthropic/claude-3.7-sonnet',
+    embeddingModel: 'baai/bge-m3',
+    assemblyAiApiKey: '',
+    assemblyAiCollectionSpeakerLabels: true,
+    glmOcrApiKey: '',
+    ocrCorrectionPrompt: 'Correct {text}',
+    summaryPrompt: 'Summarize {text}',
+    nerPrompt: 'NER {text}',
+    tripletsPrompt: 'Triples {text}',
+    modelParamsByFlow: {
+      summary: { temperature: '0.2', maxTokens: '' },
+    },
+  }
+
+  it('is clean when the current snapshot matches the saved baseline', () => {
+    const saved = buildSettingsSnapshot(baseInput)
+    expect(hasUnsavedSettingsChanges(saved, buildSettingsSnapshot({ ...baseInput }))).toBe(false)
+  })
+
+  it('flags top-level and nested model param changes as dirty', () => {
+    const saved = buildSettingsSnapshot(baseInput)
+
+    expect(
+      hasUnsavedSettingsChanges(
+        saved,
+        buildSettingsSnapshot({ ...baseInput, model: 'openai/gpt-test' })
+      )
+    ).toBe(true)
+    expect(
+      hasUnsavedSettingsChanges(
+        saved,
+        buildSettingsSnapshot({ ...baseInput, summaryPrompt: 'Edited {text}' })
+      )
+    ).toBe(true)
+    expect(
+      hasUnsavedSettingsChanges(
+        saved,
+        buildSettingsSnapshot({
+          ...baseInput,
+          modelParamsByFlow: { summary: { temperature: '0.9', maxTokens: '' } },
+        })
+      )
+    ).toBe(true)
+  })
+
+  it('never reports dirty before a baseline snapshot exists', () => {
+    expect(hasUnsavedSettingsChanges(null, buildSettingsSnapshot(baseInput))).toBe(false)
+  })
+})
+
+describe('SettingsView Escape behavior', () => {
+  beforeEach(() => {
+    locale.set('es')
+    invokeMock.mockReset().mockResolvedValue(undefined)
+    settingsGetMock.mockReset()
+    settingsGetAllMock.mockReset().mockResolvedValue([])
+    settingsSetMock.mockReset().mockResolvedValue(undefined)
+    settingsGetMock.mockImplementation(async (key: string) => {
+      if (key === 'openrouter_api_key') return 'sk-or-v1-test-key'
+      if (key === 'openrouter_model') return 'anthropic/claude-3.7-sonnet'
+      if (key === 'openrouter_embedding_model') return 'baai/bge-m3'
+      if (key === 'assemblyai_api_key') return 'aai-orig-test-1234'
+      return null
+    })
+  })
+
+  async function renderLoadedSettings() {
+    render(SettingsView)
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+  }
+
+  it('lets Escape navigate back when settings have no unsaved changes', async () => {
+    const backSpy = vi.spyOn(navigation, 'back').mockImplementation(() => {})
+    const cleanupKeyboard = setupKeyboardShortcuts()
+
+    try {
+      await renderLoadedSettings()
+
+      await fireEvent.keyDown(window, { key: 'Escape' })
+
+      expect(backSpy).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    } finally {
+      cleanupKeyboard()
+      backSpy.mockRestore()
+    }
+  })
+
+  it('asks before discarding unsaved changes on Escape and navigates only after confirming', async () => {
+    const backSpy = vi.spyOn(navigation, 'back').mockImplementation(() => {})
+    const cleanupKeyboard = setupKeyboardShortcuts()
+
+    try {
+      await renderLoadedSettings()
+
+      await fireEvent.input(screen.getByLabelText('Modelo generativo'), {
+        target: { value: 'openai/gpt-test' },
+      })
+
+      await fireEvent.keyDown(window, { key: 'Escape' })
+
+      expect(backSpy).not.toHaveBeenCalled()
+      expect(await screen.findByRole('dialog')).toBeInTheDocument()
+      expect(screen.getByText('Descartar cambios')).toBeInTheDocument()
+
+      // Keep editing → dialog closes, still on settings.
+      await fireEvent.click(screen.getByRole('button', { name: 'Seguir editando' }))
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+      expect(backSpy).not.toHaveBeenCalled()
+
+      // Escape again and confirm the discard → now it navigates back.
+      await fireEvent.keyDown(window, { key: 'Escape' })
+      await fireEvent.click(await screen.findByRole('button', { name: 'Descartar' }))
+
+      expect(backSpy).toHaveBeenCalledTimes(1)
+      await waitFor(() => {
+        expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+      })
+    } finally {
+      cleanupKeyboard()
+      backSpy.mockRestore()
+    }
+  })
+
+  it('does not prompt on Escape after saving the edited settings', async () => {
+    const backSpy = vi.spyOn(navigation, 'back').mockImplementation(() => {})
+    const cleanupKeyboard = setupKeyboardShortcuts()
+
+    try {
+      await renderLoadedSettings()
+
+      await fireEvent.input(screen.getByLabelText('Modelo generativo'), {
+        target: { value: 'openai/gpt-test' },
+      })
+      await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+      await screen.findByText(
+        'Configuración guardada. Ya podés usar esta preferencia en toda la app.'
+      )
+
+      await fireEvent.keyDown(window, { key: 'Escape' })
+
+      expect(backSpy).toHaveBeenCalledTimes(1)
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    } finally {
+      cleanupKeyboard()
+      backSpy.mockRestore()
+    }
   })
 })

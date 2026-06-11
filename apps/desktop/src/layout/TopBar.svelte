@@ -220,7 +220,7 @@
     if (debounceTimer) clearTimeout(debounceTimer)
   }
 
-  function handleSearchValueChange(query: string, e: Event) {
+  function handleSearchValueChange(query: string, _e: Event) {
     searchQuery = query
     handleInput()
     const requestId = ++searchRequestId
@@ -318,7 +318,7 @@
       {/if}
     </div>
     <nav class="breadcrumb" aria-label={$currentLocale && t('topbar.breadcrumb')} data-tauri-drag-region>
-      {#each $navigation.breadcrumb as crumb, i}
+      {#each $navigation.breadcrumb as crumb, i (i)}
         {#if i > 0}<span class="sep">/</span>{/if}
         {#if i === $navigation.breadcrumb.length - 1}
           <span class="crumb crumb--current" class:last={i === $navigation.breadcrumb.length - 1} data-tauri-drag-region>

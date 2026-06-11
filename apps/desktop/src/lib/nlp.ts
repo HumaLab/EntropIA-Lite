@@ -20,6 +20,8 @@ export interface ItemNlpState {
   embed: NlpStatus
   ner: NlpStatus
   triples: NlpStatus
+  /** Entities persisted by the last completed NER run (NER jobs only). */
+  entityCount?: number
   errors?: {
     fts?: string
     embed?: string
@@ -79,6 +81,8 @@ interface CompletePayload {
   item_id: string
   asset_id?: string
   job: string
+  /** Entities persisted by NER jobs; absent for non-NER jobs. */
+  entity_count?: number
 }
 
 interface ErrorPayload {
@@ -129,6 +133,11 @@ export class NlpStore {
 
     const unlistenComplete = await listen('nlp:complete', (e) => {
       const p = e.payload as CompletePayload
+      // Record the count before the status flip so consumers reacting to
+      // the 'done' transition already see the fresh count.
+      if (p.job === 'ner') {
+        this._setEntityCount(p.item_id, p.entity_count, p.asset_id)
+      }
       this._setJobStatus(p.item_id, p.job as NlpJobType, 'done', undefined, p.asset_id)
     })
 
@@ -158,6 +167,21 @@ export class NlpStore {
       fn()
     }
     this.cleanupFns = []
+  }
+
+  /**
+   * Records the entity count reported by the last completed NER run.
+   * `undefined` clears a stale count (e.g. a run skipped for lack of text).
+   */
+  _setEntityCount(itemId: string, entityCount?: number, assetId?: string | null): void {
+    const key = this._key(itemId, assetId)
+    const updated: StoredNlpState = { ...(this.states.get(key) ?? {}) }
+    if (typeof entityCount === 'number') {
+      updated.entityCount = entityCount
+    } else {
+      delete updated.entityCount
+    }
+    this.states.set(key, updated)
   }
 
   /** Updates a single job's status for an item or a specific asset within it. */

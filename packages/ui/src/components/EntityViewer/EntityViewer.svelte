@@ -178,7 +178,7 @@
   </div>
 {:else}
   <div class="entity-viewer">
-    {#each TYPE_ORDER as type}
+    {#each TYPE_ORDER as type (type)}
       {#if grouped.has(type)}
         <div class="entity-viewer__group" data-testid="entity-group">
           <span class="entity-viewer__group-label entity-viewer__group-label--{type}">

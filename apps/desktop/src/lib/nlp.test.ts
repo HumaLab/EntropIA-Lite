@@ -386,6 +386,85 @@ describe('NlpStore', () => {
     expect(store.getState('item-3').ner).toBe('done')
   })
 
+  it('nlp:complete with entity_count stores the count for the NER job', async () => {
+    let completeCallback: ((event: { payload: unknown }) => void) | null = null
+
+    vi.mocked(listen).mockImplementation((eventName, callback) => {
+      if (eventName === 'nlp:complete') {
+        completeCallback = callback as (event: { payload: unknown }) => void
+      }
+      return Promise.resolve(vi.fn())
+    })
+
+    await store.startListening(listen)
+
+    completeCallback!({ payload: { item_id: 'item-count', job: 'ner', entity_count: 0 } })
+
+    const state = store.getState('item-count')
+    expect(state.ner).toBe('done')
+    expect(state.entityCount).toBe(0)
+  })
+
+  it('nlp:complete with asset-scoped entity_count keeps the count on that asset', async () => {
+    let completeCallback: ((event: { payload: unknown }) => void) | null = null
+
+    vi.mocked(listen).mockImplementation((eventName, callback) => {
+      if (eventName === 'nlp:complete') {
+        completeCallback = callback as (event: { payload: unknown }) => void
+      }
+      return Promise.resolve(vi.fn())
+    })
+
+    await store.startListening(listen)
+
+    completeCallback!({
+      payload: { item_id: 'item-count', asset_id: 'asset-a', job: 'ner', entity_count: 3 },
+    })
+
+    expect(store.getState('item-count', 'asset-a').entityCount).toBe(3)
+    expect(store.getState('item-count', 'asset-b').entityCount).toBeUndefined()
+    expect(store.getState('item-count').entityCount).toBeUndefined()
+  })
+
+  it('nlp:complete without entity_count clears a stale NER count', async () => {
+    let completeCallback: ((event: { payload: unknown }) => void) | null = null
+
+    vi.mocked(listen).mockImplementation((eventName, callback) => {
+      if (eventName === 'nlp:complete') {
+        completeCallback = callback as (event: { payload: unknown }) => void
+      }
+      return Promise.resolve(vi.fn())
+    })
+
+    await store.startListening(listen)
+
+    completeCallback!({ payload: { item_id: 'item-count', job: 'ner', entity_count: 7 } })
+    expect(store.getState('item-count').entityCount).toBe(7)
+
+    completeCallback!({ payload: { item_id: 'item-count', job: 'ner' } })
+    expect(store.getState('item-count').entityCount).toBeUndefined()
+  })
+
+  it('nlp:complete for non-NER jobs does not touch entityCount', async () => {
+    let completeCallback: ((event: { payload: unknown }) => void) | null = null
+
+    vi.mocked(listen).mockImplementation((eventName, callback) => {
+      if (eventName === 'nlp:complete') {
+        completeCallback = callback as (event: { payload: unknown }) => void
+      }
+      return Promise.resolve(vi.fn())
+    })
+
+    await store.startListening(listen)
+
+    completeCallback!({ payload: { item_id: 'item-count', job: 'ner', entity_count: 4 } })
+    completeCallback!({ payload: { item_id: 'item-count', job: 'fts' } })
+
+    const state = store.getState('item-count')
+    expect(state.fts).toBe('done')
+    expect(state.entityCount).toBe(4)
+  })
+
   it('nlp:complete for triples job transitions triples to done', async () => {
     let completeCallback: ((event: { payload: unknown }) => void) | null = null
 

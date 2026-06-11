@@ -110,10 +110,11 @@
     isNoteHtmlEffectivelyEmpty,
   } from '@entropia/ui'
   import type { MapMarker } from '@entropia/ui'
-  import { onMount, onDestroy } from 'svelte'
+  import { onMount, onDestroy, untrack } from 'svelte'
   import { listen, emit } from '@tauri-apps/api/event'
   import { invoke } from '@tauri-apps/api/core'
   import { navigation } from '$lib/navigation'
+  import { registerEscapeInterceptor } from '$lib/keyboard'
   import {
     DOCUMENT_EXPLORER_ASSET_SELECTED_EVENT,
     type DocumentExplorerAssetDetail,
@@ -156,7 +157,6 @@
     })()
   )
 
-  let isDragging = $state(false)
   let itemViewEl: HTMLElement | undefined = $state()
   let dragCleanup: (() => void) | null = null
 
@@ -176,7 +176,6 @@
 
   function onResizeHandlePointerDown(e: PointerEvent) {
     e.preventDefault()
-    isDragging = true
 
     const startX = e.clientX
     const startWidthPct = sidebarWidth
@@ -201,7 +200,6 @@
     }
 
     function onPointerUp() {
-      isDragging = false
       try {
         localStorage.setItem('entropia-sidebar-width', String(Math.round(sidebarWidth)))
       } catch {}
@@ -745,6 +743,10 @@
   }
 
   let selectedAsset = $derived(assets[selectedAssetIndex] ?? null)
+  // Stable string key for asset-scoped effects. Image edits replace the asset
+  // object (versioned path) while keeping the same ID; effects keyed on this
+  // ID must NOT re-fire for those in-place replacements.
+  let selectedAssetId = $derived(selectedAsset?.id ?? null)
   let fileMetadataEntries = $derived(
     buildTechnicalMetadata({
       item,
@@ -1305,15 +1307,21 @@
     const requestToken = entitiesLoadGuard.next()
     try {
       const store = getStore()
-      let nextEntities: Entity[]
+      let allEntities: Entity[]
       if (asset) {
-        nextEntities = ((await store.entities.findByAssetId(itemId, asset.id)) as Entity[]).filter(
-          (entity) => entity.confidence == null || entity.confidence > 0.89
-        )
+        allEntities = (await store.entities.findByAssetId(itemId, asset.id)) as Entity[]
       } else {
-        nextEntities = ((await store.entities.findByItemId(itemId)) as Entity[]).filter(
-          (entity) => entity.confidence == null || entity.confidence > 0.89
-        )
+        allEntities = (await store.entities.findByItemId(itemId)) as Entity[]
+      }
+      // Display filter: hide low-confidence automatic entities.
+      const nextEntities = allEntities.filter(
+        (entity) => entity.confidence == null || entity.confidence > 0.89
+      )
+      if (allEntities.length > 0 && nextEntities.length === 0) {
+        console.warn('[ItemView] Confidence display filter (> 0.89) hid all stored entities', {
+          storedCount: allEntities.length,
+          visibleCount: nextEntities.length,
+        })
       }
       if (!entitiesLoadGuard.isCurrent(requestToken) || !isCurrentSelectedAsset(asset)) {
         return null
@@ -1876,9 +1884,14 @@
     }
   })
 
-  // Reload asset-scoped data when the selected asset changes
+  // Reload asset-scoped data when the selected asset changes.
+  // Keyed on the asset ID (not the object): editing the same asset swaps the
+  // object for one with a new versioned path, which must NOT reset the right
+  // panel tab nor reload asset-scoped state. Switching to a DIFFERENT asset
+  // (new ID) still resets the tab and refreshes everything below.
   $effect(() => {
-    const asset = selectedAsset
+    if (!selectedAssetId) return
+    const asset = untrack(() => selectedAsset)
     if (!asset) return
     const requestToken = selectedAssetStateLoadGuard.next()
 
@@ -1926,9 +1939,11 @@
     }
   })
 
-  // Reload analysis data when the selected asset changes
+  // Reload analysis data when the selected asset changes (keyed on the asset
+  // ID for the same reason as the asset-scoped effect above).
   $effect(() => {
-    const asset = selectedAsset
+    if (!selectedAssetId) return
+    const asset = untrack(() => selectedAsset)
     if (!asset) return
     void reloadEntitiesAndGeoMarkers(asset)
     void loadTriples(asset)
@@ -1954,6 +1969,23 @@
     // Reading itemId here ensures the effect re-runs when the prop changes.
     const _id = itemId
     void loadData()
+  })
+
+  onMount(() => {
+    // Escape first cancels an active editing mode (crop/erase region
+    // selection or annotation drawing) instead of navigating back; with no
+    // active mode it falls through to the global back-navigation.
+    return registerEscapeInterceptor(() => {
+      if (editTool !== 'none') {
+        editTool = 'none'
+        return true
+      }
+      if (annotationTool !== 'select') {
+        annotationTool = 'select'
+        return true
+      }
+      return false
+    })
   })
 
   onMount(() => {

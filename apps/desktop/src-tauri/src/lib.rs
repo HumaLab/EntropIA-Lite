@@ -433,6 +433,7 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             image_edit::rotate_image,
             image_edit::rotate_image_degrees,
             image_edit::erase_region,
+            image_edit::delete_asset_files,
             settings::settings_get,
             settings::settings_set,
             settings::settings_get_all,

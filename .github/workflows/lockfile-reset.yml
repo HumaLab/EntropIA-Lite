@@ -1,0 +1,91 @@
+# Standalone diagnostic probe for the pnpm lockfile reset investigation.
+# Intentionally isolated: manual dispatch plus pushes touching install inputs.
+# The structure of this file is asserted by
+# apps/desktop/src-tauri/scripts/tests/lockfile-reset-workflow.Tests.ps1.
+
+name: Lockfile Reset Probe
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - pnpm-lock.yaml
+      - package.json
+      - pnpm-workspace.yaml
+      - .npmrc
+      - .github/workflows/lockfile-reset.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lockfile-reset-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lockfile-reset-probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Checkpoint after Checkout
+        shell: pwsh
+        run: |
+          $lockfileSha256 = (Get-FileHash -Path pnpm-lock.yaml -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "checkpoint.after_checkout.sha256=$lockfileSha256"
+          $lockfileFirstLine = Get-Content -Path pnpm-lock.yaml -TotalCount 1
+          Write-Host "checkpoint.after_checkout.first_line_is_yaml_doc=$($lockfileFirstLine -eq '---')"
+          $workingBlob = (git hash-object pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "checkpoint.after_checkout.working_blob=$workingBlob"
+          $headBlob = (git rev-parse HEAD:pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "checkpoint.after_checkout.head_blob=$headBlob"
+          Write-Host "checkpoint.after_checkout.matches_head_blob=$($workingBlob -eq $headBlob)"
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v6
+        with:
+          version: 9.15.4
+          run_install: false
+
+      - name: Checkpoint after Setup pnpm
+        shell: pwsh
+        run: |
+          $lockfileSha256 = (Get-FileHash -Path pnpm-lock.yaml -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "checkpoint.after_setup_pnpm.sha256=$lockfileSha256"
+          $lockfileFirstLine = Get-Content -Path pnpm-lock.yaml -TotalCount 1
+          Write-Host "checkpoint.after_setup_pnpm.first_line_is_yaml_doc=$($lockfileFirstLine -eq '---')"
+          $workingBlob = (git hash-object pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "checkpoint.after_setup_pnpm.working_blob=$workingBlob"
+          $headBlob = (git rev-parse HEAD:pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "checkpoint.after_setup_pnpm.head_blob=$headBlob"
+          Write-Host "checkpoint.after_setup_pnpm.matches_head_blob=$($workingBlob -eq $headBlob)"
+
+      - name: Setup Node
+        uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          package-manager-cache: false
+
+      - name: Checkpoint after Setup Node
+        shell: pwsh
+        run: |
+          $lockfileSha256 = (Get-FileHash -Path pnpm-lock.yaml -Algorithm SHA256).Hash.ToLowerInvariant()
+          Write-Host "checkpoint.after_setup_node.sha256=$lockfileSha256"
+          $lockfileFirstLine = Get-Content -Path pnpm-lock.yaml -TotalCount 1
+          Write-Host "checkpoint.after_setup_node.first_line_is_yaml_doc=$($lockfileFirstLine -eq '---')"
+          $workingBlob = (git hash-object pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "checkpoint.after_setup_node.working_blob=$workingBlob"
+          $headBlob = (git rev-parse HEAD:pnpm-lock.yaml | Out-String).Trim()
+          Write-Host "checkpoint.after_setup_node.head_blob=$headBlob"
+          Write-Host "checkpoint.after_setup_node.matches_head_blob=$($workingBlob -eq $headBlob)"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          node -v
+          npm -v
+          npm exec --package=pnpm@9.15.4 -- pnpm install --frozen-lockfile
+          if ($LASTEXITCODE -ne 0) {
+            exit $LASTEXITCODE
+          }

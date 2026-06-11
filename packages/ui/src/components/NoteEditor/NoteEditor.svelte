@@ -8,8 +8,6 @@
 
   import type { NoteEditorLabels, NoteEditorProps } from './NoteEditor.types'
   import {
-    hasNoteEditorMeaningfulChanges,
-    isNoteHtmlEffectivelyEmpty,
     normalizeNoteContentForEditor,
     normalizeNoteContentForRender,
     sanitizeNoteHtml,
@@ -94,7 +92,6 @@
   let mediaStream = $state<MediaStream | null>(null)
   let dictationTimer = $state<ReturnType<typeof setInterval> | null>(null)
   let dictationChunks = $state<Blob[]>([])
-  let dictationProcessing = $state<Promise<void> | null>(null)
   let dictationSelection = $state<{ from: number; to: number } | null>(null)
   let isLinkModalOpen = $state(false)
   let linkDraftHref = $state('')
@@ -103,14 +100,7 @@
 
   const showCancel = $derived(typeof oncancel === 'function')
   const supportsDictation = $derived(typeof ondictate === 'function')
-  const isEmpty = $derived(isNoteHtmlEffectivelyEmpty(currentHtml))
   const isEditing = $derived(showCancel || !clearOnSave)
-  const hasChanges = $derived(
-    hasNoteEditorMeaningfulChanges({
-      originalContent: originalHtml,
-      currentContent: currentHtml,
-    })
-  )
   const isSaveDisabled = $derived(
     shouldDisableNoteEditorSave({
       currentContent: currentHtml,
@@ -450,7 +440,6 @@
       )
     } finally {
       dictationAutoStopped = false
-      dictationProcessing = null
     }
   }
 
@@ -465,7 +454,6 @@
         void finalizeDictation().finally(resolve)
       }
     })
-    dictationProcessing = processing
     recorder.stop()
     await processing
   }

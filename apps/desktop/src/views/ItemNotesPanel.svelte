@@ -232,6 +232,7 @@
                 class="note-expanded note-content note-content--rich"
                 use:expandedNoteContentLinkHandler
               >
+                <!-- eslint-disable-next-line svelte/no-at-html-tags -- content is sanitized by normalizeNoteContentForRender (sanitizeNoteHtml) -->
                 {@html getRenderedNoteContent(note.content)}
               </div>
             {/if}

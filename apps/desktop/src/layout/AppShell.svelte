@@ -36,7 +36,6 @@
   let searchExpanded = $state(false)
   let searchFilter = $state('')
   let searchInputEl: HTMLInputElement | undefined = $state()
-  let showCreateForm = $state(false)
 
   function toggleSidebar() {
     sidebarOpen = !sidebarOpen

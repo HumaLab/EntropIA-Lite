@@ -362,18 +362,28 @@ pub async fn render_pdf_pages(
     filename_prefix: String,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<RenderedPage>, String> {
+    use tauri::Manager;
+
     // Ensure Pdfium is initialized
     super::pdf::init_pdfium_path(&app_handle);
 
     let filename_prefix = sanitize_filename_prefix(&filename_prefix);
 
+    // The output directory must stay inside the app data dir — rendered pages
+    // become assets there, and an IPC-supplied path must not write elsewhere.
+    let app_data_dir = app_handle
+        .path()
+        .app_data_dir()
+        .map_err(|e| format!("Failed to get app data dir: {e}"))?;
+    let out_dir = validate_render_output_dir(&output_dir, &app_data_dir)?;
+
     // Create output directory if it doesn't exist
-    let out_dir = std::path::PathBuf::from(&output_dir);
     std::fs::create_dir_all(&out_dir)
         .map_err(|e| format!("Failed to create output directory: {e}"))?;
 
-    // Read PDF and render pages in a blocking task. The batch helper binds
-    // Pdfium and parses the document once for all pages.
+    // Read PDF and render pages in a blocking task. The batch helper parses
+    // the document once for all pages on the dedicated Pdfium render thread
+    // (the engine itself binds once per app lifetime).
     let pages = tokio::task::spawn_blocking(move || {
         let bytes =
             std::fs::read(&pdf_path).map_err(|e| format!("Failed to read PDF file: {e}"))?;
@@ -396,6 +406,18 @@ pub async fn render_pdf_pages(
     .map_err(|e| format!("PDF render task panicked: {e}"))??;
 
     Ok(pages)
+}
+
+/// Validate that the caller-supplied output directory resolves inside the app
+/// data dir. The directory may not exist yet (it is created right after);
+/// `..` traversal and out-of-scope paths are rejected. Returns the
+/// canonicalized directory to use for writing.
+fn validate_render_output_dir(
+    output_dir: &str,
+    app_data_dir: &std::path::Path,
+) -> Result<std::path::PathBuf, String> {
+    crate::path_utils::ensure_within_dir(output_dir, app_data_dir)
+        .map_err(|e| format!("Invalid output directory: {e}"))
 }
 
 /// Sanitize a caller-supplied filename prefix so the output files cannot
@@ -455,5 +477,30 @@ mod tests {
         assert_eq!(sanitize_filename_prefix(""), "document");
         assert_eq!(sanitize_filename_prefix("   "), "document");
         assert_eq!(sanitize_filename_prefix("///"), "___");
+    }
+
+    #[test]
+    fn validate_render_output_dir_accepts_dirs_inside_app_data() {
+        let app_data = tempfile::tempdir().expect("tempdir");
+        let existing = app_data.path().join("assets").join("col-1");
+        std::fs::create_dir_all(&existing).expect("create existing dir");
+
+        assert!(validate_render_output_dir(&existing.to_string_lossy(), app_data.path()).is_ok());
+        // Not-yet-created output dirs inside the app data dir are valid too.
+        let missing = app_data.path().join("assets").join("col-2").join("item-9");
+        assert!(validate_render_output_dir(&missing.to_string_lossy(), app_data.path()).is_ok());
+    }
+
+    #[test]
+    fn validate_render_output_dir_rejects_outside_and_traversal_paths() {
+        let app_data = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("tempdir outside");
+
+        assert!(
+            validate_render_output_dir(&outside.path().to_string_lossy(), app_data.path()).is_err()
+        );
+        let escape = app_data.path().join("assets").join("..").join("..");
+        assert!(validate_render_output_dir(&escape.to_string_lossy(), app_data.path()).is_err());
+        assert!(validate_render_output_dir("", app_data.path()).is_err());
     }
 }

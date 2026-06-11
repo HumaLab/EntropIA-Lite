@@ -108,7 +108,7 @@
       <span class="metadata-editor__header-spacer"></span>
     </div>
 
-    {#each rows as row, index}
+    {#each rows as row, index (index)}
       <div class="metadata-editor__row">
         <input
           class="metadata-editor__input metadata-editor__key"
