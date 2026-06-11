@@ -71,7 +71,9 @@ impl TranscriptionQueue {
             .spawn(move || {
                 let conn = match rusqlite::Connection::open(&db_path) {
                     Ok(c) => {
-                        let _ = c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+                        let _ = c.execute_batch(
+                            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+                        );
                         c
                     }
                     Err(e) => {
@@ -218,7 +220,7 @@ where
     F: FnMut(u8, &str),
 {
     tauri::async_runtime::block_on(async move {
-        assemblyai::AssemblyAiClient::new(api_key.to_string())
+        assemblyai::AssemblyAiClient::new(api_key.to_string())?
             .transcribe_file(Path::new(audio_path), enable_speaker_labels, on_progress)
             .await
     })
@@ -353,10 +355,7 @@ fn emit_complete(app_handle: &AppHandle, asset_id: String, result: Transcription
     crate::app_logs::info(
         app_handle,
         "transcription",
-        format!(
-            "Transcripción completada: asset_id={} chars={}",
-            asset_id, text_length
-        ),
+        format!("Transcripción completada: asset_id={asset_id} chars={text_length}"),
     );
     let _ = app_handle.emit(
         "transcription:complete",

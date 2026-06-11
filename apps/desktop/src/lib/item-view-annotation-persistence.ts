@@ -50,6 +50,7 @@ export class DebouncedAnnotationPersistor {
     private readonly options: {
       delayMs: number
       persist: (assetId: string, annotations: ViewerAnnotation[]) => Promise<void>
+      onError?: (error: unknown) => void
     }
   ) {}
 
@@ -66,7 +67,11 @@ export class DebouncedAnnotationPersistor {
         return
       }
 
-      await this.options.persist(saveJob.assetId, saveJob.annotations)
+      try {
+        await this.options.persist(saveJob.assetId, saveJob.annotations)
+      } catch (error) {
+        this.options.onError?.(error)
+      }
     }, this.options.delayMs)
   }
 
@@ -79,7 +84,11 @@ export class DebouncedAnnotationPersistor {
 
     const saveJob = this.pendingSave
     this.pendingSave = null
-    await this.options.persist(saveJob.assetId, saveJob.annotations)
+    try {
+      await this.options.persist(saveJob.assetId, saveJob.annotations)
+    } catch (error) {
+      this.options.onError?.(error)
+    }
   }
 
   getPendingAssetId() {

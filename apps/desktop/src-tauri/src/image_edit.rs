@@ -4,7 +4,8 @@
 //! browser cache invalidation and support undo. The previous file is
 //! kept on disk so undo can restore it by pointing the asset path back.
 
-use image::{DynamicImage, GenericImage, GenericImageView, Rgba, RgbaImage};
+use image::codecs::jpeg::JpegEncoder;
+use image::{DynamicImage, GenericImageView, ImageBuffer, Pixel, Rgb, Rgba, RgbaImage};
 use imageproc::geometric_transformations::{rotate_about_center, Interpolation};
 use std::path::Path;
 
@@ -55,9 +56,9 @@ fn next_version_path(path: &str, force_extension: Option<&str>) -> String {
     // Find the next available version number
     let mut version = first_version;
     loop {
-        let new_stem = format!("{}_v{}", base_stem, version);
+        let new_stem = format!("{base_stem}_v{version}");
         let new_filename = if !ext.is_empty() {
-            format!("{}.{}", new_stem, ext)
+            format!("{new_stem}.{ext}")
         } else {
             new_stem
         };
@@ -66,6 +67,26 @@ fn next_version_path(path: &str, force_extension: Option<&str>) -> String {
             return new_path.to_string_lossy().to_string();
         }
         version += 1;
+    }
+}
+
+/// JPEG quality used when re-encoding edited images. `DynamicImage::save`
+/// uses the image crate's default of 75, which compounds visible generational
+/// loss when edits are chained (each edit re-encodes the previous output).
+const JPEG_QUALITY: u8 = 92;
+
+/// Save an image inferring the format from the path, but encoding JPEG
+/// targets at [`JPEG_QUALITY`] instead of the encoder default of 75.
+fn save_image(img: &DynamicImage, path: &str) -> image::ImageResult<()> {
+    let is_jpeg = Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|ext| ext.eq_ignore_ascii_case("jpg") || ext.eq_ignore_ascii_case("jpeg"));
+    if is_jpeg {
+        let writer = std::io::BufWriter::new(std::fs::File::create(path)?);
+        img.write_with_encoder(JpegEncoder::new_with_quality(writer, JPEG_QUALITY))
+    } else {
+        img.save(path)
     }
 }
 
@@ -106,17 +127,11 @@ fn crop_image_file(
         return Err("Crop region is outside image bounds or has zero dimensions".to_string());
     }
 
-    // Use crop_imm to get a SubImage view, then copy to a new owned image
-    let sub = img.crop_imm(cx, cy, cw, ch);
-    let mut result = DynamicImage::new_rgba8(cw, ch);
-    result
-        .copy_from(&sub, 0, 0)
-        .map_err(|e| format!("Failed to copy cropped region: {e}"))?;
+    // crop_imm returns an owned cropped image preserving the source colour type
+    let result = img.crop_imm(cx, cy, cw, ch);
 
     let new_path = next_version_path(&path, None);
-    result
-        .save(&new_path)
-        .map_err(|e| format!("Failed to save cropped image: {e}"))?;
+    save_image(&result, &new_path).map_err(|e| format!("Failed to save cropped image: {e}"))?;
 
     Ok(ImageEditResult {
         path: new_path,
@@ -156,9 +171,7 @@ fn rotate_image_file(path: String, direction: String) -> Result<ImageEditResult,
 
     let (w, h) = rotated.dimensions();
     let new_path = next_version_path(&path, None);
-    rotated
-        .save(&new_path)
-        .map_err(|e| format!("Failed to save rotated image: {e}"))?;
+    save_image(&rotated, &new_path).map_err(|e| format!("Failed to save rotated image: {e}"))?;
 
     Ok(ImageEditResult {
         path: new_path,
@@ -223,6 +236,31 @@ fn rotate_image_degrees_file(path: String, degrees: f32) -> Result<ImageEditResu
     })
 }
 
+/// Fill a rectangular region of an image buffer with a solid colour.
+///
+/// Writes contiguous row slices instead of calling bounds-checked
+/// `put_pixel` once per pixel. The region must be within bounds.
+fn fill_rect<P: Pixel>(
+    buf: &mut ImageBuffer<P, Vec<P::Subpixel>>,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    color: P,
+) {
+    let channels = P::CHANNEL_COUNT as usize;
+    let stride = buf.width() as usize * channels;
+    let color_channels = color.channels().to_vec();
+    let raw: &mut [P::Subpixel] = buf;
+    for row in y..y + height {
+        let start = row as usize * stride + x as usize * channels;
+        let row_slice = &mut raw[start..start + width as usize * channels];
+        for px in row_slice.chunks_exact_mut(channels) {
+            px.copy_from_slice(&color_channels);
+        }
+    }
+}
+
 /// Erase (fill) a rectangular region of an image with a solid or transparent color.
 ///
 /// Saves the result as a NEW versioned file (never in-place).
@@ -273,9 +311,6 @@ fn erase_region_file(
     let supports_alpha = !matches!(ext.as_str(), "jpg" | "jpeg");
     let needs_conversion = fill == "transparent" && !supports_alpha;
 
-    // Always work in RGBA for erase — ensures alpha channel exists
-    let mut rgba_img = img.to_rgba8();
-
     // Determine fill colour
     let fill_color: Rgba<u8> = match fill.as_str() {
         "transparent" => Rgba([0, 0, 0, 0]),
@@ -288,28 +323,38 @@ fn erase_region_file(
         }
     };
 
-    // Fill the region pixel-by-pixel
-    for py in ey..ey + eh {
-        for px in ex..ex + ew {
-            rgba_img.put_pixel(px, py, fill_color);
+    // Opaque fills on 8-bit RGB/RGBA sources are applied in place, keeping the
+    // source colour type. Anything else (transparent fill, other colour types)
+    // goes through an RGBA copy so the fill and alpha channel are well-defined.
+    let result = match img {
+        DynamicImage::ImageRgb8(mut buf) if fill_color[3] == 255 => {
+            let rgb_fill = Rgb([fill_color[0], fill_color[1], fill_color[2]]);
+            fill_rect(&mut buf, ex, ey, ew, eh, rgb_fill);
+            DynamicImage::ImageRgb8(buf)
         }
-    }
+        DynamicImage::ImageRgba8(mut buf) => {
+            fill_rect(&mut buf, ex, ey, ew, eh, fill_color);
+            DynamicImage::ImageRgba8(buf)
+        }
+        other => {
+            let mut rgba_img = other.to_rgba8();
+            fill_rect(&mut rgba_img, ex, ey, ew, eh, fill_color);
+            DynamicImage::ImageRgba8(rgba_img)
+        }
+    };
 
-    let (w, h) = rgba_img.dimensions();
+    let (w, h) = result.dimensions();
 
     // Generate versioned path with the appropriate extension
     let forced_ext = if needs_conversion { Some("png") } else { None };
     let new_path = next_version_path(&path, forced_ext);
 
-    let result = DynamicImage::ImageRgba8(rgba_img);
     if needs_conversion {
         result
             .save_with_format(&new_path, image::ImageFormat::Png)
             .map_err(|e| format!("Failed to save image as PNG: {e}"))?;
     } else {
-        result
-            .save(&new_path)
-            .map_err(|e| format!("Failed to save erased image: {e}"))?;
+        save_image(&result, &new_path).map_err(|e| format!("Failed to save erased image: {e}"))?;
     }
 
     Ok(ImageEditResult {
@@ -351,5 +396,95 @@ mod tests {
         assert!(rotate_image_degrees_file("missing.png".to_string(), 0.0).is_err());
         assert!(rotate_image_degrees_file("missing.png".to_string(), f32::NAN).is_err());
         assert!(rotate_image_degrees_file("missing.png".to_string(), 361.0).is_err());
+    }
+
+    #[test]
+    fn crop_image_file_writes_cropped_versioned_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source_path = dir.path().join("sample.png");
+        let img = ImageBuffer::from_pixel(10, 4, Rgba([255, 0, 0, 255]));
+        DynamicImage::ImageRgba8(img)
+            .save_with_format(&source_path, ImageFormat::Png)
+            .expect("save source");
+
+        let result = crop_image_file(source_path.to_string_lossy().to_string(), 2, 1, 4, 2)
+            .expect("crop image");
+
+        assert!(result.path.ends_with("sample_v2.png"));
+        assert_eq!((result.width, result.height), (4, 2));
+        assert!(!result.format_changed);
+        let cropped = image::open(&result.path).expect("open cropped");
+        assert_eq!(cropped.dimensions(), (4, 2));
+        assert_eq!(cropped.get_pixel(0, 0), Rgba([255, 0, 0, 255]));
+    }
+
+    #[test]
+    fn crop_image_file_reencodes_jpeg_sources_as_jpeg() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source_path = dir.path().join("sample.jpg");
+        let img = ImageBuffer::from_pixel(16, 16, Rgba([0, 128, 255, 255]));
+        DynamicImage::ImageRgba8(img)
+            .save_with_format(&source_path, ImageFormat::Jpeg)
+            .expect("save source");
+
+        let result = crop_image_file(source_path.to_string_lossy().to_string(), 0, 0, 8, 8)
+            .expect("crop image");
+
+        assert!(result.path.ends_with("sample_v2.jpg"));
+        assert!(!result.format_changed);
+        let cropped = image::open(&result.path).expect("open cropped");
+        assert_eq!(cropped.dimensions(), (8, 8));
+    }
+
+    #[test]
+    fn erase_region_file_fills_white_without_rgba_promotion() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source_path = dir.path().join("sample.png");
+        let img = ImageBuffer::from_pixel(8, 8, Rgb([10, 20, 30]));
+        DynamicImage::ImageRgb8(img)
+            .save_with_format(&source_path, ImageFormat::Png)
+            .expect("save source");
+
+        let result = erase_region_file(
+            source_path.to_string_lossy().to_string(),
+            2,
+            2,
+            4,
+            4,
+            "white".to_string(),
+        )
+        .expect("erase region");
+
+        assert!(!result.format_changed);
+        let erased = image::open(&result.path).expect("open erased");
+        // Opaque fills keep the source colour type (no RGBA promotion)
+        assert!(matches!(erased, DynamicImage::ImageRgb8(_)));
+        assert_eq!(erased.get_pixel(3, 3), Rgba([255, 255, 255, 255]));
+        assert_eq!(erased.get_pixel(0, 0), Rgba([10, 20, 30, 255]));
+    }
+
+    #[test]
+    fn erase_region_file_transparent_fill_converts_jpeg_to_png() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let source_path = dir.path().join("sample.jpg");
+        let img = ImageBuffer::from_pixel(8, 8, Rgba([200, 50, 50, 255]));
+        DynamicImage::ImageRgba8(img)
+            .save_with_format(&source_path, ImageFormat::Jpeg)
+            .expect("save source");
+
+        let result = erase_region_file(
+            source_path.to_string_lossy().to_string(),
+            0,
+            0,
+            4,
+            4,
+            "transparent".to_string(),
+        )
+        .expect("erase region");
+
+        assert!(result.format_changed);
+        assert!(result.path.ends_with("sample_v2.png"));
+        let erased = image::open(&result.path).expect("open erased");
+        assert_eq!(erased.get_pixel(1, 1)[3], 0);
     }
 }

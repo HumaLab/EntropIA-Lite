@@ -56,12 +56,10 @@ export function selectOcrCorrectionAssetId<TAsset extends { id: string }>({
   completedTargetId,
   selectedAssetId,
   assets,
-  hasOcrText: _hasOcrText,
 }: {
   completedTargetId: string
   selectedAssetId: string | null | undefined
   assets: TAsset[]
-  hasOcrText: (assetId: string) => boolean
 }): string | null {
   if (selectedAssetId === completedTargetId) {
     return completedTargetId

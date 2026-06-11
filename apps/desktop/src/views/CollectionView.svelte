@@ -212,10 +212,8 @@
     itemAssetMeta = newMeta
   }
 
-  let filtered = $derived(
-    searchQuery ? items : items // search is handled by repo call below
-  )
-
+  // Search filtering is delegated to the repo call in loadItems(); there is
+  // no client-side filtering of the loaded items.
   async function loadItems() {
     const requestId = ++itemsLoadRequestId
     try {

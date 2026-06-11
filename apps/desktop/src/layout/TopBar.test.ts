@@ -141,7 +141,7 @@ describe('TopBar', () => {
     expect(screen.getByRole('button', { name: 'Minimizar ventana' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Maximizar o restaurar ventana' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Cerrar ventana' })).toBeInTheDocument()
-    expect(screen.getByRole('searchbox', { name: 'Buscar archivos' })).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: 'Buscar archivos' })).toBeInTheDocument()
     expect(screen.getByRole('navigation', { name: 'Breadcrumb' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Documento anterior' })).not.toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Documento siguiente' })).not.toBeInTheDocument()
@@ -194,14 +194,14 @@ describe('TopBar', () => {
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: 'Open settings' })).toBeInTheDocument()
-      expect(screen.getByRole('searchbox', { name: 'Search files' })).toBeInTheDocument()
+      expect(screen.getByRole('combobox', { name: 'Search files' })).toBeInTheDocument()
     })
   })
 
   it('uses an icon-only clear button for global search', async () => {
     render(TopBar)
 
-    const input = screen.getByRole('searchbox', { name: 'Buscar archivos' })
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
     await fireEvent.input(input, { target: { value: 'acta' } })
 
     expect(screen.getByRole('button', { name: 'Limpiar búsqueda' })).not.toHaveTextContent('×')
@@ -218,15 +218,15 @@ describe('TopBar', () => {
 
     render(TopBar)
 
-    const input = screen.getByRole('searchbox', { name: 'Buscar archivos' })
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
     await fireEvent.input(input, { target: { value: 'acta' } })
     vi.advanceTimersByTime(300)
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Acta fundacional/i })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: /Acta fundacional/i })).toBeInTheDocument()
     })
 
-    await fireEvent.click(screen.getByRole('button', { name: /Acta fundacional/i }))
+    await fireEvent.click(screen.getByRole('option', { name: /Acta fundacional/i }))
 
     expect(navigateMock).toHaveBeenNthCalledWith(1, {
       name: 'collection',
@@ -240,6 +240,105 @@ describe('TopBar', () => {
       itemId: 'item-1',
       itemTitle: 'Acta fundacional',
     })
+  })
+
+  it('exposes combobox semantics for the global search dropdown', async () => {
+    storeRef.current.items.searchGlobal.mockResolvedValueOnce([
+      { id: 'item-1', title: 'Acta fundacional', collectionId: 'col-1' },
+    ])
+    storeRef.current.collections.findById.mockResolvedValueOnce({
+      id: 'col-1',
+      name: 'Archivo',
+    })
+
+    render(TopBar)
+
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
+    expect(input).toHaveAttribute('aria-expanded', 'false')
+
+    await fireEvent.input(input, { target: { value: 'acta' } })
+    vi.advanceTimersByTime(300)
+
+    await waitFor(() => {
+      expect(screen.getByRole('listbox', { name: 'Buscar archivos' })).toBeInTheDocument()
+    })
+
+    expect(input).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('option', { name: /Acta fundacional/i })).toBeInTheDocument()
+  })
+
+  it('navigates global search results with arrow keys and selects with Enter', async () => {
+    storeRef.current.items.searchGlobal.mockResolvedValueOnce([
+      { id: 'item-1', title: 'Acta fundacional', collectionId: 'col-1' },
+      { id: 'item-2', title: 'Acta vigente', collectionId: 'col-1' },
+    ])
+    storeRef.current.collections.findById.mockResolvedValue({
+      id: 'col-1',
+      name: 'Archivo',
+    })
+
+    render(TopBar)
+
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
+    await fireEvent.input(input, { target: { value: 'acta' } })
+    vi.advanceTimersByTime(300)
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /Acta fundacional/i })).toBeInTheDocument()
+    })
+
+    await fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(screen.getByRole('option', { name: /Acta fundacional/i })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(input).toHaveAttribute(
+      'aria-activedescendant',
+      'topbar-global-search-listbox-option-0'
+    )
+
+    await fireEvent.keyDown(input, { key: 'ArrowDown' })
+    expect(screen.getByRole('option', { name: /Acta vigente/i })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+
+    await fireEvent.keyDown(input, { key: 'Enter' })
+
+    expect(navigateMock).toHaveBeenNthCalledWith(2, {
+      name: 'item',
+      collectionId: 'col-1',
+      collectionName: 'Archivo',
+      itemId: 'item-2',
+      itemTitle: 'Acta vigente',
+    })
+  })
+
+  it('keeps results open while focus moves within the search container', async () => {
+    storeRef.current.items.searchGlobal.mockResolvedValueOnce([
+      { id: 'item-1', title: 'Acta fundacional', collectionId: 'col-1' },
+    ])
+    storeRef.current.collections.findById.mockResolvedValueOnce({
+      id: 'col-1',
+      name: 'Archivo',
+    })
+
+    render(TopBar)
+
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
+    await fireEvent.input(input, { target: { value: 'acta' } })
+    vi.advanceTimersByTime(300)
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /Acta fundacional/i })).toBeInTheDocument()
+    })
+
+    const option = screen.getByRole('option', { name: /Acta fundacional/i })
+    await fireEvent.focusOut(input, { relatedTarget: option })
+    expect(screen.getByRole('option', { name: /Acta fundacional/i })).toBeInTheDocument()
+
+    await fireEvent.focusOut(input, { relatedTarget: document.body })
+    expect(screen.queryByRole('option', { name: /Acta fundacional/i })).not.toBeInTheDocument()
   })
 
   it('ignores stale global search results when a newer query finishes first', async () => {
@@ -256,7 +355,7 @@ describe('TopBar', () => {
 
     render(TopBar)
 
-    const input = screen.getByRole('searchbox', { name: 'Buscar archivos' })
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
     await fireEvent.input(input, { target: { value: 'acta' } })
     vi.advanceTimersByTime(300)
 
@@ -272,7 +371,7 @@ describe('TopBar', () => {
     ])
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: /Acta vigente/i })).toBeInTheDocument()
     })
 
     firstSearch.resolve([
@@ -280,8 +379,8 @@ describe('TopBar', () => {
     ])
     await Promise.resolve()
 
-    expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
-    expect(screen.queryByRole('button', { name: /Acta vieja/i })).not.toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Acta vigente/i })).toBeInTheDocument()
+    expect(screen.queryByRole('option', { name: /Acta vieja/i })).not.toBeInTheDocument()
   })
 
   it('shows a localized error when the current global search fails', async () => {
@@ -290,7 +389,7 @@ describe('TopBar', () => {
 
     render(TopBar)
 
-    const input = screen.getByRole('searchbox', { name: 'Buscar archivos' })
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
     await fireEvent.input(input, { target: { value: 'acta' } })
     await vi.advanceTimersByTimeAsync(300)
 
@@ -317,7 +416,7 @@ describe('TopBar', () => {
 
     render(TopBar)
 
-    const input = screen.getByRole('searchbox', { name: 'Buscar archivos' })
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
     await fireEvent.input(input, { target: { value: 'acta' } })
     vi.advanceTimersByTime(300)
 
@@ -333,13 +432,13 @@ describe('TopBar', () => {
     ])
 
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
+      expect(screen.getByRole('option', { name: /Acta vigente/i })).toBeInTheDocument()
     })
 
     firstSearch.reject(new Error('stale search failed'))
     await Promise.resolve()
 
-    expect(screen.getByRole('button', { name: /Acta vigente/i })).toBeInTheDocument()
+    expect(screen.getByRole('option', { name: /Acta vigente/i })).toBeInTheDocument()
     expect(screen.queryByText('No se pudo completar la búsqueda. Probá de nuevo.')).not.toBeInTheDocument()
     expect(consoleErrorSpy).not.toHaveBeenCalled()
     consoleErrorSpy.mockRestore()

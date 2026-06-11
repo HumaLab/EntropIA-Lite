@@ -132,4 +132,30 @@ describe('TranscriptionStore', () => {
       segmentsCount: 0,
     })
   })
+
+  it('stopListening before startListening resolves unlistens late registrations', async () => {
+    const cleanup = vi.fn()
+    let resolveFirstListen: ((unlisten: () => void) => void) | null = null
+    const store = new TranscriptionStore()
+
+    let callCount = 0
+    const startPromise = store.startListening(() => {
+      callCount++
+      if (callCount === 1) {
+        return new Promise((resolve) => {
+          resolveFirstListen = resolve
+        })
+      }
+      return Promise.resolve(cleanup)
+    })
+
+    // Unmount happens while the listen() registrations are still in flight
+    store.stopListening()
+
+    resolveFirstListen!(cleanup)
+    await startPromise
+
+    // All late registrations must be unlistened immediately, not leaked
+    expect(cleanup).toHaveBeenCalledTimes(3)
+  })
 })

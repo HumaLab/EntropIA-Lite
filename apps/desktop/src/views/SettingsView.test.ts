@@ -91,8 +91,12 @@ describe('SettingsView', () => {
     await fireEvent.input(ocrPrompt, { target: { value: 'Custom OCR {text}' } })
 
     await fireEvent.click(screen.getByRole('tab', { name: 'Model Params' }))
-    await fireEvent.input(screen.getAllByLabelText('temperature (0-2)')[0], { target: { value: '0.6' } })
-    await fireEvent.input(screen.getAllByLabelText('maxTokens (1-32000, vacío = default)')[0], {
+    const temperatureInput = screen.getAllByLabelText('temperature (0-2)')[0]
+    const maxTokensInput = screen.getAllByLabelText('maxTokens (1-32000, vacío = default)')[0]
+    expect(temperatureInput).toBeDefined()
+    expect(maxTokensInput).toBeDefined()
+    await fireEvent.input(temperatureInput!, { target: { value: '0.6' } })
+    await fireEvent.input(maxTokensInput!, {
       target: { value: '1234' },
     })
 

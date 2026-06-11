@@ -34,7 +34,7 @@ describe('AudioPlayer', () => {
 
     await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1))
     expect(fetchMock).toHaveBeenCalledWith('/audio/interview.wav')
-    expect((URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[0][0].type).toBe(
+    expect((URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[0]![0].type).toBe(
       'audio/wav'
     )
     expect(URL.revokeObjectURL).not.toHaveBeenCalled()
@@ -63,7 +63,7 @@ describe('AudioPlayer', () => {
     await waitFor(() => expect(URL.createObjectURL).toHaveBeenCalledTimes(1))
     expect(fallbackBlobLoader).toHaveBeenCalledTimes(1)
     expect(fetchMock).not.toHaveBeenCalled()
-    expect((URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[0][0].type).toBe(
+    expect((URL.createObjectURL as ReturnType<typeof vi.fn>).mock.calls[0]![0].type).toBe(
       'audio/wav'
     )
     expect(URL.revokeObjectURL).not.toHaveBeenCalled()

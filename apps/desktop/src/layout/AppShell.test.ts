@@ -121,7 +121,7 @@ describe('AppShell', () => {
 
   it('delegates open explorer width and border ownership to DocumentExplorer', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'AppShell.svelte'), 'utf-8')
-    const sidebarRule = source.match(/\.sidebar \{(?<body>[\s\S]*?)\n  \}/)?.groups?.body ?? ''
+    const sidebarRule = source.match(/\.sidebar \{(?<body>[\s\S]*?)\n {2}\}/)?.groups?.body ?? ''
 
     expect(sidebarRule).not.toContain('width: 240px')
     expect(sidebarRule).not.toContain('border-right')
@@ -141,6 +141,36 @@ describe('AppShell', () => {
     expect(invokeMock).toHaveBeenCalledWith('open_external_url', {
       url: 'https://hlab.com.ar/',
     })
+  })
+
+  it('toggles the sidebar with Ctrl+B except when typing in editable targets', async () => {
+    render(AppShellHost)
+
+    const editable = document.createElement('div')
+    editable.setAttribute('contenteditable', 'true')
+    document.body.appendChild(editable)
+
+    try {
+      // Plain Ctrl+B collapses the sidebar.
+      await fireEvent.keyDown(document.body, { key: 'b', ctrlKey: true })
+      expect(screen.getByRole('button', { name: 'Expandir panel (Ctrl+B)' })).toBeInTheDocument()
+
+      // Ctrl+B from a contenteditable surface (e.g. the note editor) is ignored.
+      await fireEvent.keyDown(editable, { key: 'b', ctrlKey: true })
+      expect(screen.getByRole('button', { name: 'Expandir panel (Ctrl+B)' })).toBeInTheDocument()
+
+      // Plain Ctrl+B expands it again.
+      await fireEvent.keyDown(document.body, { key: 'b', ctrlKey: true })
+      expect(screen.getByRole('button', { name: 'Colapsar panel (Ctrl+B)' })).toBeInTheDocument()
+
+      // Ctrl+B from a text input is ignored too.
+      await fireEvent.click(screen.getByRole('button', { name: 'Filtrar colecciones' }))
+      const filterInput = screen.getByPlaceholderText('Filtrar colecciones...')
+      await fireEvent.keyDown(filterInput, { key: 'b', ctrlKey: true })
+      expect(screen.getByRole('button', { name: 'Colapsar panel (Ctrl+B)' })).toBeInTheDocument()
+    } finally {
+      editable.remove()
+    }
   })
 
   it('reacts to locale changes in footer and sidebar copy', async () => {

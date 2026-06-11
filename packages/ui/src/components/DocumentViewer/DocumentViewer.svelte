@@ -1,4 +1,5 @@
 <script lang="ts">
+  import type { PDFDocumentLoadingTask, PDFDocumentProxy, RenderTask } from 'pdfjs-dist'
   import AnnotationToolbar from '../AnnotationToolbar/AnnotationToolbar.svelte'
   import AudioPlayer from '../AudioPlayer/AudioPlayer.svelte'
   import { ActionIcon } from '../Button'
@@ -95,11 +96,13 @@
   let canvasEl: HTMLCanvasElement | undefined = $state()
   let imgEl: HTMLImageElement | undefined = $state()
   let containerEl: HTMLElement | undefined = $state()
-  let pdfDoc: any = null
+  let pdfDoc: PDFDocumentProxy | null = null
   let pdfCanvasW = $state(0)
   let pdfCanvasH = $state(0)
   let renderRequestId = 0
-  let activeRenderTask: any = null
+  let activeRenderTask: RenderTask | null = null
+  let loadRequestId = 0
+  let activeLoadingTask: PDFDocumentLoadingTask | null = null
 
   // Image geometry — natural (intrinsic) dimensions of the source file
   let naturalW = $state(0)
@@ -685,16 +688,32 @@
     return err instanceof Error && err.name === 'RenderingCancelledException'
   }
 
-  function resetViewerState() {
+  function destroyPdfResources() {
+    const loadingTask = activeLoadingTask
+    activeLoadingTask = null
+    pdfDoc = null
+    if (!loadingTask || typeof loadingTask.destroy !== 'function') return
+    // destroy() frees the parsed document and terminates its dedicated worker.
+    void loadingTask.destroy().catch(() => {
+      // Aborted loads reject on destroy; nothing left to release.
+    })
+  }
+
+  function teardownPdf() {
     renderRequestId++
+    loadRequestId++
     cancelActiveRenderTask()
     activeRenderTask = null
+    destroyPdfResources()
+  }
+
+  function resetViewerState() {
+    teardownPdf()
     loading = false
     error = null
     pdfPage = 1
     totalPages = 0
     pdfZoom = 1.0
-    pdfDoc = null
     pdfCanvasW = 0
     pdfCanvasH = 0
   }
@@ -703,7 +722,8 @@
     error = null
   }
 
-  async function loadPdf() {
+  async function loadPdf(url: string) {
+    const requestId = ++loadRequestId
     try {
       activatePdfMode()
       const pdfjs = await import('pdfjs-dist')
@@ -711,15 +731,22 @@
         'pdfjs-dist/build/pdf.worker.min.mjs',
         import.meta.url
       ).href
-      const loadingTask = pdfjs.getDocument(assetUrl)
-      pdfDoc = await loadingTask.promise
-      totalPages = pdfDoc.numPages
-      pdfPage = Math.min(Math.max(currentPage, 1), Math.max(pdfDoc.numPages, 1))
+      if (requestId !== loadRequestId) return
+      const loadingTask = pdfjs.getDocument(url)
+      activeLoadingTask = loadingTask
+      const doc = await loadingTask.promise
+      if (requestId !== loadRequestId) return
+      pdfDoc = doc
+      totalPages = doc.numPages
+      pdfPage = Math.min(Math.max(currentPage, 1), Math.max(doc.numPages, 1))
       await renderPage()
     } catch (err) {
+      if (requestId !== loadRequestId) return
       error = err instanceof Error ? err.message : labels.pdfLoadError
     } finally {
-      loading = false
+      if (requestId === loadRequestId) {
+        loading = false
+      }
     }
   }
 
@@ -819,8 +846,13 @@
       resetViewerState()
       return
     }
+    // Read synchronously so the effect re-runs when the asset changes (pdf -> pdf)
+    const url = assetUrl
     activatePdfMode()
-    void loadPdf()
+    void loadPdf(url)
+    return () => {
+      teardownPdf()
+    }
   })
 
   $effect(() => {

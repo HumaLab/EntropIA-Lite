@@ -66,9 +66,15 @@ const pdfMock = vi.hoisted(() => {
     getPage: vi.fn(() => Promise.resolve(mockPage)),
   }
 
+  const createLoadingTask = (document: unknown = mockDocument) => ({
+    promise: Promise.resolve(document),
+    destroy: vi.fn(() => Promise.resolve()),
+  })
+
   return {
     createPage,
-    getDocument: vi.fn(() => ({ promise: Promise.resolve(mockDocument) })),
+    createLoadingTask,
+    getDocument: vi.fn(() => createLoadingTask()),
     mockDocument,
     mockPage,
   }
@@ -92,7 +98,7 @@ describe('DocumentViewer', () => {
     pdfMock.mockDocument.getPage.mockReset()
     pdfMock.mockDocument.getPage.mockImplementation(() => Promise.resolve(pdfMock.mockPage))
     pdfMock.getDocument.mockReset()
-    pdfMock.getDocument.mockImplementation(() => ({ promise: Promise.resolve(pdfMock.mockDocument) }))
+    pdfMock.getDocument.mockImplementation(() => pdfMock.createLoadingTask())
   })
 
   function deferred<T>() {
@@ -1358,6 +1364,88 @@ describe('DocumentViewer', () => {
       expect(screen.getByRole('img')).toHaveAttribute('src', 'asset://localhost/path/to/image.jpg')
       expect(screen.queryByTestId('pdf-toolbar')).not.toBeInTheDocument()
       expect(screen.queryByTestId('pdf-loading')).not.toBeInTheDocument()
+    })
+
+    it('reloads and destroys the previous document when the asset url changes while staying in pdf mode', async () => {
+      const view = render(DocumentViewer, {
+        props: {
+          path: '/path/to/doc-a.pdf',
+          type: 'pdf',
+          assetUrl: 'asset://localhost/path/to/doc-a.pdf',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+        },
+      })
+
+      await waitFor(() => expect(pdfMock.getDocument).toHaveBeenCalledTimes(1))
+      const firstTask = pdfMock.getDocument.mock.results[0]!.value
+
+      await view.rerender({
+        path: '/path/to/doc-b.pdf',
+        type: 'pdf',
+        assetUrl: 'asset://localhost/path/to/doc-b.pdf',
+        annotations: [],
+        selectedAnnotationId: null,
+        annotationTool: 'select',
+        annotationColor: 'var(--color-accent)',
+      })
+
+      await waitFor(() => expect(pdfMock.getDocument).toHaveBeenCalledTimes(2))
+      expect(pdfMock.getDocument).toHaveBeenLastCalledWith('asset://localhost/path/to/doc-b.pdf')
+      expect(firstTask.destroy).toHaveBeenCalledTimes(1)
+    })
+
+    it('destroys the pdf document when switching to image mode', async () => {
+      const view = render(DocumentViewer, {
+        props: {
+          path: '/path/to/doc.pdf',
+          type: 'pdf',
+          assetUrl: 'asset://localhost/path/to/doc.pdf',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+        },
+      })
+
+      await waitFor(() => expect(pdfMock.getDocument).toHaveBeenCalledTimes(1))
+      const loadingTask = pdfMock.getDocument.mock.results[0]!.value
+
+      await view.rerender({
+        path: '/path/to/image.jpg',
+        type: 'image',
+        assetUrl: 'asset://localhost/path/to/image.jpg',
+        annotations: [],
+        selectedAnnotationId: null,
+        annotationTool: 'select',
+        annotationColor: 'var(--color-accent)',
+      })
+
+      // Exactly once — effect cleanup and resetViewerState must not double-destroy
+      expect(loadingTask.destroy).toHaveBeenCalledTimes(1)
+    })
+
+    it('destroys the pdf document when the component unmounts', async () => {
+      const view = render(DocumentViewer, {
+        props: {
+          path: '/path/to/doc.pdf',
+          type: 'pdf',
+          assetUrl: 'asset://localhost/path/to/doc.pdf',
+          annotations: [],
+          selectedAnnotationId: null,
+          annotationTool: 'select',
+          annotationColor: 'var(--color-accent)',
+        },
+      })
+
+      await waitFor(() => expect(pdfMock.getDocument).toHaveBeenCalledTimes(1))
+      const loadingTask = pdfMock.getDocument.mock.results[0]!.value
+
+      view.unmount()
+
+      expect(loadingTask.destroy).toHaveBeenCalledTimes(1)
     })
   })
 })

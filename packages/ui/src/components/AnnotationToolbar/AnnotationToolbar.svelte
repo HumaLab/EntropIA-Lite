@@ -199,6 +199,7 @@
     if (!container) return
 
     function updateAvailableHeight() {
+      if (!container) return
       const nextHeight = container.getBoundingClientRect().height
       if (nextHeight <= 0) return
       toolbarAvailableHeight = Math.max(0, nextHeight - TOOLBAR_SAFE_INSET)

@@ -126,9 +126,12 @@ impl OcrQueue {
             .stack_size(8 * 1024 * 1024)
             .spawn(move || {
                 pdf::init_pdfium_path(&app_handle);
-                let conn = match rusqlite::Connection::open(&db_path) {
+                let mut conn = match rusqlite::Connection::open(&db_path) {
                     Ok(c) => {
                         let _ = c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+                        // Other connections (UI, NLP, LLM workers) write to the same
+                        // DB; wait for locks instead of failing with SQLITE_BUSY.
+                        let _ = c.busy_timeout(std::time::Duration::from_secs(5));
                         c
                     }
                     Err(e) => {
@@ -151,7 +154,7 @@ impl OcrQueue {
                         tauri::async_runtime::block_on(process_job(&conn, &job, &app_handle));
 
                     match result {
-                        Ok(output) => complete_job(&conn, &app_handle, &asset_id, output),
+                        Ok(output) => complete_job(&mut conn, &app_handle, &asset_id, output),
                         Err(error) => emit_error(&app_handle, asset_id, error),
                     }
                 }
@@ -161,35 +164,53 @@ impl OcrQueue {
 }
 
 fn complete_job(
-    conn: &rusqlite::Connection,
+    conn: &mut rusqlite::Connection,
     app_handle: &AppHandle,
     asset_id: &str,
     output: ProcessedOcrOutput,
 ) {
     let method = output.ocr.method.clone();
     let text_content = output.ocr.text.clone();
-    let save_result = save_extraction(conn, asset_id, &text_content, &method)
-        .and_then(|_| match output.layout.as_ref() {
-            Some(layout) => save_layout(conn, asset_id, layout),
-            None => delete_layout(conn, asset_id),
-        })
-        .and_then(|_| lookup_item_id_for_asset(conn, asset_id));
 
-    if let Err(e) = &save_result {
+    if let Err(e) = persist_output(
+        conn,
+        asset_id,
+        &text_content,
+        &method,
+        output.layout.as_ref(),
+    ) {
         crate::app_logs::error(
             app_handle,
             "ocr",
             format!("No se pudo guardar extracción de {asset_id}: {e}"),
         );
-    } else if let Ok(Some(item_id)) = &save_result {
-        let nlp_queue = app_handle.state::<NlpQueue>();
-        let _ = nlp_queue.submit(NlpJob::IndexFts {
-            item_id: item_id.clone(),
-        });
-        let _ = nlp_queue.submit(NlpJob::ComputeAssetEmbedding {
-            item_id: item_id.clone(),
-            asset_id: asset_id.to_string(),
-        });
+        emit_error(
+            app_handle,
+            asset_id.to_string(),
+            format!("No se pudo guardar la extracción en la base de datos: {e}"),
+        );
+        return;
+    }
+
+    match lookup_item_id_for_asset(conn, asset_id) {
+        Ok(Some(item_id)) => {
+            let nlp_queue = app_handle.state::<NlpQueue>();
+            let _ = nlp_queue.submit(NlpJob::IndexFts {
+                item_id: item_id.clone(),
+            });
+            let _ = nlp_queue.submit(NlpJob::ComputeAssetEmbedding {
+                item_id,
+                asset_id: asset_id.to_string(),
+            });
+        }
+        Ok(None) => {}
+        // The extraction is already committed; a failed lookup only skips NLP
+        // indexing, so log it without reporting the OCR job as failed.
+        Err(e) => crate::app_logs::error(
+            app_handle,
+            "ocr",
+            format!("No se pudo resolver el item del asset {asset_id}: {e}"),
+        ),
     }
 
     let _ = app_handle.emit(
@@ -201,6 +222,30 @@ fn complete_job(
             text_content,
         },
     );
+}
+
+/// Persist the OCR extraction and its layout atomically: both writes commit in
+/// a single transaction so a failure cannot leave new extraction text alongside
+/// a stale layout (or vice versa).
+fn persist_output(
+    conn: &mut rusqlite::Connection,
+    asset_id: &str,
+    text_content: &str,
+    method: &str,
+    layout: Option<&LayoutPersistencePayload>,
+) -> Result<(), String> {
+    let tx = conn
+        .transaction()
+        .map_err(|e| format!("Failed to start OCR persistence transaction: {e}"))?;
+
+    save_extraction(&tx, asset_id, text_content, method)?;
+    match layout {
+        Some(layout) => save_layout(&tx, asset_id, layout)?,
+        None => delete_layout(&tx, asset_id)?,
+    }
+
+    tx.commit()
+        .map_err(|e| format!("Failed to commit OCR persistence transaction: {e}"))
 }
 
 fn emit_error(app_handle: &AppHandle, asset_id: String, error: String) {
@@ -553,7 +598,7 @@ fn glm_response_to_processed_output(
                 continue;
             };
 
-            if let (Some(formatted_text), Some(ref bbox)) = (
+            if let (Some(formatted_text), Some(bbox)) = (
                 format_region_text(&mapped_category, &content),
                 bbox.as_ref(),
             ) {
@@ -811,6 +856,81 @@ mod tests {
         assert_eq!(layout.blocks[0].label, "title");
         assert_eq!(layout.image_width, 800);
         assert_eq!(layout.image_height, 1000);
+    }
+
+    fn open_extractions_only_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("open in-memory DB");
+        conn.execute_batch(
+            "CREATE TABLE extractions (
+                id TEXT PRIMARY KEY,
+                asset_id TEXT NOT NULL UNIQUE,
+                text_content TEXT NOT NULL,
+                method TEXT NOT NULL,
+                confidence REAL,
+                created_at INTEGER NOT NULL
+            );",
+        )
+        .expect("create extractions table");
+        conn
+    }
+
+    fn sample_layout() -> LayoutPersistencePayload {
+        LayoutPersistencePayload {
+            model: "glm_ocr".to_string(),
+            image_width: 800,
+            image_height: 1000,
+            regions: Vec::new(),
+            blocks: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn test_persist_output_saves_extraction_and_layout() {
+        let mut conn = open_extractions_only_db();
+        conn.execute_batch(
+            "CREATE TABLE layouts (
+                id TEXT PRIMARY KEY,
+                asset_id TEXT NOT NULL UNIQUE,
+                regions TEXT NOT NULL,
+                blocks TEXT NOT NULL,
+                model TEXT NOT NULL,
+                image_width INTEGER NOT NULL,
+                image_height INTEGER NOT NULL,
+                created_at INTEGER NOT NULL
+            );",
+        )
+        .expect("create layouts table");
+
+        let layout = sample_layout();
+        persist_output(&mut conn, "asset-1", "texto", "glm_ocr", Some(&layout))
+            .expect("persist output");
+
+        let extractions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM extractions", [], |row| row.get(0))
+            .expect("count extractions");
+        let layouts: i64 = conn
+            .query_row("SELECT COUNT(*) FROM layouts", [], |row| row.get(0))
+            .expect("count layouts");
+        assert_eq!(extractions, 1);
+        assert_eq!(layouts, 1);
+    }
+
+    #[test]
+    fn test_persist_output_rolls_back_extraction_when_layout_save_fails() {
+        // No layouts table → save_layout fails after save_extraction succeeded.
+        let mut conn = open_extractions_only_db();
+
+        let layout = sample_layout();
+        let result = persist_output(&mut conn, "asset-1", "texto", "glm_ocr", Some(&layout));
+        assert!(result.is_err(), "expected layout save failure");
+
+        let extractions: i64 = conn
+            .query_row("SELECT COUNT(*) FROM extractions", [], |row| row.get(0))
+            .expect("count extractions");
+        assert_eq!(
+            extractions, 0,
+            "extraction must roll back when layout save fails"
+        );
     }
 
     #[test]

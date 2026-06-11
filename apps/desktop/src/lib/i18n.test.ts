@@ -65,4 +65,30 @@ describe('i18n', () => {
     expect(t('dbBrowser.copyCell')).toBe('Copy')
     expect(t('dbBrowser.pageSizeLabel')).toBe('Rows per page')
   })
+
+  it('exposes settings prompts and model params copy in both locales', async () => {
+    const { locale, t } = await import('./i18n')
+
+    expect(t('settings.prompts.validate')).toBe('Validar cambios')
+    expect(t('settings.promptValidation.valid')).toBe('Prompt válido.')
+    expect(t('settings.promptValidation.missingText')).toBe('Debe incluir el placeholder {text}.')
+    expect(t('settings.getApiKeyLink', { provider: 'OpenRouter' })).toBe(
+      'Obtener API key en OpenRouter'
+    )
+    expect(t('settings.modelParams.invalidParam', { flow: 'Summary', param: 'topP' })).toBe(
+      'Parámetro inválido en Summary: topP'
+    )
+
+    locale.set('en')
+
+    expect(t('settings.prompts.validate')).toBe('Validate changes')
+    expect(t('settings.promptValidation.valid')).toBe('Prompt is valid.')
+    expect(t('settings.promptValidation.missingText')).toBe('It must include the {text} placeholder.')
+    expect(t('settings.getApiKeyLink', { provider: 'OpenRouter' })).toBe(
+      'Get an API key at OpenRouter'
+    )
+    expect(t('settings.modelParams.invalidParam', { flow: 'Summary', param: 'topP' })).toBe(
+      'Invalid parameter in Summary: topP'
+    )
+  })
 })

@@ -200,8 +200,8 @@ impl OpenRouterEmbeddingClient {
             }
         }
 
-        let mut averaged = accumulator
-            .ok_or_else(|| "OpenRouter embedding produced no vectors".to_string())?;
+        let mut averaged =
+            accumulator.ok_or_else(|| "OpenRouter embedding produced no vectors".to_string())?;
         let n = chunks.len() as f32;
         for value in averaged.iter_mut() {
             *value /= n;
@@ -450,7 +450,7 @@ pub fn list_asset_embedding_candidates(
     );
 
     if let Some(limit) = limit {
-        sql.push_str(&format!(" LIMIT {}", limit));
+        sql.push_str(&format!(" LIMIT {limit}"));
     }
 
     let mut stmt = conn

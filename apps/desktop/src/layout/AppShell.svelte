@@ -71,8 +71,22 @@
     }
   }
 
+  function isEditableTarget(target: EventTarget | null): boolean {
+    if (!(target instanceof Element)) return false
+
+    const tagName = target.tagName.toLowerCase()
+    return (
+      tagName === 'input' ||
+      tagName === 'textarea' ||
+      tagName === 'select' ||
+      target.closest('[contenteditable="true"]') !== null
+    )
+  }
+
   function handleKeydown(e: KeyboardEvent) {
     if ((e.ctrlKey || e.metaKey) && e.key === 'b') {
+      // Editors use Ctrl+B for bold (e.g. the TipTap note editor); leave it to them.
+      if (e.defaultPrevented || isEditableTarget(e.target)) return
       e.preventDefault()
       sidebarOpen = !sidebarOpen
     }

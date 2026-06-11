@@ -1,5 +1,5 @@
-/// Prompt templates for each LLM task.
-/// EntropIA Lite sends raw instruction text to OpenRouter only.
+//! Prompt templates for each LLM task.
+//! EntropIA Lite sends raw instruction text to OpenRouter only.
 
 // ---------------------------------------------------------------------------
 // Raw instruction text (model-agnostic)

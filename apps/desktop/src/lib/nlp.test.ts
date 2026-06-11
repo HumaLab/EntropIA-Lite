@@ -544,6 +544,33 @@ describe('NlpStore', () => {
 
     expect(cleanup).toHaveBeenCalledTimes(3) // 3 listeners registered (progress, complete, error)
   })
+
+  it('stopListening before startListening resolves unlistens late registrations', async () => {
+    const cleanup = vi.fn()
+    let resolveFirstListen: ((unlisten: () => void) => void) | null = null
+
+    let callCount = 0
+    vi.mocked(listen).mockImplementation(() => {
+      callCount++
+      if (callCount === 1) {
+        return new Promise((resolve) => {
+          resolveFirstListen = resolve
+        })
+      }
+      return Promise.resolve(cleanup)
+    })
+
+    const startPromise = store.startListening(listen)
+
+    // Unmount happens while the listen() registrations are still in flight
+    store.stopListening()
+
+    resolveFirstListen!(cleanup)
+    await startPromise
+
+    // All late registrations must be unlistened immediately, not leaked
+    expect(cleanup).toHaveBeenCalledTimes(3)
+  })
 })
 
 describe('embedding architecture governance', () => {

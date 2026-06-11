@@ -21,9 +21,18 @@ pub async fn test_assemblyai_connection(
         api_key
     };
 
-    let result = super::assemblyai::AssemblyAiClient::new(api_key.trim().to_string())
-        .test_connection()
-        .await;
+    let client = match super::assemblyai::AssemblyAiClient::new(api_key.trim().to_string()) {
+        Ok(client) => client,
+        Err(error) => {
+            crate::app_logs::error(
+                &app_handle,
+                "settings/assemblyai",
+                format!("Falló prueba de conexión AssemblyAI: {error}"),
+            );
+            return Err(error);
+        }
+    };
+    let result = client.test_connection().await;
     match &result {
         Ok(()) => crate::app_logs::info(
             &app_handle,
@@ -109,15 +118,13 @@ pub async fn update_transcription_text_cmd(
 
     drop(stmt); // release borrow before execute
 
-    match transcription_id {
-        Ok(id) => {
-            conn.execute(
-                "UPDATE transcriptions SET text_content = ?1 WHERE id = ?2",
-                rusqlite::params![text_content, id],
-            )
-            .map_err(|e| format!("Failed to update transcription text: {e}"))?;
-        }
-        Err(_) => {} // no transcription exists — no-op
+    // If no transcription exists, this is a no-op.
+    if let Ok(id) = transcription_id {
+        conn.execute(
+            "UPDATE transcriptions SET text_content = ?1 WHERE id = ?2",
+            rusqlite::params![text_content, id],
+        )
+        .map_err(|e| format!("Failed to update transcription text: {e}"))?;
     }
 
     Ok(())

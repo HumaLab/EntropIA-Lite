@@ -1,14 +1,12 @@
 //! PDF page rendering for OCR fallback.
 //!
-//! `render_pdf_page_to_image()` renders a PDF page as a PNG bitmap via
-//! `pdfium-render`, enabling OCR fallback for scanned/image-based PDFs.
+//! `render_pdf_pages_to_png_files()` rasterizes every page of a PDF to PNG
+//! files via `pdfium-render`, binding the engine and parsing the document once
+//! for the whole batch. It powers the scanned-PDF import flow.
 //!
 //! Thumbnails:
 //! - `render_pdf_thumbnail()` renders the first page at 400px width, suitable for
 //!   card previews in the collection view.
-//!
-//! For multi-page PDFs, `pdf_page_count()` returns the total number of pages,
-//! and `render_pdf_page_to_image()` accepts any page index (not just page 0).
 //!
 //! # Pdfium native library resolution
 //!
@@ -256,34 +254,28 @@ fn is_quality_text(text: &str) -> bool {
     text.chars().filter(|c| c.is_alphanumeric()).count() >= MIN_ALPHANUM_CHARS
 }
 
-/// Get the number of pages in a PDF document.
+/// Render every page of a PDF to PNG files on disk.
 ///
-/// Used by the multi-page OCR pipeline to know how many pages to process.
-pub fn pdf_page_count(bytes: &[u8]) -> Result<usize, String> {
-    let pdfium = get_pdfium()?;
-    let document = pdfium
-        .load_pdf_from_byte_slice(bytes, None)
-        .map_err(|e| format!("Failed to load PDF for page count: {e}"))?;
-    Ok(document.pages().len().into())
-}
-
-/// Render a single PDF page to PNG bytes, suitable for OCR processing.
+/// Binds the Pdfium engine and parses the document ONCE, then iterates the
+/// pages — avoiding the cost of re-initializing the engine and re-parsing the
+/// document for each page. Each page is rendered at 300 DPI equivalent
+/// (target width 2550px) and written to
+/// `{out_dir}/{filename_prefix}_page_{n}.png` (1-based page numbers).
 ///
-/// Uses `pdfium-render` to rasterize the page at 300 DPI equivalent
-/// (target width ~2550px for letter-size). Returns raw PNG bytes that
-/// can be fed directly to `OcrProvider::recognize()`.
-///
-/// # Arguments
-/// * `bytes` — Raw PDF file bytes
-/// * `page_index` — Zero-based page index (0 = first page)
+/// Returns the written file paths in page order.
 ///
 /// # Errors
 /// Returns `Err` if:
 /// - Pdfium fails to initialize
 /// - PDF cannot be loaded
-/// - Page index is out of bounds
-/// - Rendering or encoding fails
-pub fn render_pdf_page_to_image(bytes: &[u8], page_index: usize) -> Result<Vec<u8>, String> {
+/// - Rendering, encoding, or writing any page fails
+pub fn render_pdf_pages_to_png_files(
+    bytes: &[u8],
+    out_dir: &Path,
+    filename_prefix: &str,
+) -> Result<Vec<PathBuf>, String> {
+    use std::io::Write;
+
     let pdfium = get_pdfium()?;
     let document = pdfium
         .load_pdf_from_byte_slice(bytes, None)
@@ -292,17 +284,7 @@ pub fn render_pdf_page_to_image(bytes: &[u8], page_index: usize) -> Result<Vec<u
     let pages = document.pages();
     let page_count: usize = pages.len().into();
 
-    if page_index >= page_count {
-        return Err(format!(
-            "Page index {} out of bounds (PDF has {} pages)",
-            page_index, page_count
-        ));
-    }
-
-    let page_idx: PdfPageIndex = PdfPageIndex::from(page_index as u16);
-    let page = pages
-        .get(page_idx)
-        .map_err(|e| format!("Failed to get page {page_index} from PDF: {e}"))?;
+    eprintln!("[render_pdf_pages] Rendering {page_count} pages from PDF");
 
     // Render at 300 DPI equivalent. A typical letter-size page is 8.5" × 11"
     // which at 300 DPI gives 2550 × 3300 pixels.
@@ -310,19 +292,37 @@ pub fn render_pdf_page_to_image(bytes: &[u8], page_index: usize) -> Result<Vec<u
         .set_target_width(2550)
         .rotate_if_landscape(PdfPageRenderRotation::Degrees90, true);
 
-    let bitmap = page
-        .render_with_config(&render_config)
-        .map_err(|e| format!("Failed to render PDF page {page_index}: {e}"))?;
+    let mut file_paths: Vec<PathBuf> = Vec::with_capacity(page_count);
 
-    // Convert to image::DynamicImage, then encode as PNG
-    let dynamic_image = bitmap.as_image();
+    for page_index in 0..page_count {
+        let page_number = page_index + 1;
+        let page = pages
+            .get(PdfPageIndex::from(page_index as u16))
+            .map_err(|e| format!("Failed to get page {page_number} from PDF: {e}"))?;
 
-    let mut png_bytes = Vec::new();
-    dynamic_image
-        .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
-        .map_err(|e| format!("Failed to encode rendered page as PNG: {e}"))?;
+        let bitmap = page
+            .render_with_config(&render_config)
+            .map_err(|e| format!("Failed to render PDF page {page_number}: {e}"))?;
 
-    Ok(png_bytes)
+        // Convert to image::DynamicImage, then encode as PNG
+        let mut png_bytes = Vec::new();
+        bitmap
+            .as_image()
+            .write_to(&mut Cursor::new(&mut png_bytes), image::ImageFormat::Png)
+            .map_err(|e| format!("Failed to encode page {page_number} as PNG: {e}"))?;
+
+        let file_path = out_dir.join(format!("{filename_prefix}_page_{page_number}.png"));
+        let mut file = std::fs::File::create(&file_path)
+            .map_err(|e| format!("Failed to create PNG file for page {page_number}: {e}"))?;
+        file.write_all(&png_bytes)
+            .map_err(|e| format!("Failed to write PNG data for page {page_number}: {e}"))?;
+
+        eprintln!("[render_pdf_pages] Rendered page {page_number}/{page_count}");
+
+        file_paths.push(file_path);
+    }
+
+    Ok(file_paths)
 }
 
 /// Render the first page of a PDF to PNG bytes at thumbnail resolution (400px wide).
@@ -343,7 +343,7 @@ pub fn render_pdf_thumbnail(bytes: &[u8]) -> Result<Vec<u8>, String> {
         .map_err(|e| format!("Failed to load PDF for thumbnail: {e}"))?;
 
     let pages = document.pages();
-    if pages.len() == 0 {
+    if pages.is_empty() {
         return Err("PDF has no pages".to_string());
     }
 
@@ -487,13 +487,14 @@ mod tests {
         }
     }
 
-    /// pdf_page_count requires the pdfium native library which may not be
-    /// available in unit test environments. Marked as ignored.
+    /// render_pdf_pages_to_png_files requires the pdfium native library which
+    /// may not be available in unit test environments. Marked as ignored.
     #[test]
     #[ignore]
-    fn pdf_page_count_invalid_bytes() {
+    fn render_pdf_pages_to_png_files_invalid_bytes() {
         // Invalid PDF bytes should return an error, not panic
-        let result = pdf_page_count(b"not a pdf");
+        let out_dir = tempdir().expect("out dir");
+        let result = render_pdf_pages_to_png_files(b"not a pdf", out_dir.path(), "doc");
         assert!(result.is_err(), "Expected error for invalid PDF bytes");
     }
 

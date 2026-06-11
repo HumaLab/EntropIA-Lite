@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/svelte'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import CollectionView from './CollectionView.svelte'
 import { locale } from '$lib/i18n'
 import { DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT } from '$lib/document-explorer'
@@ -8,6 +8,9 @@ const { storeRef, navigationRef, fileImportRef, dragDropRef } = vi.hoisted(() =>
   storeRef: {
     current: {
       items: {
+        // CollectionView feature-detects this method: undefined exercises the
+        // findByCollection/searchByText fallback path most tests rely on.
+        findCardSummariesByCollection: undefined as Mock | undefined,
         findByCollection: vi.fn(),
         searchByText: vi.fn(),
         create: vi.fn(),
@@ -64,6 +67,7 @@ type AssetRow = {
 function createStore(items: ItemRow[], assets: AssetRow[] = []) {
   return {
     items: {
+      findCardSummariesByCollection: undefined,
       findByCollection: vi.fn().mockResolvedValue(items),
       searchByText: vi.fn().mockResolvedValue(items),
       create: vi.fn(),
@@ -387,6 +391,7 @@ describe('CollectionView consumer compatibility', () => {
 
     storeRef.current = {
       items: {
+        findCardSummariesByCollection: undefined,
         findByCollection: vi.fn().mockReturnValueOnce(firstLoad.promise),
         searchByText: vi.fn().mockReturnValueOnce(searchLoad.promise),
         create: vi.fn(),
@@ -422,6 +427,7 @@ describe('CollectionView consumer compatibility', () => {
   it('reloads and resets collection state when collectionId changes', async () => {
     storeRef.current = {
       items: {
+        findCardSummariesByCollection: undefined,
         findByCollection: vi.fn().mockImplementation(async (collectionId: string) =>
           collectionId === 'col-2'
             ? [

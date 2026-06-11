@@ -71,6 +71,7 @@ export interface OcrStoreOptions {
 export class OcrStore {
   private states = new Map<string, AssetOcrState>()
   private cleanupFns: Array<() => void> = []
+  private listenGeneration = 0
   private onComplete?: (assetId: string, method: string) => void
 
   constructor(options?: OcrStoreOptions) {
@@ -89,6 +90,8 @@ export class OcrStore {
   async startListening(
     listen: (event: string, callback: (e: { payload: unknown }) => void) => Promise<() => void>
   ): Promise<void> {
+    const generation = ++this.listenGeneration
+
     const unlistenProgress = await listen('ocr:progress', (e) => {
       const p = e.payload as ProgressPayload
       this._updateState(p.asset_id, { status: 'running', progress: p.pct, stage: p.stage })
@@ -113,11 +116,23 @@ export class OcrStore {
       this._updateState(p.asset_id, { status: 'error', error: p.error, stage: 'error' })
     })
 
-    this.cleanupFns = [unlistenProgress, unlistenComplete, unlistenError]
+    const cleanupFns = [unlistenProgress, unlistenComplete, unlistenError]
+
+    // stopListening may run while the listen() promises above are still in
+    // flight; unlisten late registrations immediately instead of leaking them.
+    if (generation !== this.listenGeneration) {
+      for (const fn of cleanupFns) {
+        fn()
+      }
+      return
+    }
+
+    this.cleanupFns = cleanupFns
   }
 
   /** Calls all cleanup functions returned by listen(), removing event listeners. */
   stopListening(): void {
+    this.listenGeneration++
     for (const fn of this.cleanupFns) {
       fn()
     }
@@ -155,7 +170,8 @@ export type OcrMode = 'light' | 'high'
 
 /**
  * Calls the Rust `extract_text` command to kick off an OCR job.
- * Sets the asset state to 'pending' before the invocation resolves.
+ * Does not mutate store state; callers own pending-state handling
+ * (see runPendingAssetJob in item-view-media-jobs.ts).
  *
  * @param mode - 'light' for native extraction, 'high' for GLM-OCR.
  */

@@ -223,6 +223,8 @@ impl NlpQueue {
     ///
     /// The worker drains jobs serially and emits `nlp:progress`, `nlp:complete`,
     /// or `nlp:error` events per job.
+    // One handle per pending-job dedup set; bundling them into a struct would obscure the wiring in lib.rs.
+    #[allow(clippy::too_many_arguments)]
     pub fn start_worker(
         db_path: std::path::PathBuf,
         mut receiver: mpsc::Receiver<NlpJob>,
@@ -274,7 +276,7 @@ impl NlpQueue {
                         let result = run_coalesced_fts_reindex(&conn, &item_id, &fts_pending);
                         match result {
                             Ok(_) => {
-                                eprintln!("[nlp/fts] Reindex complete: item_id={}", item_id);
+                                eprintln!("[nlp/fts] Reindex complete: item_id={item_id}");
                                 emit_progress(&app_handle, &item_id, "fts", 100);
                                 emit_complete(&app_handle, &item_id, "fts");
                             }
@@ -283,12 +285,12 @@ impl NlpQueue {
                     }
                     NlpJob::ExtractEntities { item_id } => {
                         emit_progress(&app_handle, &item_id, "ner", 10);
-                        let result = ner::prepare_ner_candidates_for_item(&conn, &item_id)
-                            .and_then(|input| {
+                        let result =
+                            ner::prepare_ner_candidates_for_item(&conn, &item_id).map(|input| {
                                 if input.text.trim().is_empty() {
-                                    Ok(None)
+                                    None
                                 } else {
-                                    Ok(Some(input))
+                                    Some(input)
                                 }
                             });
                         // Remove from dedup set so future enqueues for this item are allowed
@@ -302,8 +304,9 @@ impl NlpQueue {
                         // call. This mirrors the pattern used by the FTS worker.
                         let job_conn = match rusqlite::Connection::open(&db_path) {
                             Ok(c) => {
-                                let _ = c
-                                    .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+                                let _ = c.execute_batch(
+                                    "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;",
+                                );
                                 Some(c)
                             }
                             Err(e) => {
@@ -334,10 +337,7 @@ impl NlpQueue {
                             // per chunk. A crash mid-job still leaves the user with
                             // whatever entities were already extracted.
                             tokio::task::block_in_place(|| {
-                                ner::clear_automatic_entities_for_item(
-                                    &job_conn,
-                                    &item_id_for_job,
-                                )
+                                ner::clear_automatic_entities_for_item(&job_conn, &item_id_for_job)
                             })?;
 
                             let chunks = chunking::chunk_text(&input.text);
@@ -641,7 +641,9 @@ impl NlpQueue {
                             let input = match result {
                                 Ok(input) => input,
                                 Err(error) => {
-                                    return Err(format!("NER extraction for asset failed: {error}"));
+                                    return Err(format!(
+                                        "NER extraction for asset failed: {error}"
+                                    ));
                                 }
                             };
                             if input.text.trim().is_empty() {
@@ -651,11 +653,10 @@ impl NlpQueue {
                             // Open a dedicated connection so the network-bound
                             // loop below does not touch the (non-Send) worker
                             // connection across await points.
-                            let job_conn = rusqlite::Connection::open(&db_path)
-                                .map_err(|e| e.to_string())?;
-                            let _ = job_conn.execute_batch(
-                                "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;",
-                            );
+                            let job_conn =
+                                rusqlite::Connection::open(&db_path).map_err(|e| e.to_string())?;
+                            let _ = job_conn
+                                .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
 
                             // Clear stale automatic entities for this asset only,
                             // then stream-append per chunk.

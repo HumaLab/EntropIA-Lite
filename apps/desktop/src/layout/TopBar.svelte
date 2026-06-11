@@ -32,6 +32,9 @@
   let searchRequestId = 0
   let debounceTimer: ReturnType<typeof setTimeout> | null = null
   let searchInputEl: HTMLInputElement | undefined = $state()
+  let searchContainerEl: HTMLDivElement | undefined = $state()
+  let activeResultIndex = $state(-1)
+  const searchListboxId = 'topbar-global-search-listbox'
   const currentLocale = locale
   const translate = (key: string, params?: Record<string, string | number>) =>
     t(key as never, params)
@@ -42,6 +45,12 @@
     light: 'Claro',
   }
   const themeToggleLabel = $derived(themeLabels[theme])
+  const hasResultOptions = $derived(!searching && !searchError && searchResults.length > 0)
+  const activeOptionId = $derived(
+    showResults && hasResultOptions && activeResultIndex >= 0
+      ? `${searchListboxId}-option-${activeResultIndex}`
+      : undefined,
+  )
   const previousDocumentLabel = $derived($currentLocale ? t('topbar.previousDocument') : 'Documento anterior')
   const nextDocumentLabel = $derived($currentLocale ? t('topbar.nextDocument') : 'Documento siguiente')
   const dbBrowserTitle = $derived($currentLocale ? translate('topbar.dbBrowserTitle') : 'Base de datos')
@@ -193,12 +202,14 @@
 
       searchResults = results
       searchError = ''
+      activeResultIndex = -1
       showResults = true
     } catch (e) {
       if (!isCurrentRequest()) return
       console.error('[Search] error:', e)
       searchResults = []
       searchError = translate('topbar.searchError')
+      activeResultIndex = -1
       showResults = true
     } finally {
       if (isCurrentRequest()) searching = false
@@ -217,6 +228,7 @@
     if (!searchQuery.trim()) {
       searchResults = []
       searchError = ''
+      activeResultIndex = -1
       showResults = false
       return
     }
@@ -231,6 +243,7 @@
     searchQuery = ''
     searchResults = []
     searchError = ''
+    activeResultIndex = -1
     showResults = false
     if (debounceTimer) clearTimeout(debounceTimer)
   }
@@ -255,13 +268,35 @@
     if (e.key === 'Escape') {
       handleClear()
       searchInputEl?.blur()
+      return
+    }
+
+    if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      if (!showResults || searchResults.length === 0) return
+      e.preventDefault()
+      const lastIndex = searchResults.length - 1
+      if (e.key === 'ArrowDown') {
+        activeResultIndex = activeResultIndex >= lastIndex ? 0 : activeResultIndex + 1
+      } else {
+        activeResultIndex = activeResultIndex <= 0 ? lastIndex : activeResultIndex - 1
+      }
+      return
+    }
+
+    if (e.key === 'Enter') {
+      if (!showResults) return
+      const activeResult = searchResults[activeResultIndex]
+      if (!activeResult) return
+      e.preventDefault()
+      handleResultClick(activeResult)
     }
   }
 
-  function handleBlur() {
-    setTimeout(() => {
-      showResults = false
-    }, 200)
+  function handleFocusOut(event: FocusEvent) {
+    const nextFocused = event.relatedTarget
+    if (nextFocused instanceof Node && searchContainerEl?.contains(nextFocused)) return
+    showResults = false
+    activeResultIndex = -1
   }
 
   function handleFocus() {
@@ -326,11 +361,16 @@
     {/if}
   </div>
 
-  <div class="global-search">
+  <div class="global-search" bind:this={searchContainerEl} onfocusout={handleFocusOut}>
     <div class="global-search__input-wrap">
       <input
         class="global-search__input"
         type="search"
+        role="combobox"
+        aria-expanded={showResults}
+        aria-controls={searchListboxId}
+        aria-autocomplete="list"
+        aria-activedescendant={activeOptionId}
         bind:value={searchQuery}
         bind:this={searchInputEl}
         placeholder={$currentLocale && translate('topbar.searchPlaceholder')}
@@ -338,7 +378,6 @@
         oninput={(event: Event) =>
           handleSearchValueChange((event.currentTarget as HTMLInputElement).value, event)}
         onkeydown={handleKeydown}
-        onblur={handleBlur}
         onfocus={handleFocus}
       />
 
@@ -357,7 +396,12 @@
     </div>
 
     {#if showResults}
-      <div class="global-search__dropdown">
+      <div
+        class="global-search__dropdown"
+        id={searchListboxId}
+        role={hasResultOptions ? 'listbox' : 'status'}
+        aria-label={$currentLocale && translate('topbar.searchAria')}
+      >
         {#if searching}
           <div class="global-search__status">
             {$currentLocale && translate('topbar.searchSearching')}
@@ -371,10 +415,14 @@
             {$currentLocale && translate('topbar.searchNoResults', { query: searchQuery })}
           </div>
         {:else}
-          {#each searchResults as result (result.item.id)}
+          {#each searchResults as result, index (result.item.id)}
             <button
               class="global-search__result"
+              class:global-search__result--active={index === activeResultIndex}
               type="button"
+              role="option"
+              id={`${searchListboxId}-option-${index}`}
+              aria-selected={index === activeResultIndex}
               onclick={() => handleResultClick(result)}
             >
               <span class="global-search__result-title">{result.item.title}</span>
@@ -754,6 +802,10 @@
 
   .global-search__result:hover {
      background-color: var(--surface-toolbar);
+  }
+
+  .global-search__result--active {
+    background-color: var(--surface-toolbar);
   }
 
   .global-search__result + .global-search__result {

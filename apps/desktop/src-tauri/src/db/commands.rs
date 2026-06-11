@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use rusqlite::types::Value;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -65,115 +66,157 @@ pub struct DbBrowserQueryRequest {
     pub search: Option<String>,
 }
 
+/// Run rusqlite work on the blocking thread pool so IPC commands never
+/// execute SQL on the main thread (where the window event loop runs).
+async fn run_blocking_db_task<T, F>(task: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tokio::task::spawn_blocking(task)
+        .await
+        .map_err(|e| format!("DB task failed: {e}"))?
+}
+
 /// Execute multiple SQL statements atomically within a transaction.
 /// Used for cascade deletes and other multi-statement operations.
 #[tauri::command]
-pub fn db_execute_batch(db: State<'_, AppDbState>, sql: String) -> Result<(), String> {
+pub async fn db_execute_batch(db: State<'_, AppDbState>, sql: String) -> Result<(), String> {
     validate_sql_batch(&sql)?;
-    let conn = db.ui_conn.lock().map_err(|e| e.to_string())?;
-    conn.execute_batch(&sql).map_err(|e| e.to_string())
+    let conn = db.ui_conn.clone();
+    run_blocking_db_task(move || {
+        let conn = conn.lock().map_err(|e| e.to_string())?;
+        conn.execute_batch(&sql).map_err(|e| e.to_string())
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn db_execute(
+pub async fn db_execute(
     db: State<'_, AppDbState>,
     sql: String,
     params: Vec<serde_json::Value>,
 ) -> Result<ExecuteResult, String> {
     validate_sql_execute(&sql)?;
-    let conn = db.ui_conn.lock().map_err(|e| e.to_string())?;
-    let params_ref: Vec<Box<dyn rusqlite::ToSql>> = params.iter().map(json_to_sql_param).collect();
-    let params_as_refs: Vec<&dyn rusqlite::ToSql> = params_ref.iter().map(|b| b.as_ref()).collect();
-    let rows_affected = conn
-        .execute(&sql, params_as_refs.as_slice())
-        .map_err(|e| e.to_string())?;
-    Ok(ExecuteResult {
-        rows_affected: rows_affected as u64,
+    let conn = db.ui_conn.clone();
+    run_blocking_db_task(move || {
+        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let params_ref: Vec<Box<dyn rusqlite::ToSql>> =
+            params.iter().map(json_to_sql_param).collect();
+        let params_as_refs: Vec<&dyn rusqlite::ToSql> =
+            params_ref.iter().map(|b| b.as_ref()).collect();
+        let rows_affected = conn
+            .execute(&sql, params_as_refs.as_slice())
+            .map_err(|e| e.to_string())?;
+        Ok(ExecuteResult {
+            rows_affected: rows_affected as u64,
+        })
     })
+    .await
 }
 
 #[tauri::command]
-pub fn db_select(
+pub async fn db_select(
     db: State<'_, AppDbState>,
     sql: String,
     params: Vec<serde_json::Value>,
 ) -> Result<Vec<serde_json::Value>, String> {
     validate_sql_row_query(&sql)?;
-    let conn = db.ui_conn.lock().map_err(|e| e.to_string())?;
-    let params_ref: Vec<Box<dyn rusqlite::ToSql>> = params.iter().map(json_to_sql_param).collect();
-    let params_as_refs: Vec<&dyn rusqlite::ToSql> = params_ref.iter().map(|b| b.as_ref()).collect();
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let col_count = stmt.column_count();
-    let col_names: Vec<String> = (0..col_count)
-        .map(|i| stmt.column_name(i).unwrap_or("").to_string())
-        .collect();
+    let conn = db.ui_conn.clone();
+    run_blocking_db_task(move || {
+        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let params_ref: Vec<Box<dyn rusqlite::ToSql>> =
+            params.iter().map(json_to_sql_param).collect();
+        let params_as_refs: Vec<&dyn rusqlite::ToSql> =
+            params_ref.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let col_count = stmt.column_count();
+        let col_names: Vec<String> = (0..col_count)
+            .map(|i| stmt.column_name(i).unwrap_or("").to_string())
+            .collect();
 
-    let rows = stmt
-        .query_map(params_as_refs.as_slice(), |row| {
-            let mut map = serde_json::Map::new();
-            for (i, name) in col_names.iter().enumerate() {
-                let val: Value = row.get(i)?;
-                map.insert(name.clone(), rusqlite_value_to_json(val));
-            }
-            Ok(serde_json::Value::Object(map))
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params_as_refs.as_slice(), |row| {
+                let mut map = serde_json::Map::new();
+                for (i, name) in col_names.iter().enumerate() {
+                    let val: Value = row.get(i)?;
+                    map.insert(name.clone(), rusqlite_value_to_json(val));
+                }
+                Ok(serde_json::Value::Object(map))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
 
-    Ok(rows)
+        Ok(rows)
+    })
+    .await
 }
 
 /// Returns rows as arrays in column order — required by Drizzle sqlite-proxy
 /// to guarantee correct column mapping (Object.values() order is not guaranteed).
 #[tauri::command]
-pub fn db_select_rows(
+pub async fn db_select_rows(
     db: State<'_, AppDbState>,
     sql: String,
     params: Vec<serde_json::Value>,
 ) -> Result<Vec<Vec<serde_json::Value>>, String> {
     validate_sql_row_query(&sql)?;
-    let conn = db.ui_conn.lock().map_err(|e| e.to_string())?;
-    let params_ref: Vec<Box<dyn rusqlite::ToSql>> = params.iter().map(json_to_sql_param).collect();
-    let params_as_refs: Vec<&dyn rusqlite::ToSql> = params_ref.iter().map(|b| b.as_ref()).collect();
-    let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
-    let col_count = stmt.column_count();
+    let conn = db.ui_conn.clone();
+    run_blocking_db_task(move || {
+        let conn = conn.lock().map_err(|e| e.to_string())?;
+        let params_ref: Vec<Box<dyn rusqlite::ToSql>> =
+            params.iter().map(json_to_sql_param).collect();
+        let params_as_refs: Vec<&dyn rusqlite::ToSql> =
+            params_ref.iter().map(|b| b.as_ref()).collect();
+        let mut stmt = conn.prepare(&sql).map_err(|e| e.to_string())?;
+        let col_count = stmt.column_count();
 
-    let rows = stmt
-        .query_map(params_as_refs.as_slice(), |row| {
-            let mut values = Vec::with_capacity(col_count);
-            for i in 0..col_count {
-                let val: Value = row.get(i)?;
-                values.push(rusqlite_value_to_json(val));
-            }
-            Ok(values)
-        })
-        .map_err(|e| e.to_string())?
-        .collect::<Result<Vec<_>, _>>()
-        .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map(params_as_refs.as_slice(), |row| {
+                let mut values = Vec::with_capacity(col_count);
+                for i in 0..col_count {
+                    let val: Value = row.get(i)?;
+                    values.push(rusqlite_value_to_json(val));
+                }
+                Ok(values)
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
 
-    Ok(rows)
+        Ok(rows)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn db_browser_list_tables(
+pub async fn db_browser_list_tables(
     db: State<'_, AppDbState>,
 ) -> Result<Vec<DbBrowserTableInfo>, String> {
-    let conn = db.ui_conn.lock().map_err(|e| e.to_string())?;
-    list_db_browser_tables(&conn)
+    let conn = db.ui_conn.clone();
+    run_blocking_db_task(move || {
+        let conn = conn.lock().map_err(|e| e.to_string())?;
+        list_db_browser_tables(&conn)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn db_browser_describe_table(
+pub async fn db_browser_describe_table(
     db: State<'_, AppDbState>,
     table: String,
 ) -> Result<Vec<DbBrowserColumnInfo>, String> {
-    let conn = db.ui_conn.lock().map_err(|e| e.to_string())?;
-    describe_db_browser_table(&conn, &table)
+    let conn = db.ui_conn.clone();
+    run_blocking_db_task(move || {
+        let conn = conn.lock().map_err(|e| e.to_string())?;
+        describe_db_browser_table(&conn, &table)
+    })
+    .await
 }
 
 #[tauri::command]
-pub fn db_browser_query_rows(
+pub async fn db_browser_query_rows(
     db: State<'_, AppDbState>,
     table: String,
     page: u32,
@@ -182,18 +225,22 @@ pub fn db_browser_query_rows(
     sort_direction: Option<String>,
     search: Option<String>,
 ) -> Result<DbBrowserQueryResponse, String> {
-    let conn = db.ui_conn.lock().map_err(|e| e.to_string())?;
-    query_db_browser_rows(
-        &conn,
-        DbBrowserQueryRequest {
-            table,
-            page,
-            page_size,
-            sort_column,
-            sort_direction,
-            search,
-        },
-    )
+    let conn = db.ui_conn.clone();
+    run_blocking_db_task(move || {
+        let conn = conn.lock().map_err(|e| e.to_string())?;
+        query_db_browser_rows(
+            &conn,
+            DbBrowserQueryRequest {
+                table,
+                page,
+                page_size,
+                sort_column,
+                sort_direction,
+                search,
+            },
+        )
+    })
+    .await
 }
 
 fn list_db_browser_tables(conn: &Connection) -> Result<Vec<DbBrowserTableInfo>, String> {
@@ -281,7 +328,7 @@ fn query_db_browser_rows(
             .iter()
             .map(|column| {
                 format!(
-                    "CAST({} AS TEXT) LIKE ?1 COLLATE NOCASE",
+                    "CAST({} AS TEXT) LIKE ?1 COLLATE NOCASE ESCAPE '\\'",
                     quote_identifier(column)
                 )
             })
@@ -300,7 +347,7 @@ fn query_db_browser_rows(
     let total = if search.is_empty() {
         conn.query_row(&total_sql, [], |row| row.get::<_, i64>(0))
     } else {
-        let pattern = format!("%{search}%");
+        let pattern = format!("%{}%", escape_like_pattern(&search));
         conn.query_row(&total_sql, rusqlite::params![pattern], |row| {
             row.get::<_, i64>(0)
         })
@@ -320,7 +367,7 @@ fn query_db_browser_rows(
         .collect::<Result<Vec<_>, _>>()
         .map_err(|e| format!("Failed to collect rows for '{table}': {e}"))?
     } else {
-        let pattern = format!("%{search}%");
+        let pattern = format!("%{}%", escape_like_pattern(&search));
         stmt.query_map(
             rusqlite::params![pattern, page_size as i64, offset],
             |row| Ok(row_to_json(row, &column_names)),
@@ -377,6 +424,16 @@ fn quote_identifier(value: &str) -> String {
     format!("\"{value}\"")
 }
 
+/// Escape LIKE wildcards (`%`, `_`) and the escape character itself so user
+/// searches match those characters literally. Pairs with `ESCAPE '\'` in the
+/// LIKE clauses built above.
+fn escape_like_pattern(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
+}
+
 fn parse_sort_direction(value: Option<&str>) -> &'static str {
     match value.unwrap_or("asc").to_ascii_lowercase().as_str() {
         "desc" => "DESC",
@@ -408,40 +465,8 @@ fn rusqlite_value_to_json(val: Value) -> serde_json::Value {
         Value::Integer(i) => serde_json::Value::Number(i.into()),
         Value::Real(f) => serde_json::json!(f),
         Value::Text(s) => serde_json::Value::String(s),
-        Value::Blob(b) => serde_json::Value::String(base64_encode(&b)),
+        Value::Blob(b) => serde_json::Value::String(BASE64_STANDARD.encode(b)),
     }
-}
-
-fn base64_encode(data: &[u8]) -> String {
-    // Simple base64 without external crate
-    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut result = String::new();
-    for chunk in data.chunks(3) {
-        let b0 = chunk[0] as usize;
-        let b1 = if chunk.len() > 1 {
-            chunk[1] as usize
-        } else {
-            0
-        };
-        let b2 = if chunk.len() > 2 {
-            chunk[2] as usize
-        } else {
-            0
-        };
-        result.push(CHARS[b0 >> 2] as char);
-        result.push(CHARS[((b0 & 3) << 4) | (b1 >> 4)] as char);
-        if chunk.len() > 1 {
-            result.push(CHARS[((b1 & 15) << 2) | (b2 >> 6)] as char);
-        } else {
-            result.push('=');
-        }
-        if chunk.len() > 2 {
-            result.push(CHARS[b2 & 63] as char);
-        } else {
-            result.push('=');
-        }
-    }
-    result
 }
 
 fn normalize_sql(sql: &str) -> String {
@@ -584,6 +609,50 @@ mod tests {
         assert_eq!(
             response.rows[0]["name"],
             serde_json::Value::String("Fotografías".to_string())
+        );
+    }
+
+    #[test]
+    fn db_browser_query_rows_matches_like_wildcards_literally() {
+        let conn = setup_db_browser_test_db();
+        conn.execute_batch(
+            r#"
+            INSERT INTO collections (id, name, created_at) VALUES
+                ('col-3', '100% algodón', 30),
+                ('col-4', '1000 hilados', 40);
+            "#,
+        )
+        .expect("wildcard rows should insert");
+
+        let response = query_db_browser_rows(
+            &conn,
+            DbBrowserQueryRequest {
+                table: "collections".to_string(),
+                page: 1,
+                page_size: 25,
+                sort_column: None,
+                sort_direction: None,
+                search: Some("100%".to_string()),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(response.total, 1);
+        assert_eq!(
+            response.rows[0]["name"],
+            serde_json::Value::String("100% algodón".to_string())
+        );
+    }
+
+    #[test]
+    fn blob_values_encode_as_standard_base64_with_padding() {
+        assert_eq!(
+            rusqlite_value_to_json(Value::Blob(b"hi".to_vec())),
+            serde_json::Value::String("aGk=".to_string())
+        );
+        assert_eq!(
+            rusqlite_value_to_json(Value::Blob(vec![0xfb, 0xff, 0xbf])),
+            serde_json::Value::String("+/+/".to_string())
         );
     }
 }

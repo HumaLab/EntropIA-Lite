@@ -568,8 +568,9 @@ mod tests {
 
     #[test]
     fn openrouter_ner_rejects_bad_json_without_fallback() {
-        let error = parse_openrouter_entities("texto", &[], "[not json]", "google/gemma-4-26b-a4b-it")
-            .expect_err("bad JSON should not silently fall back");
+        let error =
+            parse_openrouter_entities("texto", &[], "[not json]", "google/gemma-4-26b-a4b-it")
+                .expect_err("bad JSON should not silently fall back");
 
         assert!(error.contains("OpenRouter NER"));
         assert!(error.contains("failed to parse JSON"));

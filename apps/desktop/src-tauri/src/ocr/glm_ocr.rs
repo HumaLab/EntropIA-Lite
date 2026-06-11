@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 const GLM_OCR_API_URL: &str = "https://api.z.ai/api/paas/v4/layout_parsing";
 const GLM_OCR_TEST_IMAGE_URL: &str = "https://cdn.bigmodel.cn/static/logo/introduction.png";
@@ -71,8 +72,14 @@ pub struct GlmOcrClient {
 
 impl GlmOcrClient {
     pub fn new(api_key: String) -> Self {
+        // Requests upload multi-MB base64 bodies and the OCR worker processes
+        // jobs serially, so a stalled connection without timeouts would hang
+        // the whole queue. The overall timeout is generous to allow slow
+        // uploads of large scans.
         let client = reqwest::Client::builder()
             .user_agent("EntropIA-Desktop/0.1 (historical-research-app)")
+            .connect_timeout(Duration::from_secs(15))
+            .timeout(Duration::from_secs(300))
             .build()
             .expect("Failed to build reqwest client");
 

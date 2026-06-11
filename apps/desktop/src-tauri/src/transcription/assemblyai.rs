@@ -2,9 +2,17 @@ use super::engine::{Segment, TranscriptionResult};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::Path;
+use std::time::Duration;
 
 const ASSEMBLYAI_API_BASE: &str = "https://api.assemblyai.com/v2";
 const DEFAULT_SPEECH_MODELS: [&str; 2] = ["universal-3-pro", "universal-2"];
+/// Audio uploads can be large; give them a generous per-request timeout that
+/// overrides the client-wide default.
+const UPLOAD_TIMEOUT: Duration = Duration::from_secs(600);
+/// Bound on transcript status polls (3 s apart, ~60 minutes total) so a
+/// transcript stuck in 'queued'/'processing' on the provider side cannot
+/// wedge the dedicated transcription worker thread forever.
+const MAX_TRANSCRIPT_POLL_ATTEMPTS: u32 = 1200;
 
 #[derive(Deserialize)]
 struct AssemblyAiApiError {
@@ -69,13 +77,19 @@ pub struct AssemblyAiClient {
 }
 
 impl AssemblyAiClient {
-    pub fn new(api_key: String) -> Self {
+    /// Build a client with request/connect timeouts so a stalled connection
+    /// cannot wedge the serial transcription worker. Surfaces HTTP-client
+    /// init failures as `Err` instead of panicking (release builds use
+    /// `panic = "abort"`).
+    pub fn new(api_key: String) -> Result<Self, String> {
         let client = reqwest::Client::builder()
             .user_agent("EntropIA-Desktop/0.1 (historical-research-app)")
+            .timeout(Duration::from_secs(60))
+            .connect_timeout(Duration::from_secs(20))
             .build()
-            .expect("Failed to build reqwest client");
+            .map_err(|e| format!("Failed to build AssemblyAI HTTP client: {e}"))?;
 
-        Self { client, api_key }
+        Ok(Self { client, api_key })
     }
 
     pub async fn test_connection(&self) -> Result<(), String> {
@@ -112,6 +126,7 @@ impl AssemblyAiClient {
             .post(format!("{ASSEMBLYAI_API_BASE}/upload"))
             .header("Authorization", &self.api_key)
             .header("Content-Type", "application/octet-stream")
+            .timeout(UPLOAD_TIMEOUT)
             .body(audio_bytes)
             .send()
             .await
@@ -147,11 +162,12 @@ impl AssemblyAiClient {
                 .await
                 .map_err(|e| format!("Failed to parse AssemblyAI transcript response: {e}"))?;
 
-        let mut poll_attempt = 0_u8;
+        let mut poll_attempt = 0_u32;
         loop {
             poll_attempt = poll_attempt.saturating_add(1);
-            let progress = 45_u8.saturating_add((poll_attempt.saturating_sub(1)).saturating_mul(5));
-            on_progress(progress.min(90), "polling_remote");
+            let progress =
+                45_u32.saturating_add((poll_attempt.saturating_sub(1)).saturating_mul(5));
+            on_progress(progress.min(90) as u8, "polling_remote");
 
             let status_response = self
                 .client
@@ -203,7 +219,17 @@ impl AssemblyAiClient {
                         "AssemblyAI returned an unknown transcription error".to_string()
                     }))
                 }
-                _ => tokio::time::sleep(tokio::time::Duration::from_secs(3)).await,
+                _ => {
+                    if poll_attempt >= MAX_TRANSCRIPT_POLL_ATTEMPTS {
+                        return Err(format!(
+                            "AssemblyAI transcript {} still '{}' after ~{} minutes of polling; aborting",
+                            created.id,
+                            transcript.status,
+                            MAX_TRANSCRIPT_POLL_ATTEMPTS * 3 / 60
+                        ));
+                    }
+                    tokio::time::sleep(Duration::from_secs(3)).await
+                }
             }
         }
     }

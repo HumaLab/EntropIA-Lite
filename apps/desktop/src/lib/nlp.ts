@@ -98,6 +98,7 @@ type StoredNlpState = Partial<ItemNlpState>
 export class NlpStore {
   private states = new Map<string, StoredNlpState>()
   private cleanupFns: Array<() => void> = []
+  private listenGeneration = 0
 
   /** Returns item NLP state, optionally overlaid with asset-scoped job state. */
   getState(itemId: string, assetId?: string | null): ItemNlpState {
@@ -119,6 +120,8 @@ export class NlpStore {
   async startListening(
     listen: (event: string, callback: (e: { payload: unknown }) => void) => Promise<() => void>
   ): Promise<void> {
+    const generation = ++this.listenGeneration
+
     const unlistenProgress = await listen('nlp:progress', (e) => {
       const p = e.payload as ProgressPayload
       this._setJobStatus(p.item_id, p.job as NlpJobType, 'running', undefined, p.asset_id)
@@ -134,11 +137,23 @@ export class NlpStore {
       this._setJobStatus(p.item_id, p.job as NlpJobType, 'error', p.error, p.asset_id)
     })
 
-    this.cleanupFns = [unlistenProgress, unlistenComplete, unlistenError]
+    const cleanupFns = [unlistenProgress, unlistenComplete, unlistenError]
+
+    // stopListening may run while the listen() promises above are still in
+    // flight; unlisten late registrations immediately instead of leaking them.
+    if (generation !== this.listenGeneration) {
+      for (const fn of cleanupFns) {
+        fn()
+      }
+      return
+    }
+
+    this.cleanupFns = cleanupFns
   }
 
   /** Calls all cleanup functions returned by listen(), removing event listeners. */
   stopListening(): void {
+    this.listenGeneration++
     for (const fn of this.cleanupFns) {
       fn()
     }

@@ -117,6 +117,7 @@ export interface TranscriptionStoreOptions {
 export class TranscriptionStore {
   private states = new Map<string, AssetTranscriptionState>()
   private cleanupFns: Array<() => void> = []
+  private listenGeneration = 0
   private onComplete?: (assetId: string) => void
 
   constructor(options?: TranscriptionStoreOptions) {
@@ -135,6 +136,8 @@ export class TranscriptionStore {
   async startListening(
     listen: (event: string, callback: (e: { payload: unknown }) => void) => Promise<() => void>
   ): Promise<void> {
+    const generation = ++this.listenGeneration
+
     const unlistenProgress = await listen('transcription:progress', (e) => {
       const p = e.payload as ProgressPayload
       this._updateState(p.asset_id, { status: 'running', progress: p.pct, stage: p.stage })
@@ -160,11 +163,23 @@ export class TranscriptionStore {
       this._updateState(p.asset_id, { status: 'error', error: p.error, stage: 'error' })
     })
 
-    this.cleanupFns = [unlistenProgress, unlistenComplete, unlistenError]
+    const cleanupFns = [unlistenProgress, unlistenComplete, unlistenError]
+
+    // stopListening may run while the listen() promises above are still in
+    // flight; unlisten late registrations immediately instead of leaking them.
+    if (generation !== this.listenGeneration) {
+      for (const fn of cleanupFns) {
+        fn()
+      }
+      return
+    }
+
+    this.cleanupFns = cleanupFns
   }
 
   /** Calls all cleanup functions returned by listen(), removing event listeners. */
   stopListening(): void {
+    this.listenGeneration++
     for (const fn of this.cleanupFns) {
       fn()
     }
@@ -191,7 +206,8 @@ export class TranscriptionStore {
 
 /**
  * Calls the Rust `transcribe_audio` command to kick off a transcription job.
- * Sets the asset state to 'pending' before the invocation resolves.
+ * Does not mutate store state; callers own pending-state handling
+ * (see runPendingAssetJob in item-view-media-jobs.ts).
  */
 export async function transcribeAudio(assetId: string, assetPath: string): Promise<void> {
   await invoke('transcribe_audio', { assetId, assetPath })

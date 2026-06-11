@@ -14,7 +14,8 @@
   --color-hairline: rgba(226, 232, 255, 0.075);
   --color-text-primary: #e2e6ee;
   --color-text-secondary: #a5adbc;
-  --color-text-muted: #6f7787;
+  /* Muted text must keep >= 4.5:1 (WCAG AA) on --color-bg and raised surfaces. */
+  --color-text-muted: #7d8596;
   --color-accent: #9aa4c7;
   --color-accent-hover: #b2bbd8;
   --color-accent-soft: rgba(154, 164, 199, 0.13);
@@ -148,8 +149,9 @@
   --color-border-hover: #bbb;
   --color-hairline: rgba(0, 0, 0, 0.08);
   --color-text-primary: #1a1a1a;
-  --color-text-secondary: #777;
-  --color-text-muted: #999;
+  /* Secondary/muted text must keep >= 4.5:1 (WCAG AA) on --color-bg #ffffff. */
+  --color-text-secondary: #6b6b6b;
+  --color-text-muted: #767676;
   --color-accent: #5a67d8;
   --color-accent-hover: #4c5ac7;
   --color-accent-soft: rgba(90, 103, 216, 0.08);

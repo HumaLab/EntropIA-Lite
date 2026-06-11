@@ -133,15 +133,10 @@ pub fn fts_search(
 pub fn sanitize_fts5_query(raw: &str) -> String {
     // Remove FTS5 special characters
     let cleaned = raw
-        .replace('"', "")
-        .replace('(', "")
-        .replace(')', "")
-        .replace('*', "")
+        .replace(['"', '(', ')', '*'], "")
         .replace('-', " ")
         .replace('^', "")
-        .replace(':', " ")
-        .replace(',', " ")
-        .replace('.', " ");
+        .replace([':', ',', '.'], " ");
 
     // Remove FTS5 boolean operators (case-insensitive, whole word)
     let mut words: Vec<&str> = cleaned

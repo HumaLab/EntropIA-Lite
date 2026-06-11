@@ -62,7 +62,8 @@ pub async fn extract_entities_with_openrouter(
     }
 
     let model_name = normalize_model_name(&model_name);
-    let client = crate::llm::openrouter::OpenRouterClient::new(api_key, model_name.clone());
+    let client = crate::llm::openrouter::OpenRouterClient::try_new(api_key, model_name.clone())
+        .map_err(|error| openrouter_ner_unavailable(&error))?;
     let prompt = render_ner_prompt(prompt_template.as_deref(), text);
     let params = params
         .unwrap_or_else(|| crate::llm::openrouter::GenerationParams::with_defaults(1024, 0.3));

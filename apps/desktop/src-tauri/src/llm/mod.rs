@@ -73,7 +73,7 @@ fn llm_job_suffix(job: &LlmJob) -> Option<&'static str> {
 
 fn llm_job_prefix(job: &LlmJob) -> String {
     match llm_job_suffix(job) {
-        Some(suffix) => format!("{}[{}]", LLM_CLOUD_PREFIX, suffix),
+        Some(suffix) => format!("{LLM_CLOUD_PREFIX}[{suffix}]"),
         None => LLM_CLOUD_PREFIX.to_string(),
     }
 }
@@ -367,12 +367,10 @@ pub fn get_all_results_for_target(
 
     let mut results = Vec::new();
     let mut seen_job_types = std::collections::HashSet::new();
-    for row in rows {
-        if let Ok(entry) = row {
-            // Keep only the latest result per job_type (DESC order means first is latest)
-            if seen_job_types.insert(entry.job_type.clone()) {
-                results.push(entry);
-            }
+    for entry in rows.flatten() {
+        // Keep only the latest result per job_type (DESC order means first is latest)
+        if seen_job_types.insert(entry.job_type.clone()) {
+            results.push(entry);
         }
     }
 
@@ -436,9 +434,9 @@ pub fn ensure_llm_results_schema(conn: &rusqlite::Connection) -> Result<(), Stri
 
     let has_target_type: bool = conn
         .prepare("SELECT target_type FROM llm_results LIMIT 0")
-        .and_then(|mut stmt| {
+        .map(|mut stmt| {
             let _ = stmt.query_map([], |_| Ok(()));
-            Ok(true)
+            true
         })
         .unwrap_or(false);
 
@@ -799,10 +797,7 @@ fn fn_now_millis() -> i64 {
 
 /// Delete all existing item-level triples (asset_id IS NULL).
 /// Called once at the start of a streaming triples job.
-fn clear_triples_for_item(
-    conn: &rusqlite::Connection,
-    item_id: &str,
-) -> Result<(), String> {
+fn clear_triples_for_item(conn: &rusqlite::Connection, item_id: &str) -> Result<(), String> {
     conn.execute("DELETE FROM triples WHERE item_id = ?1", params![item_id])
         .map_err(|e| format!("Failed to delete old triples for item: {e}"))?;
     Ok(())
@@ -944,8 +939,8 @@ fn build_streaming_triples_plan(
         LlmJob::ExtractTriplesAsset { asset_id } => {
             // For asset-level jobs we need the parent item_id for the row
             // scoping, so resolve it up front while we still hold `&conn`.
-            let item_id = crate::nlp::lookup_item_id_for_asset(conn, asset_id)?
-                .ok_or_else(|| {
+            let item_id =
+                crate::nlp::lookup_item_id_for_asset(conn, asset_id)?.ok_or_else(|| {
                     format!("Asset {asset_id} has no parent item; cannot run triples streaming")
                 })?;
             let text = text_provider::get_asset_text(conn, asset_id)?;
@@ -1026,7 +1021,9 @@ impl LlmQueue {
             // Open dedicated DB connection for the worker FIRST so we can read remote settings.
             let conn = match rusqlite::Connection::open(&db_path) {
                 Ok(c) => {
-                    let _ = c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;");
+                    let _ = c.execute_batch(
+                        "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+                    );
                     c
                 }
                 Err(e) => {
@@ -1077,7 +1074,13 @@ impl LlmQueue {
                 }
 
                 eprintln!("{job_log_prefix} Running job '{job_name}' for {id} via remote API");
-                let client = OpenRouterClient::new(api_key, remote_model);
+                let client = match OpenRouterClient::try_new(api_key, remote_model) {
+                    Ok(client) => client,
+                    Err(e) => {
+                        emit_error(&app_handle, &id, job_name, &e);
+                        continue;
+                    }
+                };
 
                 // Triples extraction has a dedicated streaming path that
                 // chunks long documents and accumulates triples across chunks
@@ -1109,7 +1112,7 @@ impl LlmQueue {
                     let job_conn = match rusqlite::Connection::open(&db_path) {
                         Ok(c) => {
                             let _ = c.execute_batch(
-                                "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;",
+                                "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
                             );
                             c
                         }
@@ -1139,11 +1142,20 @@ impl LlmQueue {
                         continue;
                     }
 
+                    // Resolve the source text once before the chunk loop — it
+                    // cannot change between chunks. Ordinal-token restoration
+                    // uses it to see the original document window: asset text
+                    // for asset-level jobs, item text for item-level jobs.
+                    let source_text = if let Some(asset_id) = target.asset_id.as_deref() {
+                        text_provider::get_asset_text(&job_conn, asset_id).unwrap_or_default()
+                    } else {
+                        text_provider::get_item_text(&job_conn, &target.item_id).unwrap_or_default()
+                    };
+
                     // Network + persist loop. `&job_conn` does NOT cross
-                    // `.await` because persistence is wrapped in
-                    // `block_in_place` (which runs sync on the current thread)
-                    // while `client.generate_remote_job(...).await` is the
-                    // only `await` point.
+                    // `.await`: persistence runs synchronously between chunk
+                    // requests, and `generate_remote_job(...).await` is the
+                    // only `await` point (rusqlite connections are not `Send`).
                     let mut accumulator: HashSet<(String, String, String)> = HashSet::new();
                     let mut last_output = String::new();
                     let mut chunk_error: Option<String> = None;
@@ -1154,18 +1166,6 @@ impl LlmQueue {
                                 chunk_error = Some(format!("triples chunk {index} failed: {e}"));
                                 break;
                             }
-                        };
-
-                        // Resolve the source text on the dedicated conn so
-                        // ordinal-token restoration sees the original document
-                        // window. For asset-level jobs we need the asset
-                        // text; for item-level, the item text.
-                        let source_text = if let Some(asset_id) = target.asset_id.as_deref() {
-                            text_provider::get_asset_text(&job_conn, asset_id)
-                                .unwrap_or_default()
-                        } else {
-                            text_provider::get_item_text(&job_conn, &target.item_id)
-                                .unwrap_or_default()
                         };
 
                         let chunk_triples =
@@ -1196,11 +1196,7 @@ impl LlmQueue {
                                 &new_triples,
                             )
                         } else {
-                            store_chunk_triples_for_item(
-                                &job_conn,
-                                &target.item_id,
-                                &new_triples,
-                            )
+                            store_chunk_triples_for_item(&job_conn, &target.item_id, &new_triples)
                         };
                         if let Err(e) = stored_result {
                             eprintln!(
@@ -1232,13 +1228,9 @@ impl LlmQueue {
                     }
 
                     // Cache parity: persist the last chunk's raw response.
-                    if let Err(e) = persist_result(
-                        &job_conn,
-                        job.target_type(),
-                        &id,
-                        job_name,
-                        &last_output,
-                    ) {
+                    if let Err(e) =
+                        persist_result(&job_conn, job.target_type(), &id, job_name, &last_output)
+                    {
                         eprintln!(
                             "{job_log_prefix} Warning: failed to persist result for {id}/{job_name}: {e}"
                         );
@@ -1362,8 +1354,7 @@ pub(crate) fn truncate_text_for_context(n_ctx: u32, max_tokens: i32, text: &str)
 
     // Collect chars up to budget, then try to cut at the last sentence boundary
     let truncated: String = text.chars().take(budget_chars).collect();
-    if let Some(pos) = truncated.rfind(|c: char| c == '.' || c == '\n' || c == '！' || c == '。')
-    {
+    if let Some(pos) = truncated.rfind(['.', '\n', '！', '。']) {
         // Keep up to and including the sentence boundary char
         truncated[..=pos].to_string()
     } else {
@@ -1444,7 +1435,7 @@ fn gather_collection_context(
                 text.clone()
             };
 
-            let snippet = format!("--- {} ---\n{}\n\n", title, display_text);
+            let snippet = format!("--- {title} ---\n{display_text}\n\n");
             if context.len() + snippet.len() > MAX_ASK_CONTEXT_CHARS {
                 // Budget exceeded — add what fits and stop
                 let remaining = MAX_ASK_CONTEXT_CHARS.saturating_sub(context.len());
@@ -1580,8 +1571,7 @@ fn prompt_from_settings(
         .chars()
         .count();
     eprintln!(
-        "{LLM_CLOUD_PREFIX} Runtime prompt for {flow}: source={source}, chars={}",
-        template_chars
+        "{LLM_CLOUD_PREFIX} Runtime prompt for {flow}: source={source}, chars={template_chars}"
     );
     match override_template {
         Some(template) => prompt::render_user_prompt_template(&template, text),

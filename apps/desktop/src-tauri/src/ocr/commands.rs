@@ -46,10 +46,7 @@ pub async fn extract_text(
     crate::app_logs::info(
         &app_handle,
         "ocr",
-        format!(
-            "Trabajo OCR encolado: asset_id={}, tipo={}, modo={:?}",
-            asset_id, asset_type, ocr_mode
-        ),
+        format!("Trabajo OCR encolado: asset_id={asset_id}, tipo={asset_type}, modo={ocr_mode:?}"),
     );
 
     let job = super::OcrJob {
@@ -203,7 +200,7 @@ pub async fn generate_image_thumbnail(
         .map_err(|e| format!("Failed to create thumbnails directory: {e}"))?;
 
     let path_hash = Sha256::digest(asset_path.as_bytes());
-    let thumb_name = format!("image-{asset_id}-{:x}.png", path_hash);
+    let thumb_name = format!("image-{asset_id}-{path_hash:x}.png");
     let thumb_path = thumb_dir.join(thumb_name);
 
     if thumb_path.exists() {
@@ -353,7 +350,8 @@ pub async fn probe_pdf(
 /// # Arguments
 /// * `pdf_path` — Absolute filesystem path to the source PDF file
 /// * `output_dir` — Directory where PNG files will be saved (created if missing)
-/// * `filename_prefix` — Prefix for output filenames (e.g., "document" → "document_page_1.png")
+/// * `filename_prefix` — Prefix for output filenames (e.g., "document" → "document_page_1.png").
+///   Sanitized before use: path separators, `:`, and `..` cannot escape `output_dir`.
 ///
 /// # Returns
 /// A list of `RenderedPage` objects with page numbers and absolute file paths.
@@ -364,53 +362,98 @@ pub async fn render_pdf_pages(
     filename_prefix: String,
     app_handle: tauri::AppHandle,
 ) -> Result<Vec<RenderedPage>, String> {
-    use std::io::Write;
-
     // Ensure Pdfium is initialized
     super::pdf::init_pdfium_path(&app_handle);
+
+    let filename_prefix = sanitize_filename_prefix(&filename_prefix);
 
     // Create output directory if it doesn't exist
     let out_dir = std::path::PathBuf::from(&output_dir);
     std::fs::create_dir_all(&out_dir)
         .map_err(|e| format!("Failed to create output directory: {e}"))?;
 
-    // Read PDF and render pages in a blocking task
+    // Read PDF and render pages in a blocking task. The batch helper binds
+    // Pdfium and parses the document once for all pages.
     let pages = tokio::task::spawn_blocking(move || {
         let bytes =
             std::fs::read(&pdf_path).map_err(|e| format!("Failed to read PDF file: {e}"))?;
 
-        let page_count = super::pdf::pdf_page_count(&bytes)
-            .map_err(|e| format!("Failed to get PDF page count: {e}"))?;
+        let file_paths =
+            super::pdf::render_pdf_pages_to_png_files(&bytes, &out_dir, &filename_prefix)?;
 
-        eprintln!("[render_pdf_pages] Rendering {page_count} pages from PDF");
-
-        let mut rendered_pages: Vec<RenderedPage> = Vec::with_capacity(page_count);
-
-        for page_idx in 0..page_count {
-            let png_data = super::pdf::render_pdf_page_to_image(&bytes, page_idx)
-                .map_err(|e| format!("Failed to render PDF page {}: {e}", page_idx + 1))?;
-
-            let page_number = (page_idx + 1) as u32;
-            let filename = format!("{filename_prefix}_page_{page_number}.png");
-            let file_path = out_dir.join(&filename);
-
-            let mut file = std::fs::File::create(&file_path)
-                .map_err(|e| format!("Failed to create PNG file for page {page_number}: {e}"))?;
-            file.write_all(&png_data)
-                .map_err(|e| format!("Failed to write PNG data for page {page_number}: {e}"))?;
-
-            rendered_pages.push(RenderedPage {
-                page_number,
-                png_path: normalize_windows_path_string(&file_path),
-            });
-
-            eprintln!("[render_pdf_pages] Rendered page {page_number}/{page_count}");
-        }
-
-        Ok::<Vec<RenderedPage>, String>(rendered_pages)
+        Ok::<Vec<RenderedPage>, String>(
+            file_paths
+                .into_iter()
+                .enumerate()
+                .map(|(page_index, file_path)| RenderedPage {
+                    page_number: (page_index + 1) as u32,
+                    png_path: normalize_windows_path_string(&file_path),
+                })
+                .collect(),
+        )
     })
     .await
     .map_err(|e| format!("PDF render task panicked: {e}"))??;
 
     Ok(pages)
+}
+
+/// Sanitize a caller-supplied filename prefix so the output files cannot
+/// escape the output directory: path separators, drive colons, and control
+/// characters become `_`, and `..` sequences are collapsed. Normal basename
+/// prefixes (e.g., "document") pass through unchanged; an empty result falls
+/// back to "document".
+fn sanitize_filename_prefix(prefix: &str) -> String {
+    let mut sanitized: String = prefix
+        .chars()
+        .map(|c| match c {
+            '/' | '\\' | ':' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect();
+
+    while sanitized.contains("..") {
+        sanitized = sanitized.replace("..", "_");
+    }
+
+    if sanitized.trim().is_empty() {
+        "document".to_string()
+    } else {
+        sanitized
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sanitize_filename_prefix_keeps_normal_basenames() {
+        assert_eq!(sanitize_filename_prefix("document"), "document");
+        assert_eq!(
+            sanitize_filename_prefix("Acta 1923 - foja 4"),
+            "Acta 1923 - foja 4"
+        );
+    }
+
+    #[test]
+    fn sanitize_filename_prefix_strips_separators_and_traversal() {
+        let windows = sanitize_filename_prefix(r"..\..\AppData\evil");
+        assert!(!windows.contains('\\'));
+        assert!(!windows.contains(".."));
+
+        let unix = sanitize_filename_prefix("../../etc/evil");
+        assert!(!unix.contains('/'));
+        assert!(!unix.contains(".."));
+
+        assert_eq!(sanitize_filename_prefix("C:evil"), "C_evil");
+    }
+
+    #[test]
+    fn sanitize_filename_prefix_falls_back_when_empty() {
+        assert_eq!(sanitize_filename_prefix(""), "document");
+        assert_eq!(sanitize_filename_prefix("   "), "document");
+        assert_eq!(sanitize_filename_prefix("///"), "___");
+    }
 }

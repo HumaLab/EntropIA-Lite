@@ -177,4 +177,30 @@ describe('DebouncedAnnotationPersistor', () => {
     expect(persist).not.toHaveBeenCalled()
     expect(persistor.getPendingAssetId()).toBeNull()
   })
+
+  it('reports a failed scheduled persist through onError instead of rejecting', async () => {
+    const error = new Error('persist failed')
+    const persist = vi.fn().mockRejectedValue(error)
+    const onError = vi.fn()
+    const persistor = new DebouncedAnnotationPersistor({ delayMs: 500, persist, onError })
+
+    persistor.schedule('asset-1', [annotation()])
+    await vi.advanceTimersByTimeAsync(500)
+
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledWith(error)
+  })
+
+  it('reports a failed flushPending persist through onError instead of rejecting', async () => {
+    const error = new Error('persist failed')
+    const persist = vi.fn().mockRejectedValue(error)
+    const onError = vi.fn()
+    const persistor = new DebouncedAnnotationPersistor({ delayMs: 500, persist, onError })
+
+    persistor.schedule('asset-1', [annotation()])
+    await expect(persistor.flushPending()).resolves.toBeUndefined()
+
+    expect(persist).toHaveBeenCalledTimes(1)
+    expect(onError).toHaveBeenCalledWith(error)
+  })
 })

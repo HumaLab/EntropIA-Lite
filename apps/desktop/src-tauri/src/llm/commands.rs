@@ -7,7 +7,13 @@ use crate::db::state::AppDbState;
 /// Returns `true` if the LLM engine loaded successfully and is ready to accept jobs.
 #[tauri::command]
 pub async fn llm_is_available(llm_queue: State<'_, LlmQueue>) -> Result<bool, String> {
-    Ok(llm_queue.is_available())
+    // The availability check opens a SQLite connection and may hit the
+    // Windows Credential Manager — both blocking — so keep it off the
+    // async runtime workers (the frontend polls this command).
+    let queue = llm_queue.inner().clone();
+    tokio::task::spawn_blocking(move || queue.is_available())
+        .await
+        .map_err(|e| format!("LLM availability check failed: {e}"))
 }
 
 /// Return Lite-compatible model status for the existing frontend contract.
@@ -166,7 +172,17 @@ pub async fn test_openrouter_connection(
         api_key
     };
 
-    let client = OpenRouterClient::new(api_key.trim().to_string(), String::new());
+    let client = match OpenRouterClient::try_new(api_key.trim().to_string(), String::new()) {
+        Ok(client) => client,
+        Err(error) => {
+            crate::app_logs::error(
+                &app_handle,
+                "settings/openrouter",
+                format!("Falló prueba de conexión OpenRouter: {error}"),
+            );
+            return Err(error);
+        }
+    };
     let result = client.test_connection().await;
     match &result {
         Ok(models) => crate::app_logs::info(

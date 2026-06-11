@@ -128,7 +128,9 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             let ui_conn =
                 rusqlite::Connection::open(&db_path).expect("Failed to open SQLite database (ui)");
             ui_conn
-                .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+                .execute_batch(
+                    "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+                )
                 .expect("Failed to configure SQLite pragmas (ui)");
 
             // Normalize legacy duplicates and enforce one-row-per-asset semantics
@@ -189,9 +191,9 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
                 // Legacy fallback for databases that haven't run JS migrations yet.
                 let has_sort_index: bool = ui_conn
                     .prepare("SELECT sort_index FROM assets LIMIT 0")
-                    .and_then(|mut stmt| {
+                    .map(|mut stmt| {
                         let _ = stmt.query_map([], |_| Ok(()));
-                        Ok(true)
+                        true
                     })
                     .unwrap_or(false);
 
@@ -208,9 +210,9 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
 
                 let has_notes_asset_id: bool = ui_conn
                     .prepare("SELECT asset_id FROM notes LIMIT 0")
-                    .and_then(|mut stmt| {
+                    .map(|mut stmt| {
                         let _ = stmt.query_map([], |_| Ok(()));
-                        Ok(true)
+                        true
                     })
                     .unwrap_or(false);
 
@@ -253,7 +255,9 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             let worker_conn = rusqlite::Connection::open(&db_path)
                 .expect("Failed to open SQLite database (worker)");
             worker_conn
-                .execute_batch("PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;")
+                .execute_batch(
+                    "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;",
+                )
                 .expect("Failed to configure SQLite pragmas (worker)");
 
             app.manage(AppDbState::new(ui_conn, worker_conn, db_path.clone()));
@@ -565,8 +569,7 @@ fn prefer_richer_legacy_database(legacy_dir: &Path, app_dir: &Path) -> Result<()
 
     if legacy_score <= current_score {
         eprintln!(
-            "[setup] keeping current sqlite bundle (current_score={}, legacy_score={})",
-            current_score, legacy_score
+            "[setup] keeping current sqlite bundle (current_score={current_score}, legacy_score={legacy_score})"
         );
         return Ok(());
     }
@@ -575,8 +578,7 @@ fn prefer_richer_legacy_database(legacy_dir: &Path, app_dir: &Path) -> Result<()
     remove_sqlite_bundle(&current_db)?;
     copy_sqlite_bundle(&legacy_db, &current_db)?;
     eprintln!(
-        "[setup] restored richer legacy sqlite bundle (legacy_score={} > current_score={})",
-        legacy_score, current_score
+        "[setup] restored richer legacy sqlite bundle (legacy_score={legacy_score} > current_score={current_score})"
     );
     Ok(())
 }
@@ -777,9 +779,9 @@ fn migrate_legacy_asset_paths(db_path: &Path, app_dir: &Path) -> Result<(), Stri
 
     let has_path_column: bool = conn
         .prepare("SELECT path FROM assets LIMIT 0")
-        .and_then(|mut stmt| {
+        .map(|mut stmt| {
             let _ = stmt.query_map([], |_| Ok(()));
-            Ok(true)
+            true
         })
         .unwrap_or(false);
 

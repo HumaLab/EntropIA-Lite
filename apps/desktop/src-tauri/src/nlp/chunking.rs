@@ -108,18 +108,22 @@ mod tests {
 
     #[test]
     fn newline_in_second_half_is_preferred_over_first_half() {
-        let mut text = "a".repeat(20_000);
+        // Window is [0, MAX_CHARS) with the boundary search limited to the
+        // second half (>= MAX_CHARS / 2 = 14_000). Place one newline in the
+        // first half (index 10_000) and one in the second half (index 20_001);
+        // the chunk must break at the second-half newline.
+        let mut text = "a".repeat(10_000);
         text.push('\n');
-        text.push_str(&"b".repeat(4_999));
+        text.push_str(&"b".repeat(10_000));
         text.push('\n');
-        text.push_str(&"c".repeat(100));
+        text.push_str(&"c".repeat(8_000)); // total 28_002 > MAX_CHARS
         let chunks = chunk_text(&text);
         assert_eq!(chunks.len(), 2);
         assert_eq!(chunks[0].start, 0);
-        assert_eq!(chunks[0].text.chars().count(), 25_001);
+        assert_eq!(chunks[0].text.chars().count(), 20_002);
         assert!(chunks[0].text.ends_with('\n'));
-        assert_eq!(chunks[1].start, 25_001);
-        assert_eq!(chunks[1].text.chars().count(), 100);
+        assert_eq!(chunks[1].start, 20_002);
+        assert_eq!(chunks[1].text.chars().count(), 8_000);
     }
 
     #[test]

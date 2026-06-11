@@ -236,7 +236,7 @@ pub async fn backfill_asset_embeddings(
         })?;
 
         conn.execute_batch(
-            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON;\
+            "PRAGMA journal_mode=WAL; PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000;\
              CREATE TABLE IF NOT EXISTS vec_assets(\
                  asset_id TEXT PRIMARY KEY,\
                  item_id TEXT NOT NULL,\
@@ -505,7 +505,7 @@ mod tests {
             NlpJob::EnrichItem { item_id } => {
                 assert_eq!(item_id, "item-enrich-cmd");
             }
-            _ => panic!("Expected EnrichItem job, got: {:?}", job),
+            _ => panic!("Expected EnrichItem job, got: {job:?}"),
         }
     }
 

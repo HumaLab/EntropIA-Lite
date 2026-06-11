@@ -248,6 +248,7 @@
   let layoutSelectedBlockId = $state<string | null>(null)
   let layoutHoveredRegionId = $state<string | null>(null)
   let layoutSelectedRegionId = $state<string | null>(null)
+  const itemLoadGuard = new LatestRequestGuard()
   const layoutLoadGuard = new LatestRequestGuard()
   const notesLoadGuard = new LatestRequestGuard()
   const selectedAssetStateLoadGuard = new LatestRequestGuard()
@@ -324,6 +325,9 @@
   const annotationPersistor = new DebouncedAnnotationPersistor({
     delayMs: PERSIST_IDLE_MS,
     persist: persistAnnotations,
+    onError: (error) => {
+      console.error('[ItemView] Failed to persist annotations:', error)
+    },
   })
 
   /** Save manual OCR edits; cheap FTS indexing runs after successful persistence. */
@@ -390,15 +394,18 @@
     'notes'
   )
   let rightPanelOpen = $state(true)
-  const metadataEditorLabels = {
-    keyPlaceholder: 'Campo',
-    valuePlaceholder: 'Valor',
-    removeFieldAria: 'Eliminar campo',
-    addField: '+ Agregar campo',
-    fieldLabel: 'Campo',
-    valueLabel: 'Valor',
-    emptyText: 'No hay metadatos cargados para este documento.',
-  }
+  const metadataEditorLabels = $derived.by(() => {
+    $currentLocale
+    return {
+      keyPlaceholder: translate('item.metadataKeyPlaceholder'),
+      valuePlaceholder: translate('item.metadataValuePlaceholder'),
+      removeFieldAria: translate('item.metadataRemoveField'),
+      addField: translate('item.metadataAddField'),
+      fieldLabel: translate('item.metadataFieldLabel'),
+      valueLabel: translate('item.metadataValueLabel'),
+      emptyText: translate('item.metadataEmpty'),
+    }
+  })
 
   const documentViewerLabels = $derived.by(() => {
     $currentLocale
@@ -538,7 +545,6 @@
           completedTargetId: id,
           selectedAssetId: selectedAsset?.id ?? null,
           assets,
-          hasOcrText: (assetId) => Boolean(ocrStore.getTextContent(assetId)),
         })
         if (assetId) {
           ocrEditedText.set(assetId, result)
@@ -1097,6 +1103,12 @@
       assets = updateAssetPathInList(assets, assetId, entry.path)
       annotations = entry.annotations
       selectedAnnotationId = null
+      if (selectedAsset && selectedAsset.id === assetId) {
+        // Restore the pre-edit dimensions immediately so edits started before
+        // the restored image decodes use correct pixel coordinates.
+        imageNaturalW = entry.width
+        imageNaturalH = entry.height
+      }
       // Force image refresh
       imageVersion++
 
@@ -1135,8 +1147,14 @@
     // if something caches at the protocol level).
     imageVersion++
 
-    // Persist adjusted annotations
     if (selectedAsset && selectedAsset.id === assetId) {
+      // Adopt the authoritative post-edit dimensions from the backend result.
+      // Waiting for the <img> load event leaves a window where a follow-up
+      // crop/erase computes pixel coordinates against stale dimensions.
+      imageNaturalW = result.width
+      imageNaturalH = result.height
+
+      // Persist adjusted annotations
       await persistAnnotations(assetId, annotations)
     }
 
@@ -1225,7 +1243,7 @@
   let activeAssetSummary = $derived(
     selectedAsset
       ? `${getAssetTypeLabel(selectedAsset.type)} · ${getAssetPathLabel(selectedAsset.path)}`
-      : 'Sin asset seleccionado'
+      : translate('item.assetNoSelection')
   )
 
   function isCurrentSelectedAsset(asset: Asset | null) {
@@ -1656,6 +1674,7 @@
   }
 
   async function loadData() {
+    const requestToken = itemLoadGuard.next()
     try {
       loading = true
       error = null
@@ -1667,6 +1686,9 @@
         store.assets.findByItem(itemId),
         store.collections.findById(collectionId),
       ])
+      // Discard stale responses: a newer navigation may have started another
+      // loadData while this one was awaiting.
+      if (!itemLoadGuard.isCurrent(requestToken)) return
       item = loadedItem
       assets = loadedAssets
       collection = loadedCollection
@@ -1677,9 +1699,13 @@
       void loadTopics()
       void loadTopicSuggestions()
     } catch (e) {
+      if (!itemLoadGuard.isCurrent(requestToken)) return
       error = e instanceof Error ? e.message : 'Failed to load item'
     } finally {
-      loading = false
+      // The newer invocation owns `loading`; it set it to true synchronously.
+      if (itemLoadGuard.isCurrent(requestToken)) {
+        loading = false
+      }
     }
   }
 
@@ -1948,6 +1974,7 @@
           ocrTick++
         }
       })
+      .catch((e) => console.error('[ItemView] OCR listener setup failed:', e))
 
     nlpStore
       .startListening((eventName, callback) =>
@@ -1970,6 +1997,7 @@
           }
         }
       })
+      .catch((e) => console.error('[ItemView] NLP listener setup failed:', e))
 
     transcriptionStore
       .startListening((eventName, callback) =>
@@ -1982,21 +2010,25 @@
           transcriptionTick++
         }
       })
+      .catch((e) => console.error('[ItemView] Transcription listener setup failed:', e))
 
-    llmStore.startListening().then(() => {
-      llmStore.onChange(() => {
-        llmTick++
-        const target = getActiveLlmTarget({ itemId, selectedAssetId: selectedAsset?.id ?? null })
-        const llmState = llmStore.getState(target.targetId)
-        if (isLlmTriplesJob(llmState.activeJob ?? '') && llmState.status === 'running') {
-          nlpStore._setJobStatus(itemId, 'triples', 'running')
-          nlpTick++
-        }
+    llmStore
+      .startListening()
+      .then(() => {
+        llmStore.onChange(() => {
+          llmTick++
+          const target = getActiveLlmTarget({ itemId, selectedAssetId: selectedAsset?.id ?? null })
+          const llmState = llmStore.getState(target.targetId)
+          if (isLlmTriplesJob(llmState.activeJob ?? '') && llmState.status === 'running') {
+            nlpStore._setJobStatus(itemId, 'triples', 'running')
+            nlpTick++
+          }
+        })
+        // Load persisted LLM results for the item (legacy item-level results).
+        // Asset-level results are loaded in the selectedAsset effect below.
+        llmStore.loadPersistedResults(itemId, 'item')
       })
-      // Load persisted LLM results for the item (legacy item-level results).
-      // Asset-level results are loaded in the selectedAsset effect below.
-      llmStore.loadPersistedResults(itemId, 'item')
-    })
+      .catch((e) => console.error('[ItemView] LLM listener setup failed:', e))
 
     llmIsAvailable()
       .then((available) => {
@@ -2006,11 +2038,14 @@
         llmAvailable = false
       })
 
-    geoStore.startListening()
+    geoStore
+      .startListening()
+      .catch((e) => console.error('[ItemView] Geo listener setup failed:', e))
     return () => metadataPersistor.cancel()
   })
 
   onDestroy(() => {
+    itemLoadGuard.invalidate()
     layoutLoadGuard.invalidate()
     notesLoadGuard.invalidate()
     selectedAssetStateLoadGuard.invalidate()

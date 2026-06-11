@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/svelte'
+import { tick } from 'svelte'
 import { describe, expect, it, vi } from 'vitest'
 import ConfirmDialog from '../ConfirmDialog.svelte'
 
@@ -45,6 +46,52 @@ describe('ConfirmDialog', () => {
     expect(oncancel).toHaveBeenCalledOnce()
     expect(propagated).not.toHaveBeenCalled()
     document.body.removeEventListener('keydown', propagated)
+  })
+
+  it('cancels on Escape even when focus stays outside the dialog', async () => {
+    const oncancel = vi.fn()
+    render(ConfirmDialog, { props: { ...baseProps, oncancel } })
+
+    await fireEvent.keyDown(document.body, { key: 'Escape' })
+
+    expect(oncancel).toHaveBeenCalledOnce()
+  })
+
+  it('moves focus to the cancel button when opened', async () => {
+    render(ConfirmDialog, { props: baseProps })
+    await tick()
+
+    expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus()
+  })
+
+  it('traps Tab and Shift+Tab within the dialog', async () => {
+    render(ConfirmDialog, { props: baseProps })
+    await tick()
+
+    const cancelButton = screen.getByRole('button', { name: 'Cancel' })
+    const confirmButton = screen.getByRole('button', { name: 'Delete' })
+
+    confirmButton.focus()
+    await fireEvent.keyDown(confirmButton, { key: 'Tab' })
+    expect(cancelButton).toHaveFocus()
+
+    await fireEvent.keyDown(cancelButton, { key: 'Tab', shiftKey: true })
+    expect(confirmButton).toHaveFocus()
+  })
+
+  it('restores focus to the previously focused element on close', async () => {
+    const trigger = document.createElement('button')
+    document.body.appendChild(trigger)
+    trigger.focus()
+
+    const { unmount } = render(ConfirmDialog, { props: baseProps })
+    await tick()
+    expect(trigger).not.toHaveFocus()
+
+    unmount()
+
+    expect(trigger).toHaveFocus()
+    trigger.remove()
   })
 
   it('supports destructive icon-only confirmation', () => {

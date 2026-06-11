@@ -67,9 +67,18 @@ pub async fn settings_set(
     deps: State<'_, crate::deps::DepsState>,
 ) -> Result<(), String> {
     let should_invalidate = crate::deps::should_invalidate_cache_for_setting(&key);
-    let stored_value = match prepare_setting_value_for_storage(&key, &value) {
-        Ok(stored_value) => stored_value,
-        Err(error) => {
+    // Keyring (Windows Credential Manager) calls are blocking Win32 APIs;
+    // keep them off the async runtime workers.
+    let prepared = {
+        let key = key.clone();
+        let value = value.clone();
+        tokio::task::spawn_blocking(move || prepare_setting_value_for_storage(&key, &value))
+            .await
+            .map_err(|e| format!("Secret storage task failed: {e}"))
+    };
+    let stored_value = match prepared {
+        Ok(Ok(stored_value)) => stored_value,
+        Ok(Err(error)) | Err(error) => {
             crate::app_logs::error(
                 &app_handle,
                 setting_log_source(&key),
@@ -131,10 +140,8 @@ pub async fn settings_get_all(db: State<'_, AppDbState>) -> Result<Vec<SettingEn
         })
         .map_err(|e| format!("Failed to query settings: {e}"))?;
     let mut entries = Vec::new();
-    for row in rows {
-        if let Ok(entry) = row {
-            entries.push(entry);
-        }
+    for entry in rows.flatten() {
+        entries.push(entry);
     }
     Ok(entries)
 }
@@ -148,7 +155,9 @@ pub async fn settings_delete(
 ) -> Result<(), String> {
     let should_invalidate = crate::deps::should_invalidate_cache_for_setting(&key);
     if is_secret_key(&key) {
-        let _ = delete_secret(&key);
+        // Blocking Win32 credential call — run off the async workers.
+        let secret_key = key.clone();
+        let _ = tokio::task::spawn_blocking(move || delete_secret(&secret_key)).await;
     }
     {
         let conn = db.ui_conn.lock().map_err(|e| {
@@ -275,9 +284,7 @@ pub fn get_setting(conn: &rusqlite::Connection, key: &str) -> Option<String> {
     resolve_secret_ref(key, &value).or(Some(value))
 }
 
-pub fn migrate_legacy_default_openrouter_model(
-    conn: &rusqlite::Connection,
-) -> Result<(), String> {
+pub fn migrate_legacy_default_openrouter_model(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute(
         "UPDATE app_settings SET value = ?1 WHERE key = ?2 AND value = ?3",
         rusqlite::params![

@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::time::Duration;
 
 // ---------------------------------------------------------------------------
 // OpenRouter API types
@@ -120,16 +121,21 @@ pub struct OpenRouterClient {
 }
 
 impl OpenRouterClient {
-    pub fn new(api_key: String, model: String) -> Self {
+    /// Build a client with request/connect timeouts so a stalled connection
+    /// cannot wedge the serial LLM worker. Surfaces HTTP-client init failures
+    /// as `Err` instead of panicking (release builds use `panic = "abort"`).
+    pub fn try_new(api_key: String, model: String) -> Result<Self, String> {
         let client = reqwest::Client::builder()
             .user_agent("EntropIA-Desktop/0.1 (historical-research-app)")
+            .timeout(Duration::from_secs(120))
+            .connect_timeout(Duration::from_secs(20))
             .build()
-            .expect("Failed to build reqwest client");
-        Self {
+            .map_err(|e| format!("Failed to build OpenRouter HTTP client: {e}"))?;
+        Ok(Self {
             client,
             api_key,
             model,
-        }
+        })
     }
 
     /// Returns the configured model's context window size.
@@ -234,7 +240,7 @@ impl OpenRouterClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("OpenRouter API error ({}): {}", status, body));
+            return Err(format!("OpenRouter API error ({status}): {body}"));
         }
 
         let parsed: ChatCompletionResponse = response
@@ -264,7 +270,7 @@ impl OpenRouterClient {
         let status = response.status();
         if !status.is_success() {
             let body = response.text().await.unwrap_or_default();
-            return Err(format!("OpenRouter API error ({}): {}", status, body));
+            return Err(format!("OpenRouter API error ({status}): {body}"));
         }
 
         let parsed: OpenRouterModelsResponse = response

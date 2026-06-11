@@ -35,10 +35,10 @@
   let glmOcrApiKey = $state('')
   let maskedGlmOcrApiKey = $state('')
   let showGlmOcrApiKey = $state(false)
-  let ocrCorrectionPrompt = $state(DEFAULT_PROMPTS.ocrCorrectionPrompt)
-  let summaryPrompt = $state(DEFAULT_PROMPTS.summaryPrompt)
-  let nerPrompt = $state(DEFAULT_PROMPTS.nerPrompt)
-  let tripletsPrompt = $state(DEFAULT_PROMPTS.tripletsPrompt)
+  let ocrCorrectionPrompt = $state<string>(DEFAULT_PROMPTS.ocrCorrectionPrompt)
+  let summaryPrompt = $state<string>(DEFAULT_PROMPTS.summaryPrompt)
+  let nerPrompt = $state<string>(DEFAULT_PROMPTS.nerPrompt)
+  let tripletsPrompt = $state<string>(DEFAULT_PROMPTS.tripletsPrompt)
   type PromptKey = keyof typeof DEFAULT_PROMPTS
   type ValidationFeedback = { tone: 'success' | 'error'; text: string } | null
   let promptValidationFeedback = $state<Record<PromptKey, ValidationFeedback>>({
@@ -171,7 +171,7 @@
 
       if (storedKey?.startsWith(SECRET_REF_PREFIX)) {
         apiKey = ''
-        maskedApiKey = 'Clave guardada en Windows Credential Manager'
+        maskedApiKey = t('settings.keyStoredInCredentialManager')
       } else if (storedKey) {
         apiKey = storedKey
         maskedApiKey = maskKey(storedKey)
@@ -180,7 +180,7 @@
       if (storedEmbeddingModel) embeddingModel = storedEmbeddingModel
       if (storedAssemblyAiKey?.startsWith(SECRET_REF_PREFIX)) {
         assemblyAiApiKey = ''
-        maskedAssemblyAiApiKey = 'Clave guardada en Windows Credential Manager'
+        maskedAssemblyAiApiKey = t('settings.keyStoredInCredentialManager')
       } else if (storedAssemblyAiKey) {
         assemblyAiApiKey = storedAssemblyAiKey
         maskedAssemblyAiApiKey = maskKey(storedAssemblyAiKey, 5)
@@ -188,7 +188,7 @@
       assemblyAiCollectionSpeakerLabels = parseEnabledByDefault(storedAssemblyAiSpeakerLabels)
       if (storedGlmOcrKey?.startsWith(SECRET_REF_PREFIX)) {
         glmOcrApiKey = ''
-        maskedGlmOcrApiKey = 'Clave guardada en Windows Credential Manager'
+        maskedGlmOcrApiKey = t('settings.keyStoredInCredentialManager')
       } else if (storedGlmOcrKey) {
         glmOcrApiKey = storedGlmOcrKey
         maskedGlmOcrApiKey = maskKey(storedGlmOcrKey, 0)
@@ -261,7 +261,7 @@
         ['frequencyPenalty', params.frequencyPenalty, (value) => !value.trim() || validNumberText(value, -2, 2) !== null],
       ]
       const invalid = checks.find(([_, value, isValid]) => !isValid(value))
-      if (invalid) return `Parámetro inválido en ${flow.label}: ${invalid[0]}`
+      if (invalid) return t('settings.modelParams.invalidParam', { flow: flow.label, param: invalid[0] })
     }
     return null
   }
@@ -275,21 +275,21 @@
 
   function validatePromptContract(key: PromptKey, value = promptValue(key)): string | null {
     const prompt = value.trim()
-    if (!prompt) return 'El prompt no puede estar vacío.'
+    if (!prompt) return t('settings.promptValidation.empty')
     if ((key === 'ocrCorrectionPrompt' || key === 'summaryPrompt') && !prompt.includes('{text}')) {
-      return 'Debe incluir el placeholder {text}.'
+      return t('settings.promptValidation.missingText')
     }
     if (key === 'nerPrompt') {
-      if (!prompt.includes('{text}')) return 'NER debe incluir el placeholder {text}.'
+      if (!prompt.includes('{text}')) return t('settings.promptValidation.nerMissingText')
       const requiredLabels = ['PER', 'LOC', 'ORG', 'DATE', 'MISC']
       const missing = requiredLabels.filter((label) => !prompt.includes(label))
-      if (missing.length > 0) return `NER debe conservar estas etiquetas: ${missing.join(', ')}.`
+      if (missing.length > 0) return t('settings.promptValidation.nerMissingLabels', { labels: missing.join(', ') })
     }
     if (key === 'tripletsPrompt') {
-      if (!prompt.includes('{text}')) return 'Triplets debe incluir el placeholder {text}.'
+      if (!prompt.includes('{text}')) return t('settings.promptValidation.tripletsMissingText')
       const requiredKeys = ['subject', 'predicate', 'object']
       const missing = requiredKeys.filter((label) => !prompt.includes(label))
-      if (missing.length > 0) return `Triplets debe conservar estas claves: ${missing.join(', ')}.`
+      if (missing.length > 0) return t('settings.promptValidation.tripletsMissingKeys', { keys: missing.join(', ') })
     }
     return null
   }
@@ -298,7 +298,7 @@
     const error = validatePromptContract(key)
     promptValidationFeedback[key] = error
       ? { tone: 'error', text: error }
-      : { tone: 'success', text: 'Prompt válido.' }
+      : { tone: 'success', text: t('settings.promptValidation.valid') }
     return !error
   }
 
@@ -310,7 +310,7 @@
         promptValidationFeedback[key] = { tone: 'error', text: error }
         return `${promptLabel(key)}: ${error}`
       }
-      promptValidationFeedback[key] = { tone: 'success', text: 'Prompt válido.' }
+      promptValidationFeedback[key] = { tone: 'success', text: t('settings.promptValidation.valid') }
     }
     return null
   }
@@ -513,10 +513,10 @@
         {t('settings.remoteApisTab')}
       </TabButton>
       <TabButton active={activeTab === 'prompts'} onclick={() => (activeTab = 'prompts')}>
-        Prompts
+        {t('settings.promptsTab')}
       </TabButton>
       <TabButton active={activeTab === 'modelParams'} onclick={() => (activeTab = 'modelParams')}>
-        Model Params
+        {t('settings.modelParamsTab')}
       </TabButton>
       <TabButton active={activeTab === 'logs'} onclick={() => (activeTab = 'logs')}>
         {t('settings.logsTab')}
@@ -557,7 +557,7 @@
             href={PROVIDER_LINKS.openrouter}
             onclick={(event) => openProviderLink(event, PROVIDER_LINKS.openrouter, 'OpenRouter')}
           >
-            <span>Obtener API key en OpenRouter</span>
+            <span>{t('settings.getApiKeyLink', { provider: 'OpenRouter' })}</span>
             <ActionIcon name="external-link" size={14} />
           </a>
         </div>
@@ -667,7 +667,7 @@
             href={PROVIDER_LINKS.assemblyai}
             onclick={(event) => openProviderLink(event, PROVIDER_LINKS.assemblyai, 'AssemblyAI')}
           >
-            <span>Obtener API key en AssemblyAI</span>
+            <span>{t('settings.getApiKeyLink', { provider: 'AssemblyAI' })}</span>
             <ActionIcon name="external-link" size={14} />
           </a>
         </div>
@@ -743,7 +743,7 @@
             href={PROVIDER_LINKS.glmOcr}
             onclick={(event) => openProviderLink(event, PROVIDER_LINKS.glmOcr, 'Z.ai')}
           >
-            <span>Obtener API key en Z.ai</span>
+            <span>{t('settings.getApiKeyLink', { provider: 'Z.ai' })}</span>
             <ActionIcon name="external-link" size={14} />
           </a>
         </div>
@@ -808,8 +808,8 @@
       <Card>
         <section class="settings-card-section settings-card-section--vertical">
           <div class="settings-card-section__copy">
-            <h2>Prompts</h2>
-            <p>Estos templates son la fuente real usada en runtime. Usá <code>{'{text}'}</code> para insertar el texto activo.</p>
+            <h2>{t('settings.prompts.title')}</h2>
+            <p>{t('settings.prompts.descriptionLead')} <code>{'{text}'}</code> {t('settings.prompts.descriptionTrail')}</p>
           </div>
 
           <div class="settings__prompt-grid">
@@ -820,8 +820,8 @@
                 <p class="settings__validation" class:settings__validation--error={promptValidationFeedback.ocrCorrectionPrompt.tone === 'error'}>{promptValidationFeedback.ocrCorrectionPrompt.text}</p>
               {/if}
               <div class="settings__button-row">
-                <Button variant="secondary" size="sm" onclick={() => validatePrompt('ocrCorrectionPrompt')}>Validar cambios</Button>
-                <Button variant="secondary" size="sm" onclick={() => resetPrompt('ocrCorrectionPrompt')}>Restaurar default</Button>
+                <Button variant="secondary" size="sm" onclick={() => validatePrompt('ocrCorrectionPrompt')}>{t('settings.prompts.validate')}</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetPrompt('ocrCorrectionPrompt')}>{t('settings.prompts.restoreDefault')}</Button>
               </div>
             </div>
             <div class="settings__field settings__field--stacked settings__prompt-card">
@@ -831,8 +831,8 @@
                 <p class="settings__validation" class:settings__validation--error={promptValidationFeedback.summaryPrompt.tone === 'error'}>{promptValidationFeedback.summaryPrompt.text}</p>
               {/if}
               <div class="settings__button-row">
-                <Button variant="secondary" size="sm" onclick={() => validatePrompt('summaryPrompt')}>Validar cambios</Button>
-                <Button variant="secondary" size="sm" onclick={() => resetPrompt('summaryPrompt')}>Restaurar default</Button>
+                <Button variant="secondary" size="sm" onclick={() => validatePrompt('summaryPrompt')}>{t('settings.prompts.validate')}</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetPrompt('summaryPrompt')}>{t('settings.prompts.restoreDefault')}</Button>
               </div>
             </div>
             <div class="settings__field settings__field--stacked settings__prompt-card">
@@ -842,8 +842,8 @@
                 <p class="settings__validation" class:settings__validation--error={promptValidationFeedback.nerPrompt.tone === 'error'}>{promptValidationFeedback.nerPrompt.text}</p>
               {/if}
               <div class="settings__button-row">
-                <Button variant="secondary" size="sm" onclick={() => validatePrompt('nerPrompt')}>Validar cambios</Button>
-                <Button variant="secondary" size="sm" onclick={() => resetPrompt('nerPrompt')}>Restaurar default</Button>
+                <Button variant="secondary" size="sm" onclick={() => validatePrompt('nerPrompt')}>{t('settings.prompts.validate')}</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetPrompt('nerPrompt')}>{t('settings.prompts.restoreDefault')}</Button>
               </div>
             </div>
             <div class="settings__field settings__field--stacked settings__prompt-card">
@@ -853,8 +853,8 @@
                 <p class="settings__validation" class:settings__validation--error={promptValidationFeedback.tripletsPrompt.tone === 'error'}>{promptValidationFeedback.tripletsPrompt.text}</p>
               {/if}
               <div class="settings__button-row">
-                <Button variant="secondary" size="sm" onclick={() => validatePrompt('tripletsPrompt')}>Validar cambios</Button>
-                <Button variant="secondary" size="sm" onclick={() => resetPrompt('tripletsPrompt')}>Restaurar default</Button>
+                <Button variant="secondary" size="sm" onclick={() => validatePrompt('tripletsPrompt')}>{t('settings.prompts.validate')}</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetPrompt('tripletsPrompt')}>{t('settings.prompts.restoreDefault')}</Button>
               </div>
             </div>
           </div>
@@ -875,8 +875,8 @@
       <Card>
         <section class="settings-card-section settings-card-section--vertical">
           <div class="settings-card-section__copy">
-            <h2>Model Params</h2>
-            <p><strong>Configuración avanzada.</strong> Valores vacíos usan defaults seguros. Estos parámetros se aplican a OCR correction, Summary, NER y Triplets.</p>
+            <h2>{t('settings.modelParams.title')}</h2>
+            <p><strong>{t('settings.modelParams.advancedLabel')}</strong> {t('settings.modelParams.description')}</p>
           </div>
 
           {#if modelParamsError}
@@ -888,18 +888,18 @@
               <div class="settings__field settings__field--stacked settings__param-card">
                 <h3>{flow.label}</h3>
                 <div class="settings__param-card-grid">
-                  <Input label="temperature (0-2)" type="number" bind:value={modelParamsByFlow[flow.id].temperature} />
-                  <Input label="maxTokens (1-32000, vacío = default)" type="number" bind:value={modelParamsByFlow[flow.id].maxTokens} />
-                  <Input label="topP (0-1, opcional)" type="number" bind:value={modelParamsByFlow[flow.id].topP} />
-                  <Input label="topK (1-1000, opcional)" type="number" bind:value={modelParamsByFlow[flow.id].topK} />
-                  <Input label="presencePenalty (-2 a 2)" type="number" bind:value={modelParamsByFlow[flow.id].presencePenalty} />
-                  <Input label="frequencyPenalty (-2 a 2)" type="number" bind:value={modelParamsByFlow[flow.id].frequencyPenalty} />
+                  <Input label="temperature (0-2)" type="text" bind:value={modelParamsByFlow[flow.id].temperature} />
+                  <Input label="maxTokens (1-32000, vacío = default)" type="text" bind:value={modelParamsByFlow[flow.id].maxTokens} />
+                  <Input label="topP (0-1, opcional)" type="text" bind:value={modelParamsByFlow[flow.id].topP} />
+                  <Input label="topK (1-1000, opcional)" type="text" bind:value={modelParamsByFlow[flow.id].topK} />
+                  <Input label="presencePenalty (-2 a 2)" type="text" bind:value={modelParamsByFlow[flow.id].presencePenalty} />
+                  <Input label="frequencyPenalty (-2 a 2)" type="text" bind:value={modelParamsByFlow[flow.id].frequencyPenalty} />
                   <div class="settings__field settings__field--stacked settings__field--wide">
                     <label class="settings__label" for={`${flow.id}-stop-sequences`}>stopSequences</label>
-                    <textarea id={`${flow.id}-stop-sequences`} class="settings__textarea" rows="3" bind:value={modelParamsByFlow[flow.id].stopSequences} placeholder="Una secuencia por línea"></textarea>
+                    <textarea id={`${flow.id}-stop-sequences`} class="settings__textarea" rows="3" bind:value={modelParamsByFlow[flow.id].stopSequences} placeholder={t('settings.modelParams.stopSequencesPlaceholder')}></textarea>
                   </div>
                 </div>
-                <Button variant="secondary" size="sm" onclick={() => resetModelParams(flow.id)}>Restaurar defaults</Button>
+                <Button variant="secondary" size="sm" onclick={() => resetModelParams(flow.id)}>{t('settings.modelParams.restoreDefaults')}</Button>
               </div>
             {/each}
           </div>

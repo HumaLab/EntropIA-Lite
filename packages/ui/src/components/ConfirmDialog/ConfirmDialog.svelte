@@ -2,6 +2,9 @@
   import { ActionIcon, Button } from '../Button'
   import type { ConfirmDialogProps } from './ConfirmDialog.types'
 
+  const FOCUSABLE_SELECTOR =
+    'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+
   let dialogId = `confirm-dialog-title-${Math.random().toString(36).slice(2)}`
 
   let {
@@ -28,15 +31,75 @@
   const isDestructive = $derived(variant === 'destructive')
   const isConfirmDisabled = $derived(confirmDisabled || confirming)
 
+  let dialogEl: HTMLDivElement | undefined = $state()
+
+  function getFocusableElements(): HTMLElement[] {
+    if (!dialogEl) return []
+
+    return Array.from(dialogEl.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)).filter(
+      (element) => !element.hasAttribute('disabled') && !element.hasAttribute('hidden')
+    )
+  }
+
   function handleOverlayClick() {
     oncancel()
   }
 
-  function handleDialogKeydown(event: KeyboardEvent) {
-    if (event.key !== 'Escape') return
-    event.stopPropagation()
-    oncancel()
+  function handleWindowKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      event.stopPropagation()
+      oncancel()
+      return
+    }
+
+    if (event.key !== 'Tab') return
+
+    const focusableElements = getFocusableElements()
+    if (focusableElements.length === 0) {
+      event.preventDefault()
+      dialogEl?.focus()
+      return
+    }
+
+    const currentElement =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const currentIndex = currentElement ? focusableElements.indexOf(currentElement) : -1
+    let nextElement: HTMLElement | undefined
+    if (event.shiftKey) {
+      nextElement =
+        currentIndex <= 0
+          ? focusableElements[focusableElements.length - 1]
+          : focusableElements[currentIndex - 1]
+    } else {
+      nextElement =
+        currentIndex === -1 || currentIndex === focusableElements.length - 1
+          ? focusableElements[0]
+          : focusableElements[currentIndex + 1]
+    }
+
+    const target = nextElement ?? dialogEl
+    event.preventDefault()
+    target?.focus()
   }
+
+  $effect(() => {
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const cancelButton = dialogEl?.querySelector<HTMLElement>(
+      '.confirm-dialog__actions .btn--secondary:not([disabled])'
+    )
+    const initialFocusTarget = cancelButton ?? getFocusableElements()[0] ?? dialogEl
+    initialFocusTarget?.focus()
+    window.addEventListener('keydown', handleWindowKeydown, true)
+
+    return () => {
+      window.removeEventListener('keydown', handleWindowKeydown, true)
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus()
+      }
+    }
+  })
 </script>
 
 {#snippet cancelAction()}
@@ -74,7 +137,9 @@
 
 <!-- svelte-ignore a11y_click_events_have_key_events -->
 <div class="confirm-dialog__overlay" onclick={handleOverlayClick} role="presentation">
+  <!-- svelte-ignore a11y_click_events_have_key_events -->
   <div
+    bind:this={dialogEl}
     class="confirm-dialog"
     class:confirm-dialog--destructive={isDestructive}
     role="dialog"
@@ -82,7 +147,6 @@
     aria-labelledby={titleId}
     tabindex="-1"
     onclick={(event) => event.stopPropagation()}
-    onkeydown={handleDialogKeydown}
   >
     <div class="confirm-dialog__content">
       <h3 id={titleId} class="confirm-dialog__title">{title}</h3>
