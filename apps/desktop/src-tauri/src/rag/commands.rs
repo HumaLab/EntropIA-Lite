@@ -1,0 +1,357 @@
+//! Comando Tauri del chat RAG: `rag_ask`.
+//!
+//! Pipeline: validación → settings → recuperación híbrida (en `spawn_blocking`
+//! con la conexión worker) → prompt de fragmentos numerados → LLM remoto.
+
+use super::retrieval;
+use super::{RagAnswer, RagChatTurn, RagSource};
+use crate::llm::openrouter::{GenerationParams, OpenRouterClient};
+
+const DEFAULT_TOP_K: u8 = 6;
+const MAX_TOP_K: u8 = 12;
+const HISTORY_MAX_TURNS: usize = 6;
+const HISTORY_TURN_MAX_CHARS: usize = 500;
+const QUESTION_MAX_CHARS: usize = 4000;
+const RAG_MAX_TOKENS: i32 = 1500;
+const RAG_TEMPERATURE: f32 = 0.2;
+
+/// Resultado de la fase bloqueante (settings + recuperación).
+struct RetrievalPhase {
+    api_key: String,
+    model: String,
+    sources: Vec<RagSource>,
+}
+
+/// Responde una pregunta con RAG híbrido (vector + FTS5 fusionados con RRF)
+/// sobre la base de transcripciones, citando las fuentes con `[n]`.
+#[tauri::command]
+pub async fn rag_ask(
+    question: String,
+    history: Option<Vec<RagChatTurn>>,
+    top_k: Option<u8>,
+    db: tauri::State<'_, crate::db::state::AppDbState>,
+) -> Result<RagAnswer, String> {
+    let question = validate_question(&question)?;
+    let top_k = resolve_top_k(top_k);
+
+    // Fase de recuperación: settings + embedding + SQL corren en el pool
+    // bloqueante con la conexión worker (nunca en el hilo del event loop).
+    let conn_arc = db.worker_conn.clone();
+    let retrieval_question = question.clone();
+    let phase = tokio::task::spawn_blocking(move || -> Result<RetrievalPhase, String> {
+        // Paso 1: lecturas de settings con el lock, soltándolo antes de
+        // cualquier I/O de red (el embedding remoto puede tardar hasta 120s).
+        let (api_key, model, embedding_config) = {
+            let conn = conn_arc.lock().map_err(|e| e.to_string())?;
+
+            // `get_secret_setting` devuelve None si la referencia
+            // `secret_ref:` no se pudo resolver (credencial ausente en el
+            // keyring), evitando mandar el placeholder como Bearer token.
+            let api_key = validate_chat_api_key(crate::settings::get_secret_setting(
+                &conn,
+                "openrouter_api_key",
+            ))?;
+            let model = crate::settings::get_setting(&conn, "openrouter_model")
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+                .unwrap_or_else(|| crate::settings::DEFAULT_OPENROUTER_MODEL.to_string());
+            let embedding_config = crate::nlp::embeddings::config_from_settings(&conn);
+
+            (api_key, model, embedding_config)
+        };
+
+        // Paso 2 (sin lock): pierna vectorial con degradación elegante; si la
+        // config o el embedding fallan (clave ausente, error de API), seguimos
+        // solo con FTS.
+        let query_embedding = match embedding_config.and_then(|config| {
+            crate::nlp::embeddings::embed_query_text_with_config(config, &retrieval_question)
+        }) {
+            Ok(embedding) => Some(embedding),
+            Err(error) => {
+                eprintln!("[rag] Pierna vectorial deshabilitada (se usa solo FTS): {error}");
+                None
+            }
+        };
+
+        // Paso 3: re-adquirir el lock solo para la recuperación SQL.
+        let conn = conn_arc.lock().map_err(|e| e.to_string())?;
+        let sources = retrieval::hybrid_retrieve(
+            &conn,
+            &retrieval_question,
+            query_embedding.as_deref(),
+            top_k,
+        )?;
+
+        Ok(RetrievalPhase {
+            api_key,
+            model,
+            sources,
+        })
+    })
+    .await
+    .map_err(|e| format!("RAG retrieval task panicked: {e}"))??;
+
+    // Sin contenido relevante: no llamamos al LLM; el frontend muestra su
+    // propio mensaje de "sin resultados".
+    if phase.sources.is_empty() {
+        return Ok(empty_answer(phase.model));
+    }
+
+    let prompt = build_rag_prompt(&question, &phase.sources, history.as_deref().unwrap_or(&[]));
+
+    let client = OpenRouterClient::try_new(phase.api_key, phase.model.clone())?;
+    let answer = client
+        .generate_with_params(
+            &prompt,
+            &GenerationParams::with_defaults(RAG_MAX_TOKENS, RAG_TEMPERATURE),
+        )
+        .await?;
+
+    Ok(RagAnswer {
+        answer,
+        sources: phase.sources,
+        model: phase.model,
+    })
+}
+
+/// Valida la pregunta del usuario: trim, no vacía y máximo 4000 caracteres
+/// (conteo por chars, no bytes).
+fn validate_question(question: &str) -> Result<String, String> {
+    let question = question.trim().to_string();
+    if question.is_empty() {
+        return Err(
+            "La pregunta no puede estar vacía. Escribí una consulta para buscar en tus documentos."
+                .to_string(),
+        );
+    }
+    if question.chars().count() > QUESTION_MAX_CHARS {
+        return Err(format!(
+            "La pregunta es demasiado larga (máximo {QUESTION_MAX_CHARS} caracteres)."
+        ));
+    }
+    Ok(question)
+}
+
+/// Valida la API key cruda devuelta por `settings::get_secret_setting`:
+/// `None` cubre tanto la ausencia del setting como una referencia
+/// `secret_ref:` sin resolver (credencial faltante en el keyring).
+fn validate_chat_api_key(raw: Option<String>) -> Result<String, String> {
+    raw.map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .ok_or_else(|| {
+            "OpenRouter API key no configurada. Andá a Configuración para agregarla.".to_string()
+        })
+}
+
+/// top_k final: default 6, clamp 1..=12.
+fn resolve_top_k(top_k: Option<u8>) -> usize {
+    usize::from(top_k.unwrap_or(DEFAULT_TOP_K).clamp(1, MAX_TOP_K))
+}
+
+/// Respuesta vacía cuando la recuperación no encontró fuentes (sin LLM).
+fn empty_answer(model: String) -> RagAnswer {
+    RagAnswer {
+        answer: String::new(),
+        sources: Vec::new(),
+        model,
+    }
+}
+
+/// Prompt completo: instrucciones + fragmentos numerados + historial + pregunta.
+fn build_rag_prompt(question: &str, sources: &[RagSource], history: &[RagChatTurn]) -> String {
+    let context = format_fragments(sources);
+    let history_block = format_history(history);
+    crate::llm::prompt::raw_rag_answer(question, &context, &history_block)
+}
+
+/// Fragmentos con el formato `[n] «item_title» (collection_name):\n{snippet}`.
+fn format_fragments(sources: &[RagSource]) -> String {
+    sources
+        .iter()
+        .map(|source| {
+            format!(
+                "[{}] «{}» ({}):\n{}",
+                source.index, source.item_title, source.collection_name, source.snippet
+            )
+        })
+        .collect::<Vec<String>>()
+        .join("\n\n")
+}
+
+/// Últimos 6 turnos, cada uno truncado a 500 chars (por chars, no bytes),
+/// con prefijo Usuario:/Asistente:.
+fn format_history(history: &[RagChatTurn]) -> String {
+    history
+        .iter()
+        .skip(history.len().saturating_sub(HISTORY_MAX_TURNS))
+        .filter(|turn| !turn.content.trim().is_empty())
+        .map(|turn| {
+            let prefix = if turn.role == "assistant" {
+                "Asistente"
+            } else {
+                "Usuario"
+            };
+            let content: String = turn
+                .content
+                .trim()
+                .chars()
+                .take(HISTORY_TURN_MAX_CHARS)
+                .collect();
+            format!("{prefix}: {content}")
+        })
+        .collect::<Vec<String>>()
+        .join("\n")
+}
+
+// ── Unit tests ───────────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn turn(role: &str, content: &str) -> RagChatTurn {
+        RagChatTurn {
+            role: role.to_string(),
+            content: content.to_string(),
+        }
+    }
+
+    fn source(index: u32, title: &str, collection: &str, snippet: &str) -> RagSource {
+        RagSource {
+            index,
+            asset_id: format!("asset-{index}"),
+            item_id: format!("item-{index}"),
+            item_title: title.to_string(),
+            collection_id: "col-1".to_string(),
+            collection_name: collection.to_string(),
+            snippet: snippet.to_string(),
+            score: 1.0 / f64::from(index),
+            start_seconds: None,
+            end_seconds: None,
+        }
+    }
+
+    #[test]
+    fn resolve_top_k_defaults_and_clamps() {
+        assert_eq!(resolve_top_k(None), 6);
+        assert_eq!(resolve_top_k(Some(0)), 1);
+        assert_eq!(resolve_top_k(Some(3)), 3);
+        assert_eq!(resolve_top_k(Some(12)), 12);
+        assert_eq!(resolve_top_k(Some(200)), 12);
+    }
+
+    #[test]
+    fn validate_question_rejects_empty_and_whitespace() {
+        assert!(validate_question("").is_err());
+        assert!(validate_question("   \n\t ").is_err());
+    }
+
+    #[test]
+    fn validate_question_trims_and_accepts_normal_input() {
+        assert_eq!(
+            validate_question("  ¿Qué pasó en mayo?  ").as_deref(),
+            Ok("¿Qué pasó en mayo?")
+        );
+    }
+
+    #[test]
+    fn validate_question_caps_at_4000_chars_not_bytes() {
+        // Multibyte char: 4000 chars son 8000 bytes — el límite es por chars.
+        let exactly_max = "á".repeat(4000);
+        assert!(validate_question(&exactly_max).is_ok());
+
+        let over_max = "á".repeat(4001);
+        let error = validate_question(&over_max).expect_err("4001 chars must be rejected");
+        assert_eq!(
+            error,
+            "La pregunta es demasiado larga (máximo 4000 caracteres)."
+        );
+    }
+
+    #[test]
+    fn validate_chat_api_key_rejects_unresolved_secret_ref_as_missing() {
+        // `get_secret_setting` devuelve None cuando el valor es un placeholder
+        // `secret_ref:` sin credencial en el keyring; la validación debe dar
+        // el error amigable en vez de mandar el placeholder como Bearer token.
+        let error = validate_chat_api_key(None).expect_err("missing key must be rejected");
+        assert_eq!(
+            error,
+            "OpenRouter API key no configurada. Andá a Configuración para agregarla."
+        );
+        assert!(validate_chat_api_key(Some("   ".to_string())).is_err());
+    }
+
+    #[test]
+    fn validate_chat_api_key_trims_and_accepts_resolved_key() {
+        assert_eq!(
+            validate_chat_api_key(Some("  sk-or-123  ".to_string())).as_deref(),
+            Ok("sk-or-123")
+        );
+    }
+
+    #[test]
+    fn format_history_keeps_last_six_turns_and_truncates_content() {
+        let mut history = Vec::new();
+        for i in 0..8 {
+            history.push(turn(
+                if i % 2 == 0 { "user" } else { "assistant" },
+                &format!("turno {i}"),
+            ));
+        }
+        history.push(turn("user", &"x".repeat(600)));
+
+        let formatted = format_history(&history);
+        let lines: Vec<&str> = formatted.lines().collect();
+        assert_eq!(lines.len(), 6, "only the last 6 turns survive");
+        assert!(!formatted.contains("turno 0"));
+        assert!(!formatted.contains("turno 2"));
+        assert!(formatted.contains("Usuario: turno 4"));
+        assert!(formatted.contains("Asistente: turno 7"));
+
+        let last = lines.last().expect("history should have lines");
+        assert!(last.starts_with("Usuario: "));
+        assert_eq!(
+            last.chars().count(),
+            "Usuario: ".chars().count() + 500,
+            "content is truncated to 500 chars"
+        );
+    }
+
+    #[test]
+    fn format_history_empty_returns_empty_string() {
+        assert!(format_history(&[]).is_empty());
+    }
+
+    #[test]
+    fn build_rag_prompt_contains_numbered_fragments_history_and_question() {
+        let sources = vec![
+            source(1, "Acta del Cabildo", "Archivo General", "fragmento uno"),
+            source(2, "Crónica", "Hemeroteca", "fragmento dos"),
+        ];
+        let history = vec![turn("user", "hola"), turn("assistant", "buenas")];
+        let prompt = build_rag_prompt("¿Qué pasó en mayo?", &sources, &history);
+
+        assert!(prompt.contains("[1] «Acta del Cabildo» (Archivo General):\nfragmento uno"));
+        assert!(prompt.contains("[2] «Crónica» (Hemeroteca):\nfragmento dos"));
+        assert!(prompt.contains("Usuario: hola"));
+        assert!(prompt.contains("Asistente: buenas"));
+        assert!(prompt.contains("Pregunta: ¿Qué pasó en mayo?"));
+        assert!(prompt.contains("[n]"), "citation instructions present");
+    }
+
+    #[test]
+    fn build_rag_prompt_without_history_omits_history_block() {
+        let sources = vec![source(1, "Acta", "Archivo", "fragmento")];
+        let prompt = build_rag_prompt("pregunta", &sources, &[]);
+        assert!(!prompt.contains("Conversación previa"));
+        assert!(prompt.contains("Pregunta: pregunta"));
+    }
+
+    #[test]
+    fn empty_answer_skips_llm_and_returns_empty_payload() {
+        let answer = empty_answer("modelo-x".to_string());
+        assert!(answer.answer.is_empty());
+        assert!(answer.sources.is_empty());
+        assert_eq!(answer.model, "modelo-x");
+    }
+}

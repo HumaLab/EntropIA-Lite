@@ -161,6 +161,31 @@ Texto:
     )
 }
 
+pub fn raw_rag_answer(question: &str, context: &str, history: &str) -> String {
+    let history_block = if history.trim().is_empty() {
+        String::new()
+    } else {
+        format!("Conversación previa (solo para interpretar la pregunta, NO es una fuente):\n{history}\n\n")
+    };
+
+    format!(
+        r#"Sos un asistente de investigación académica especializado en fuentes históricas y de archivo.
+
+Reglas obligatorias:
+1. Respondé EXCLUSIVAMENTE con información presente en los fragmentos numerados provistos.
+2. Citá cada afirmación con el número del fragmento que la respalda usando el formato [n]. Toda afirmación debe llevar al menos una cita.
+3. Si la respuesta no se puede determinar a partir de los fragmentos, decilo explícitamente y NO inventes contenido.
+4. Distinguí con claridad lo que dicen las fuentes de lo que es inferencia tuya; si inferís algo, indicalo.
+5. Sé preciso con nombres, fechas, lugares y cifras: usá los términos exactos de los fragmentos.
+6. Respondé en el mismo idioma de la pregunta (por defecto, español).
+
+Fragmentos:
+{context}
+
+{history_block}Pregunta: {question}"#
+    )
+}
+
 pub fn raw_question_answer(question: &str, context: &str) -> String {
     format!(
         r#"Respondé la siguiente pregunta basándote SOLO en los fragmentos de documento provistos. Si la respuesta no se puede determinar del contexto, decilo explícitamente. Respondé en el mismo idioma que la pregunta (por defecto, español).

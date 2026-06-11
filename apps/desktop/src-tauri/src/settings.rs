@@ -6,7 +6,7 @@ use crate::db::state::AppDbState;
 const SECRET_REF_PREFIX: &str = "secret_ref:";
 const OPENROUTER_MODEL_KEY: &str = "openrouter_model";
 const LEGACY_DEFAULT_OPENROUTER_MODEL: &str = "google/gemma-3-4b-it";
-const DEFAULT_OPENROUTER_MODEL: &str = "google/gemma-4-26b-a4b-it";
+pub(crate) const DEFAULT_OPENROUTER_MODEL: &str = "google/gemma-4-26b-a4b-it";
 const SECRET_SERVICE: &str = "EntropIA Lite";
 const SECRET_KEYS: &[&str] = &[
     "openrouter_api_key",

@@ -19,9 +19,10 @@ export type View =
       assetLabel?: string | null
     }
   | { name: 'db-browser' }
+  | { name: 'rag-chat' }
   | { name: 'settings' }
 
-type RootSectionView = Extract<View, { name: 'settings' | 'db-browser' }>
+type RootSectionView = Extract<View, { name: 'settings' | 'db-browser' | 'rag-chat' }>
 
 type NavigationSnapshot = {
   history: View[]
@@ -74,6 +75,7 @@ export class NavigationStore {
       return breadcrumb
     }
     if (view.name === 'db-browser') return [root, t('nav.dbBrowser')]
+    if (view.name === 'rag-chat') return [root, t('nav.ragChat')]
     return [root, t('nav.settings')]
   }
 

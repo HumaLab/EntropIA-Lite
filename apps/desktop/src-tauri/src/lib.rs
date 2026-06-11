@@ -8,6 +8,7 @@ mod llm;
 mod nlp;
 mod ocr;
 mod path_utils;
+mod rag;
 #[allow(dead_code)]
 // Runtime structs remain for Tauri contracts; Lite commands return no-op status.
 mod runtime;
@@ -427,6 +428,7 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             llm::commands::llm_local_model_info,
             llm::commands::llm_open_models_dir,
             llm::commands::llm_download_model,
+            rag::commands::rag_ask,
             geo::commands::geocode_entity,
             geo::commands::geocode_item_entities,
             image_edit::crop_image,

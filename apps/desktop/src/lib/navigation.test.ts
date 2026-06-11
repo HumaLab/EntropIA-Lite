@@ -163,6 +163,27 @@ describe('NavigationStore', () => {
     expect(nav.breadcrumb).toEqual(['Colecciones', 'Base de datos'])
   })
 
+  it('navigates to rag chat view', () => {
+    nav.navigate({ name: 'rag-chat' })
+    expect(nav.current).toEqual({ name: 'rag-chat' })
+    expect(nav.canGoBack).toBe(true)
+  })
+
+  it('rag chat breadcrumb shows Chat', () => {
+    nav.navigate({ name: 'rag-chat' })
+    expect(nav.breadcrumb).toEqual(['Colecciones', 'Chat'])
+  })
+
+  it('openRootSection rebuilds canonical breadcrumb for rag chat', () => {
+    nav.navigate({ name: 'collection', id: 'c1', collectionName: 'Archivo' })
+
+    nav.openRootSection({ name: 'rag-chat' })
+
+    expect(nav.current).toEqual({ name: 'rag-chat' })
+    expect(nav.breadcrumb).toEqual(['Colecciones', 'Chat'])
+    expect(nav.canGoBack).toBe(true)
+  })
+
   it('settings breadcrumb shows Configuracion', () => {
     nav.navigate({ name: 'settings' })
     expect(nav.breadcrumb).toEqual(['Colecciones', 'Configuración'])

@@ -66,6 +66,50 @@ describe('i18n', () => {
     expect(t('dbBrowser.pageSizeLabel')).toBe('Rows per page')
   })
 
+  it('exposes rag chat copy in both locales', async () => {
+    const { locale, t } = await import('./i18n')
+
+    expect(t('nav.ragChat')).toBe('Chat')
+    expect(t('topbar.ragChatAria')).toBe('Abrir chat de investigación')
+    expect(t('topbar.ragChatTitle')).toBe('Chat de investigación')
+    expect(t('ragChat.title')).toBe('Chat de investigación')
+    expect(t('ragChat.subtitle')).toBe('Consultá la base de conocimiento de transcripciones')
+    expect(t('ragChat.placeholder')).toBe('Escribí tu pregunta…')
+    expect(t('ragChat.send')).toBe('Enviar')
+    expect(t('ragChat.thinking')).toBe('Buscando en las transcripciones…')
+    expect(t('ragChat.sources')).toBe('Fuentes')
+    expect(t('ragChat.noResults')).toBe(
+      'No encontré contenido relevante en las transcripciones para esa pregunta.'
+    )
+    expect(t('ragChat.emptyState')).toBe(
+      'Hacé una pregunta sobre tus transcripciones. Las respuestas citan las fuentes.'
+    )
+    expect(t('ragChat.errorGeneric')).toBe('Ocurrió un error al consultar.')
+    expect(t('ragChat.clear')).toBe('Nueva conversación')
+    expect(t('ragChat.openSource')).toBe('Abrir fuente')
+
+    locale.set('en')
+
+    expect(t('nav.ragChat')).toBe('Chat')
+    expect(t('topbar.ragChatAria')).toBe('Open research chat')
+    expect(t('topbar.ragChatTitle')).toBe('Research chat')
+    expect(t('ragChat.title')).toBe('Research chat')
+    expect(t('ragChat.subtitle')).toBe('Query the transcription knowledge base')
+    expect(t('ragChat.placeholder')).toBe('Type your question…')
+    expect(t('ragChat.send')).toBe('Send')
+    expect(t('ragChat.thinking')).toBe('Searching the transcriptions…')
+    expect(t('ragChat.sources')).toBe('Sources')
+    expect(t('ragChat.noResults')).toBe(
+      'I did not find relevant content in the transcriptions for that question.'
+    )
+    expect(t('ragChat.emptyState')).toBe(
+      'Ask a question about your transcriptions. Answers cite their sources.'
+    )
+    expect(t('ragChat.errorGeneric')).toBe('Something went wrong while querying.')
+    expect(t('ragChat.clear')).toBe('New conversation')
+    expect(t('ragChat.openSource')).toBe('Open source')
+  })
+
   it('exposes settings prompts and model params copy in both locales', async () => {
     const { locale, t } = await import('./i18n')
 

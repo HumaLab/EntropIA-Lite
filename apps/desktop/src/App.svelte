@@ -10,6 +10,7 @@
   import CollectionView from './views/CollectionView.svelte'
   import ItemView from './views/ItemView.svelte'
   import DbBrowserView from './views/DbBrowserView.svelte'
+  import RagChatView from './views/RagChatView.svelte'
   import SettingsView from './views/SettingsView.svelte'
 
   let ready = $state(false)
@@ -75,6 +76,8 @@
       />
     {:else if currentViewName === 'db-browser'}
       <DbBrowserView />
+    {:else if currentViewName === 'rag-chat'}
+      <RagChatView />
     {:else if currentViewName === 'settings'}
       <SettingsView />
     {/if}

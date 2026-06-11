@@ -21,6 +21,7 @@
     Folder,
     FolderPlus,
     Hand,
+    MessageCircle,
     Moon,
     PanelLeft,
     PanelLeftClose,
@@ -96,6 +97,8 @@
   <FolderPlus {size} aria-hidden="true" />
 {:else if name === 'hand'}
   <Hand {size} aria-hidden="true" />
+{:else if name === 'message-circle'}
+  <MessageCircle {size} aria-hidden="true" />
 {:else if name === 'moon'}
   <Moon {size} aria-hidden="true" />
 {:else if name === 'panel-left'}

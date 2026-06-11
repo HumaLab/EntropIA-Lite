@@ -4,6 +4,7 @@ pub mod embeddings;
 pub mod fts;
 pub mod ner;
 pub mod text_provider;
+pub(crate) mod vector;
 // NOTE: `triples` module removed — semantic triples are now LLM-only via OpenRouter
 // (see llm::LlmJob::ExtractTriples / ExtractTriplesAsset). The old NLP regex route has
 // been retired to prevent low-quality triples from overwriting LLM results in the `triples` table.

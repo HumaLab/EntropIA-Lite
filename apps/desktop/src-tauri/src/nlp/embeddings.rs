@@ -294,6 +294,22 @@ pub fn config_from_settings(conn: &Connection) -> Result<EmbeddingConfig, String
     })
 }
 
+/// Embed a single ad-hoc query (por ejemplo, una pregunta del chat RAG)
+/// usando una configuración de OpenRouter ya resuelta (vía
+/// `config_from_settings`), sin tocar la base de datos.
+///
+/// Construye un engine transitorio sobre el cliente remoto existente — no
+/// duplica el código HTTP. Pensado para llamarse dentro de `spawn_blocking`
+/// SIN sostener el lock de la conexión (el cliente usa reqwest bloqueante
+/// con timeout de 120s).
+pub(crate) fn embed_query_text_with_config(
+    config: EmbeddingConfig,
+    text: &str,
+) -> Result<Vec<f32>, String> {
+    let engine = EmbeddingEngine::init(config)?;
+    engine.embed_text(text)
+}
+
 pub fn resolve_local_embedding_model_dir(
     configured: Option<&str>,
     app_data_dir: Option<&Path>,

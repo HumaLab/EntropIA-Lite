@@ -136,6 +136,7 @@ describe('TopBar', () => {
     expect(
       screen.getByRole('button', { name: 'Abrir navegador de base de datos' })
     ).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: 'Abrir chat de investigación' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Oscuro' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Abrir configuración' })).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Minimizar ventana' })).toBeInTheDocument()
@@ -153,6 +154,14 @@ describe('TopBar', () => {
     await fireEvent.click(screen.getByRole('button', { name: 'Abrir navegador de base de datos' }))
 
     expect(openRootSectionMock).toHaveBeenCalledWith({ name: 'db-browser' })
+  })
+
+  it('navigates to the research chat from the chat icon button', async () => {
+    render(TopBar)
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Abrir chat de investigación' }))
+
+    expect(openRootSectionMock).toHaveBeenCalledWith({ name: 'rag-chat' })
   })
 
   it('opens settings as a canonical root section', async () => {

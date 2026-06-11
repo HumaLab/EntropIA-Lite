@@ -55,6 +55,8 @@
   const nextDocumentLabel = $derived($currentLocale ? t('topbar.nextDocument') : 'Documento siguiente')
   const dbBrowserTitle = $derived($currentLocale ? translate('topbar.dbBrowserTitle') : 'Base de datos')
   const dbBrowserAria = $derived($currentLocale ? translate('topbar.dbBrowserAria') : 'Abrir navegador de base de datos')
+  const ragChatTitle = $derived($currentLocale ? translate('topbar.ragChatTitle') : 'Chat de investigación')
+  const ragChatAria = $derived($currentLocale ? translate('topbar.ragChatAria') : 'Abrir chat de investigación')
   const settingsTitle = $derived(
     hasDepsWarning
       ? 'Dependencias de IA pendientes - click para configurar'
@@ -453,6 +455,17 @@
       title={dbBrowserTitle}
     >
       <ActionIcon name="database" size={16} />
+    </IconButton>
+
+    <IconButton
+      class="topbar__icon-btn"
+      size="md"
+      variant="secondary"
+      label={ragChatAria}
+      onclick={() => navigation.openRootSection({ name: 'rag-chat' })}
+      title={ragChatTitle}
+    >
+      <ActionIcon name="message-circle" size={16} />
     </IconButton>
 
     <IconButton
