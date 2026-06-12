@@ -74,8 +74,9 @@ jobs:
           deb_file=$(ls apps/desktop/src-tauri/target/release/bundle/deb/*.deb | head -n 1)
           echo "deb_file=$deb_file"
           dpkg-deb --info "$deb_file"
-          dpkg-deb --contents "$deb_file"
-          if ! dpkg-deb --contents "$deb_file" | grep -q "libpdfium\.so"; then
+          contents=$(dpkg-deb --contents "$deb_file")
+          printf '%s\n' "$contents"
+          if ! printf '%s' "$contents" | grep -q "libpdfium\.so"; then
             echo "smoke_check=fail reason=libpdfium.so missing from .deb contents"
             exit 1
           fi
