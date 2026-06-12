@@ -190,14 +190,7 @@ impl OpenRouterEmbeddingClient {
         let mut accumulator: Option<Vec<f32>> = None;
         for chunk in &chunks {
             let vector = self.embed_single_chunk(&chunk.text)?;
-            match accumulator.as_mut() {
-                Some(acc) => {
-                    for (i, value) in vector.iter().enumerate() {
-                        acc[i] += value;
-                    }
-                }
-                None => accumulator = Some(vector),
-            }
+            accumulate_chunk_vector(&mut accumulator, vector, &self.model_name)?;
         }
 
         let mut averaged =
@@ -258,6 +251,32 @@ impl OpenRouterEmbeddingClient {
             .map(|entry| entry.embedding)
             .ok_or_else(|| "OpenRouter embedding response returned no vectors".to_string())
     }
+}
+
+/// Suma `vector` sobre el acumulador de chunks. Cada respuesta de la API debe
+/// compartir la dimensión del acumulador; un mismatch devuelve `Err` en lugar
+/// de indexar fuera de rango.
+fn accumulate_chunk_vector(
+    accumulator: &mut Option<Vec<f32>>,
+    vector: Vec<f32>,
+    model_name: &str,
+) -> Result<(), String> {
+    match accumulator.as_mut() {
+        Some(acc) => {
+            if vector.len() != acc.len() {
+                return Err(format!(
+                    "El modelo de embeddings '{model_name}' devolvió vectores con dimensiones inconsistentes entre fragmentos ({} y {}). Reintentá la operación; si persiste, verificá el modelo de embeddings en Configuración.",
+                    acc.len(),
+                    vector.len(),
+                ));
+            }
+            for (slot, value) in acc.iter_mut().zip(vector) {
+                *slot += value;
+            }
+        }
+        None => *accumulator = Some(vector),
+    }
+    Ok(())
 }
 
 pub fn config_from_settings(conn: &Connection) -> Result<EmbeddingConfig, String> {
@@ -517,4 +536,40 @@ fn rolling_hash64(bytes: &[u8]) -> u64 {
         hash = hash.wrapping_mul(FNV_PRIME);
     }
     hash
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn accumulate_first_chunk_initializes_accumulator() {
+        let mut acc = None;
+        accumulate_chunk_vector(&mut acc, vec![1.0, 2.0], "test-model").unwrap();
+        assert_eq!(acc, Some(vec![1.0, 2.0]));
+    }
+
+    #[test]
+    fn accumulate_same_dimensions_sums_componentwise() {
+        let mut acc = Some(vec![1.0, 2.0]);
+        accumulate_chunk_vector(&mut acc, vec![3.0, 4.0], "test-model").unwrap();
+        assert_eq!(acc, Some(vec![4.0, 6.0]));
+    }
+
+    #[test]
+    fn accumulate_longer_vector_errors_instead_of_panicking() {
+        let mut acc = Some(vec![0.0; 768]);
+        let error = accumulate_chunk_vector(&mut acc, vec![0.0; 1024], "test-model").unwrap_err();
+        assert!(error.contains("dimensiones inconsistentes"));
+        assert!(error.contains("768"));
+        assert!(error.contains("1024"));
+        assert!(error.contains("test-model"));
+    }
+
+    #[test]
+    fn accumulate_shorter_vector_errors_instead_of_corrupting_average() {
+        let mut acc = Some(vec![0.0; 1024]);
+        let error = accumulate_chunk_vector(&mut acc, vec![0.0; 768], "test-model").unwrap_err();
+        assert!(error.contains("dimensiones inconsistentes"));
+    }
 }
