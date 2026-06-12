@@ -446,7 +446,7 @@
     background: var(--surface-card);
     overflow: hidden;
     color: var(--color-text-tertiary, var(--color-text-secondary));
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: var(--font-weight-semibold);
     letter-spacing: 0.04em;
   }
@@ -498,7 +498,7 @@
   .similar-technical-meta {
     margin: 0 var(--space-3) var(--space-2) calc(72px + var(--space-3) + var(--space-3));
     color: var(--color-text-tertiary, var(--color-text-secondary));
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
   }
 
   .similar-technical-meta summary {

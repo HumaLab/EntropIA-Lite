@@ -428,7 +428,7 @@
   }
 
   .entity-viewer__delete-label {
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: var(--font-weight-bold);
     letter-spacing: 0.01em;
     line-height: 1;
@@ -472,7 +472,7 @@
   }
 
   .entity-viewer__tag {
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: var(--font-weight-bold);
     letter-spacing: 0.04em;
     opacity: 0.9;

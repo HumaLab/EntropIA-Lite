@@ -564,7 +564,7 @@
   .topbar__app-title {
     min-width: 0;
     color: var(--color-text-secondary);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: var(--font-weight-semibold);
     letter-spacing: 0.02em;
     text-transform: uppercase;
@@ -629,7 +629,7 @@
     height: 24px;
     border-radius: var(--radius-sm);
     color: inherit;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     line-height: 1;
   }
 
@@ -638,7 +638,7 @@
   }
 
   .crumb-nav__separator {
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     opacity: 0.55;
   }
 
@@ -707,7 +707,7 @@
 
   :global(.topbar__deps-badge) {
     min-height: 24px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
   }
 
   .topbar__badge {

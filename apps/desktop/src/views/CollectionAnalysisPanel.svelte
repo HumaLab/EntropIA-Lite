@@ -389,7 +389,7 @@
 
   .analysis-header__eyebrow {
     font-family: var(--font-mono);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: var(--font-weight-normal);
     letter-spacing: 0.15em;
     text-transform: uppercase;

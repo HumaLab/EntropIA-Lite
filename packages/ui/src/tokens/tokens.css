@@ -69,6 +69,7 @@
   --font-display: 'Geist', 'Inter', system-ui, sans-serif;
   --font-sans: 'Geist', 'Inter', system-ui, sans-serif;
   --font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, monospace;
+  --font-size-2xs: 11px;
   --font-size-xs: 12px;
   --font-size-sm: 14px;
   --font-size-md: 16px;

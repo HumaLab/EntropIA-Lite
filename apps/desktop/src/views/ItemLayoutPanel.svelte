@@ -717,7 +717,7 @@
     align-items: center;
     padding: 2px var(--space-2);
     border-radius: var(--radius-control);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     line-height: var(--line-height-tight);
     border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--border-subtle));
     background: color-mix(in srgb, var(--color-accent) 10%, var(--surface-card));
@@ -753,7 +753,7 @@
 
   .layout-inspector__eyebrow {
     margin: 0 0 4px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     text-transform: uppercase;
     letter-spacing: 0.075em;
     color: var(--color-text-muted);
@@ -822,7 +822,7 @@
   .layout-inspector__label {
     display: block;
     margin-bottom: 4px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     text-transform: uppercase;
     letter-spacing: 0.075em;
     color: var(--color-text-muted);

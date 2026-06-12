@@ -984,7 +984,7 @@
   .explorer__section-label {
     margin-bottom: 5px;
     padding-left: 5px;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     font-weight: var(--font-weight-medium);
     color: var(--color-text-muted);
     text-transform: uppercase;
@@ -1224,7 +1224,7 @@
   .explorer__node-meta,
   .explorer__asset-type {
     flex: 0 0 auto;
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     color: color-mix(in srgb, var(--color-text-muted) 82%, transparent);
     text-transform: uppercase;
     letter-spacing: 0.075em;

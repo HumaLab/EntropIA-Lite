@@ -919,7 +919,7 @@
     background: var(--color-surface-elevated);
     box-shadow: var(--shadow-md);
     color: var(--color-text-primary);
-    font-size: 11px;
+    font-size: var(--font-size-2xs);
     line-height: 1.35;
     text-align: center;
     white-space: normal;
