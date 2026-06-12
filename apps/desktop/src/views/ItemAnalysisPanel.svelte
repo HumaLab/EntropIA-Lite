@@ -246,7 +246,7 @@
     padding: var(--space-2);
     border: 1px solid var(--border-subtle);
     border-top: none;
-    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    border-radius: 0 0 var(--radius-surface) var(--radius-surface);
     overflow: hidden;
     background: var(--surface-card);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
@@ -254,7 +254,7 @@
 
   .analysis-panel--tabbed {
     border-top: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-surface);
   }
 
   .nlp-actions {
@@ -281,6 +281,10 @@
     font-family: var(--font-sans);
     text-align: center;
     white-space: nowrap;
+    transition:
+      background-color var(--transition-base),
+      border-color var(--transition-base),
+      box-shadow var(--transition-base);
   }
 
   .nlp-btn:hover:not(:disabled) {
@@ -294,12 +298,11 @@
   }
 
   .nlp-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.48;
     cursor: not-allowed;
   }
 
   :global(.nlp-badge) {
-    font-size: 10px;
     text-transform: uppercase;
   }
 
@@ -329,7 +332,7 @@
     font-size: var(--font-size-xs);
     color: var(--color-text-secondary);
     text-transform: uppercase;
-    letter-spacing: 0.04em;
+    letter-spacing: 0.075em;
   }
 
   .entity-editor__hint {
@@ -351,17 +354,17 @@
     min-width: 0;
     padding: var(--space-2);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-input);
     background: var(--surface-input);
     color: var(--color-text-primary);
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-sm);
   }
 
   .entity-editor__create input {
     min-width: 0;
     padding: var(--space-2);
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-input);
     background: var(--surface-input);
     color: var(--color-text-primary);
     font-size: var(--font-size-sm);

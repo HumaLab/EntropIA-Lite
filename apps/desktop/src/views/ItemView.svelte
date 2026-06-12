@@ -2520,7 +2520,7 @@
   }
   .item-header__eyebrow {
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 11px;
     font-weight: var(--font-weight-normal);
     letter-spacing: 0.15em;
     text-transform: uppercase;
@@ -2609,8 +2609,12 @@
     border-color: var(--color-accent);
     background: var(--color-primary-subtle);
   }
+  .pagination-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
   .pagination-btn:disabled {
-    opacity: 0.35;
+    opacity: 0.48;
     cursor: not-allowed;
   }
   .pagination-info {

@@ -123,7 +123,7 @@
     color: var(--color-accent);
     font-family: var(--font-display);
     font-size: var(--font-size-lg);
-    font-weight: 700;
+    font-weight: var(--font-weight-bold);
   }
 
   .startup-mark--error {
@@ -151,18 +151,26 @@
   .startup-action {
     grid-column: 2;
     justify-self: start;
-    min-height: 36px;
+    min-height: var(--control-height-md);
     padding: 0 var(--space-3);
     border: 1px solid color-mix(in srgb, var(--color-accent) 22%, var(--color-hairline));
     border-radius: var(--radius-control);
     background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface-glass));
     color: var(--color-text-primary);
     cursor: pointer;
+    transition:
+      background-color var(--transition-smooth),
+      border-color var(--transition-smooth);
   }
 
   .startup-action:hover {
     border-color: color-mix(in srgb, var(--color-accent) 40%, var(--color-hairline));
     background: color-mix(in srgb, var(--color-accent) 20%, var(--color-surface-glass));
+  }
+
+  .startup-action:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
 
   @media (max-width: 520px) {

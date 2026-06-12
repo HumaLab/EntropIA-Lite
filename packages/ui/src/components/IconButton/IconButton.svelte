@@ -72,8 +72,8 @@
   }
 
   .icon-button--lg {
-    width: 40px;
-    height: 40px;
+    width: var(--control-height-lg);
+    height: var(--control-height-lg);
   }
 
   .icon-button--ghost {

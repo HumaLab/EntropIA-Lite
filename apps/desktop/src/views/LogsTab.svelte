@@ -132,7 +132,7 @@
     justify-content: space-between;
     gap: var(--space-4);
     align-items: flex-start;
-    padding: var(--space-5);
+    padding: var(--space-4);
     border: 1px solid color-mix(in srgb, var(--color-hairline) 78%, transparent);
     border-radius: var(--radius-lg);
     background: color-mix(in srgb, var(--color-surface-glass) 76%, transparent);

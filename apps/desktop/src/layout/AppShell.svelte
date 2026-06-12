@@ -346,7 +346,7 @@
     border-top: 1px solid var(--border-subtle);
     background: var(--surface-input);
     font-family: var(--font-mono);
-    font-size: calc(0.6rem + 5px);
+    font-size: var(--font-size-sm);
     color: var(--color-text-muted);
     flex-shrink: 0;
     letter-spacing: 0.02em;
@@ -381,7 +381,7 @@
   }
 
   .statusbar__link b {
-    font-weight: 600;
+    font-weight: var(--font-weight-semibold);
   }
 
   :global(.statusbar__badge) {

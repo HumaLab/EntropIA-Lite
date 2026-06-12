@@ -912,7 +912,7 @@
     border-right: 1px solid var(--color-border-subtle);
     background: var(--color-surface);
     overflow: hidden;
-    font-size: 12px;
+    font-size: var(--font-size-xs);
   }
 
   .explorer__panel {
@@ -984,11 +984,11 @@
   .explorer__section-label {
     margin-bottom: 5px;
     padding-left: 5px;
-    font-size: 10px;
+    font-size: 11px;
     font-weight: var(--font-weight-medium);
     color: var(--color-text-muted);
     text-transform: uppercase;
-    letter-spacing: 0.06em;
+    letter-spacing: 0.075em;
   }
 
   .explorer__tree {
@@ -1072,7 +1072,7 @@
     width: var(--tree-control-width);
     height: 20px;
     border: 1px solid transparent;
-    border-radius: 5px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-text-muted);
     cursor: pointer;
@@ -1118,7 +1118,7 @@
     min-width: 0;
     padding: 3px 6px 3px 7px;
     border: 1px solid transparent;
-    border-radius: 5px;
+    border-radius: var(--radius-control);
     background: transparent;
     color: var(--color-text-secondary);
     text-align: left;
@@ -1217,17 +1217,17 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: 12px;
-    line-height: 1.25;
+    font-size: var(--font-size-xs);
+    line-height: var(--line-height-tight);
   }
 
   .explorer__node-meta,
   .explorer__asset-type {
     flex: 0 0 auto;
-    font-size: 10px;
+    font-size: 11px;
     color: color-mix(in srgb, var(--color-text-muted) 82%, transparent);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.075em;
   }
 
   .explorer__node.is-active .explorer__node-meta,
@@ -1241,7 +1241,7 @@
 
   .explorer__message {
     margin: 0;
-    font-size: 11px;
+    font-size: var(--font-size-xs);
     color: var(--color-text-muted);
   }
 

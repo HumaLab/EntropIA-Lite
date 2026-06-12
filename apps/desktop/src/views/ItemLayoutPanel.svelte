@@ -487,7 +487,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    padding: 6px 10px;
+    padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-control);
     background: var(--surface-input);
@@ -495,16 +495,21 @@
     font-size: var(--font-size-xs);
     cursor: pointer;
     transition:
-      border-color 0.15s ease,
-      background-color 0.15s ease,
-      color 0.15s ease,
-      box-shadow 0.15s ease;
+      border-color var(--transition-base),
+      background-color var(--transition-base),
+      color var(--transition-base),
+      box-shadow var(--transition-base);
   }
 
-  .layout-page-chip:hover,
-  .layout-page-chip.active {
+  .layout-page-chip:hover {
     border-color: var(--border-focus);
     background: var(--color-accent-faint);
+  }
+
+  .layout-page-chip.active {
+    border-color: var(--border-focus);
+    background: var(--color-accent-soft);
+    color: var(--color-text-primary);
   }
 
   .layout-page-chip:focus-visible {
@@ -518,7 +523,7 @@
     align-items: center;
     justify-content: center;
     min-width: 22px;
-    padding: 2px 6px;
+    padding: 2px var(--space-2);
     border-radius: var(--radius-control);
     background: var(--surface-card);
     font-variant-numeric: tabular-nums;
@@ -541,7 +546,7 @@
     display: inline-flex;
     align-items: center;
     gap: var(--space-2);
-    padding: 6px 10px;
+    padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-control);
     background: var(--surface-input);
@@ -549,16 +554,21 @@
     font-size: var(--font-size-xs);
     cursor: pointer;
     transition:
-      border-color 0.15s ease,
-      background-color 0.15s ease,
-      color 0.15s ease,
-      box-shadow 0.15s ease;
+      border-color var(--transition-base),
+      background-color var(--transition-base),
+      color var(--transition-base),
+      box-shadow var(--transition-base);
   }
 
-  .layout-filter-chip:hover,
-  .layout-filter-chip.active {
+  .layout-filter-chip:hover {
     border-color: var(--border-focus);
     background: var(--color-accent-faint);
+  }
+
+  .layout-filter-chip.active {
+    border-color: var(--border-focus);
+    background: var(--color-accent-soft);
+    color: var(--color-text-primary);
   }
 
   .layout-filter-chip:focus-visible {
@@ -572,7 +582,7 @@
     align-items: center;
     justify-content: center;
     min-width: 22px;
-    padding: 2px 6px;
+    padding: 2px var(--space-2);
     border-radius: var(--radius-control);
     background: var(--surface-card);
     font-variant-numeric: tabular-nums;
@@ -593,6 +603,10 @@
     font-size: var(--font-size-xs);
     cursor: pointer;
     white-space: nowrap;
+    transition:
+      background-color var(--transition-base),
+      border-color var(--transition-base),
+      box-shadow var(--transition-base);
   }
 
   .layout-toggle:hover:not(:disabled) {
@@ -607,7 +621,7 @@
   }
 
   .layout-toggle:disabled {
-    opacity: 0.5;
+    opacity: 0.48;
     cursor: not-allowed;
   }
 
@@ -632,9 +646,9 @@
     text-align: left;
     cursor: pointer;
     transition:
-      border-color 0.15s ease,
-      background-color 0.15s ease,
-      box-shadow 0.15s ease;
+      border-color var(--transition-base),
+      background-color var(--transition-base),
+      box-shadow var(--transition-base);
   }
 
   .layout-block-item:hover,
@@ -701,10 +715,10 @@
   .layout-block-page-chip {
     display: inline-flex;
     align-items: center;
-    padding: 2px 8px;
+    padding: 2px var(--space-2);
     border-radius: var(--radius-control);
-    font-size: 10px;
-    line-height: 1.2;
+    font-size: 11px;
+    line-height: var(--line-height-tight);
     border: 1px solid color-mix(in srgb, var(--color-accent) 35%, var(--border-subtle));
     background: color-mix(in srgb, var(--color-accent) 10%, var(--surface-card));
     color: var(--color-text-secondary);
@@ -739,9 +753,9 @@
 
   .layout-inspector__eyebrow {
     margin: 0 0 4px;
-    font-size: 10px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.075em;
     color: var(--color-text-muted);
   }
 
@@ -759,13 +773,17 @@
   }
 
   .layout-inspector__action {
-    padding: 6px 10px;
+    padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-sm);
     background: var(--surface-input);
     color: var(--color-text-primary);
     font-size: var(--font-size-xs);
     cursor: pointer;
+    transition:
+      background-color var(--transition-base),
+      border-color var(--transition-base),
+      box-shadow var(--transition-base);
   }
 
   .layout-inspector__action:hover:not(:disabled) {
@@ -780,7 +798,7 @@
   }
 
   .layout-inspector__action:disabled {
-    opacity: 0.5;
+    opacity: 0.48;
     cursor: not-allowed;
   }
 
@@ -804,9 +822,9 @@
   .layout-inspector__label {
     display: block;
     margin-bottom: 4px;
-    font-size: 10px;
+    font-size: 11px;
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.075em;
     color: var(--color-text-muted);
   }
 

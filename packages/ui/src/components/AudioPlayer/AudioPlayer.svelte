@@ -400,13 +400,18 @@
     cursor: pointer;
     font-size: var(--font-size-sm);
     transition:
-      background-color 0.15s ease,
-      border-color 0.15s ease;
+      background-color var(--transition-base),
+      border-color var(--transition-base);
   }
 
   .audio-player__btn:hover {
     background-color: var(--color-surface-raised);
     border-color: var(--color-text-muted);
+  }
+
+  .audio-player__btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
 
   .audio-player__btn--play {
@@ -420,7 +425,7 @@
 
   .audio-player__btn--play:hover {
     background-color: var(--color-accent);
-    color: var(--color-text-on-accent, #fff);
+    color: var(--color-bg);
   }
 
   .audio-player__progress {
@@ -477,8 +482,8 @@
     margin: 0;
     padding: var(--space-2) var(--space-3);
     border-radius: var(--radius-md);
-    background: rgba(255, 143, 143, 0.12);
-    color: #ff8f8f;
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
     font-size: var(--font-size-sm);
     text-align: center;
     max-width: 480px;

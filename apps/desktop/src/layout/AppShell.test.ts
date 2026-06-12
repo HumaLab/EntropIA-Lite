@@ -115,7 +115,7 @@ describe('AppShell', () => {
   it('keeps footer typography enlarged for readability', () => {
     const source = readFileSync(resolve(import.meta.dirname, 'AppShell.svelte'), 'utf-8')
 
-    expect(source).toContain('font-size: calc(0.6rem + 5px);')
+    expect(source).toContain('font-size: var(--font-size-sm);')
     expect(source).toContain('font-size: calc(0.58rem + 3px);')
   })
 

@@ -161,7 +161,7 @@
     position: relative;
     width: 100%;
     min-width: 0;
-    border: 1px solid var(--color-border, #e2e8f0);
+    border: 1px solid var(--color-border);
     border-radius: var(--radius-sm, 4px);
     overflow: hidden;
   }
@@ -178,12 +178,12 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    background: var(--color-surface, #f8fafc);
+    background: var(--color-surface);
     pointer-events: none;
   }
 
   .map-viewer__empty p {
-    color: var(--color-text-muted, #94a3b8);
+    color: var(--color-text-muted);
     font-size: var(--font-size-sm, 0.875rem);
   }
 </style>

@@ -378,8 +378,8 @@
     margin-top: var(--space-2);
     padding: var(--space-3);
     border: 1px solid var(--color-hairline);
-    border-radius: var(--radius-sm);
-    background: var(--color-surface-sunken);
+    border-radius: var(--radius-md);
+    background: var(--surface-input);
   }
 
   .summary-status {
@@ -475,7 +475,7 @@
   }
 
   .ocr-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.48;
     cursor: not-allowed;
     border-color: var(--border-subtle);
     background: var(--surface-input);

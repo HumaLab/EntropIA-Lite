@@ -314,7 +314,8 @@
   }
 
   .collections-intro {
-    padding-top: var(--space-5);
+    padding: var(--space-4) 0 var(--space-3);
+    border-bottom: 1px solid var(--border-subtle);
   }
 
   .collections-intro__content {
@@ -328,7 +329,7 @@
   .collections-controls__label {
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-medium);
-    letter-spacing: 0.08em;
+    letter-spacing: 0.075em;
     text-transform: uppercase;
     color: var(--color-text-muted);
   }

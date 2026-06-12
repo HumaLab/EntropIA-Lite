@@ -658,8 +658,8 @@
     line-height: 1;
     pointer-events: auto;
     transition:
-      background-color 0.15s ease,
-      color 0.15s ease;
+      background-color var(--transition-base),
+      color var(--transition-base);
   }
 
   .annotation-toolbar__fab:hover {
@@ -694,9 +694,9 @@
     color: var(--color-text-primary);
     cursor: pointer;
     transition:
-      background-color 0.15s ease,
-      border-color 0.15s ease,
-      transform 0.15s ease;
+      background-color var(--transition-base),
+      border-color var(--transition-base),
+      transform var(--transition-base);
   }
 
   .annotation-toolbar__button:hover:not(:disabled),
@@ -719,8 +719,15 @@
 
   .annotation-toolbar__button:disabled,
   .annotation-toolbar__swatch:disabled {
-    opacity: 0.4;
+    opacity: 0.48;
     cursor: not-allowed;
+  }
+
+  .annotation-toolbar__button:focus-visible,
+  .annotation-toolbar__swatch:focus-visible,
+  .annotation-toolbar__fab:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
 
   .annotation-toolbar__button--active,

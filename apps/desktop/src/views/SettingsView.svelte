@@ -1358,6 +1358,13 @@
     resize: vertical;
   }
 
+  .settings__textarea:focus {
+    outline: none;
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring);
+    background: color-mix(in srgb, var(--color-surface-glass) 88%, transparent);
+  }
+
   @media (max-width: 760px) {
     .settings__prompt-grid,
     .settings__params-grid--flows {
@@ -1376,7 +1383,7 @@
     color: var(--color-text-muted);
     margin-bottom: var(--space-1);
     text-transform: uppercase;
-    letter-spacing: 0.08em;
+    letter-spacing: 0.075em;
   }
 
   .settings__input-row {
@@ -1421,12 +1428,22 @@
     background: color-mix(in srgb, var(--color-surface-glass) 78%, transparent);
     color: var(--color-text-secondary);
     cursor: pointer;
-    font-size: 14px;
+    font-size: var(--font-size-sm);
+    transition:
+      background-color var(--transition-base),
+      border-color var(--transition-base),
+      color var(--transition-base),
+      box-shadow var(--transition-base);
   }
 
   .settings__icon-btn:hover {
     border-color: color-mix(in srgb, var(--color-accent) 18%, var(--color-hairline));
     background: color-mix(in srgb, var(--color-surface-glass) 88%, transparent);
+  }
+
+  .settings__icon-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
 
   .settings-view :global(.input-field__input) {

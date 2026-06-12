@@ -1427,15 +1427,15 @@
     height: 32px;
     padding: 0;
     border: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-control);
     background-color: transparent;
     color: var(--color-text-primary);
     cursor: pointer;
     font-size: var(--font-size-lg);
     line-height: 1;
     transition:
-      background-color 0.15s ease,
-      border-color 0.15s ease;
+      background-color var(--transition-base),
+      border-color var(--transition-base);
   }
 
   .document-viewer__btn:hover:not(:disabled) {
@@ -1443,8 +1443,13 @@
     border-color: var(--color-text-muted);
   }
 
+  .document-viewer__btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
   .document-viewer__btn:disabled {
-    opacity: 0.4;
+    opacity: 0.48;
     cursor: not-allowed;
   }
 

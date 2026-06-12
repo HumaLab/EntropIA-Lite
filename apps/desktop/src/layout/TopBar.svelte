@@ -634,11 +634,11 @@
   }
 
   :global(.crumb-nav__button:disabled) {
-    opacity: 0.38;
+    opacity: 0.48;
   }
 
   .crumb-nav__separator {
-    font-size: 10px;
+    font-size: 11px;
     opacity: 0.55;
   }
 
@@ -660,8 +660,8 @@
   }
 
   :global(.topbar__window-btn) {
-    width: 28px;
-    height: 28px;
+    width: var(--control-height-sm);
+    height: var(--control-height-sm);
     border-radius: var(--radius-sm);
     color: var(--color-text-secondary);
   }
@@ -707,7 +707,7 @@
 
   :global(.topbar__deps-badge) {
     min-height: 24px;
-    font-size: 0.66rem;
+    font-size: 11px;
   }
 
   .topbar__badge {
@@ -744,6 +744,10 @@
     background: var(--surface-input);
     color: var(--color-text-primary);
     font-size: var(--font-size-sm);
+    transition:
+      border-color var(--transition-smooth),
+      box-shadow var(--transition-smooth),
+      background-color var(--transition-smooth);
   }
 
   .global-search__input:focus {

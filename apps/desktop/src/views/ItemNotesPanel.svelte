@@ -292,7 +292,7 @@
     padding: var(--space-2) var(--space-3);
     border: 1px solid var(--color-hairline);
     border-radius: var(--radius-md);
-    background: var(--color-surface);
+    background: var(--surface-card);
   }
 
   .note-row {
@@ -417,7 +417,7 @@
   }
 
   :global(.note-action-button--edit) {
-    color: color-mix(in srgb, var(--color-text-primary) 78%, white);
+    color: var(--color-text-secondary);
   }
 
   :global(.note-action-button--edit:hover) {

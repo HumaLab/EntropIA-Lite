@@ -930,18 +930,24 @@
 
   .note-editor__tool,
   .note-editor__btn {
-    padding: 0.45rem 0.65rem;
+    padding: var(--space-2) var(--space-3);
     font-family: var(--font-sans);
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-medium);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-control);
     cursor: pointer;
     border: 1px solid var(--color-border);
     transition:
-      background-color 0.15s ease,
-      border-color 0.15s ease,
-      color 0.15s ease,
-      box-shadow 0.15s ease;
+      background-color var(--transition-base),
+      border-color var(--transition-base),
+      color var(--transition-base),
+      box-shadow var(--transition-base);
+  }
+
+  .note-editor__tool:focus-visible,
+  .note-editor__btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
   }
 
   .note-editor__tool--dictation {
@@ -978,7 +984,7 @@
   .note-editor__dictation-status {
     display: inline-flex;
     align-items: center;
-    padding: 0 0.5rem;
+    padding: 0 var(--space-2);
     font-size: var(--font-size-xs);
     color: var(--color-text-muted);
   }
@@ -990,7 +996,7 @@
   }
 
   .note-editor__dictation-message--error {
-    color: #ff8f8f;
+    color: var(--color-danger);
   }
 
   .note-editor__surface {
@@ -1004,8 +1010,8 @@
   }
 
   .note-editor__surface--focused {
-    border-color: color-mix(in srgb, var(--color-accent) 65%, var(--color-border));
-    box-shadow: 0 0 0 2px rgba(124, 149, 255, 0.12);
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring);
   }
 
   .note-editor__surface :global(.ProseMirror) {
@@ -1089,7 +1095,7 @@
     display: grid;
     place-items: center;
     padding: var(--space-4);
-    background: rgba(7, 10, 18, 0.76);
+    background: var(--color-overlay);
     backdrop-filter: blur(10px);
   }
 
@@ -1134,7 +1140,7 @@
   .note-editor__modal-copy {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: var(--space-1);
   }
 
   .note-editor__modal-copy h3 {
@@ -1164,17 +1170,17 @@
 
   .note-editor__modal-input {
     width: 100%;
-    padding: 0.8rem 0.95rem;
+    padding: var(--space-3) var(--space-4);
     border: 1px solid color-mix(in srgb, var(--color-border) 90%, transparent);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-input);
     background: color-mix(in srgb, var(--color-surface) 82%, black 18%);
     color: var(--color-text-primary);
     font-family: var(--font-sans);
     font-size: var(--font-size-sm);
     transition:
-      border-color 0.15s ease,
-      box-shadow 0.15s ease,
-      background-color 0.15s ease;
+      border-color var(--transition-smooth),
+      box-shadow var(--transition-smooth),
+      background-color var(--transition-smooth);
   }
 
   .note-editor__modal-input::placeholder {
@@ -1183,20 +1189,20 @@
 
   .note-editor__modal-input:focus {
     outline: none;
-    border-color: color-mix(in srgb, var(--color-accent) 65%, var(--color-border));
-    box-shadow: 0 0 0 3px rgba(124, 149, 255, 0.12);
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring);
     background: color-mix(in srgb, var(--color-surface) 88%, black 12%);
   }
 
   .note-editor__modal-input[aria-invalid='true'] {
-    border-color: rgba(255, 143, 143, 0.5);
-    box-shadow: 0 0 0 3px rgba(255, 143, 143, 0.08);
+    border-color: var(--color-danger);
+    box-shadow: var(--focus-ring-danger);
   }
 
   .note-editor__modal-error {
     margin: 0;
     font-size: var(--font-size-xs);
-    color: #ff9f9f;
+    color: var(--color-danger);
   }
 
   .note-editor__modal-actions {
@@ -1207,7 +1213,7 @@
 
   .note-editor__btn:disabled {
     cursor: not-allowed;
-    opacity: 0.5;
+    opacity: 0.48;
   }
 
   .note-editor__btn--ghost {

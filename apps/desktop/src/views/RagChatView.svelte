@@ -298,7 +298,7 @@
 
   .rag-chat__sidebar-header {
     flex-shrink: 0;
-    padding: var(--space-3) var(--space-3) var(--space-2);
+    padding: var(--space-3) var(--space-4);
     border-bottom: 1px solid var(--border-subtle);
   }
 
@@ -555,6 +555,10 @@
     font-family: var(--font-sans);
     font-size: var(--font-size-sm);
     resize: vertical;
+    transition:
+      border-color var(--transition-smooth),
+      box-shadow var(--transition-smooth),
+      background-color var(--transition-smooth);
   }
 
   .rag-chat__input:focus {
@@ -565,7 +569,8 @@
   }
 
   .rag-chat__input:disabled {
-    opacity: 0.6;
+    cursor: not-allowed;
+    opacity: 0.48;
   }
 
   @media (max-width: 720px) {

@@ -389,7 +389,7 @@
 
   .analysis-header__eyebrow {
     font-family: var(--font-mono);
-    font-size: 0.6rem;
+    font-size: 11px;
     font-weight: var(--font-weight-normal);
     letter-spacing: 0.15em;
     text-transform: uppercase;
@@ -433,7 +433,7 @@
   .analysis-pane {
     display: flex;
     flex-direction: column;
-    gap: var(--space-4);
+    gap: var(--space-3);
   }
 
   .analysis-pane.is-hidden {
@@ -448,8 +448,8 @@
 
   .analysis-section__title {
     font-size: var(--font-size-xs);
-    font-weight: var(--font-weight-bold);
-    letter-spacing: 0.08em;
+    font-weight: var(--font-weight-medium);
+    letter-spacing: 0.075em;
     text-transform: uppercase;
     color: var(--color-text-secondary);
   }
@@ -534,6 +534,7 @@
   .settings-textarea:focus-visible {
     outline: none;
     border-color: var(--border-focus);
+    box-shadow: var(--focus-ring);
   }
 
   .settings-hint {

@@ -264,7 +264,7 @@
     padding: var(--space-2);
     border: 1px solid var(--border-subtle);
     border-top: none;
-    border-radius: 0 0 var(--radius-md) var(--radius-md);
+    border-radius: 0 0 var(--radius-surface) var(--radius-surface);
     overflow: hidden;
     background: var(--surface-card);
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.025);
@@ -272,7 +272,7 @@
 
   .analysis-panel--tabbed {
     border-top: 1px solid var(--color-border);
-    border-radius: var(--radius-md);
+    border-radius: var(--radius-surface);
   }
 
   .fts-search-section,
@@ -292,13 +292,16 @@
   .fts-search-input {
     width: 100%;
     border: 1px solid var(--border-subtle);
-    border-radius: var(--radius-sm);
+    border-radius: var(--radius-input);
     background: var(--surface-input);
     color: var(--color-text-primary);
     font-size: var(--font-size-sm);
     padding: var(--space-2) var(--space-3);
     outline: none;
     font-family: var(--font-sans);
+    transition:
+      border-color var(--transition-smooth),
+      box-shadow var(--transition-smooth);
   }
 
   .fts-search-input:focus {
@@ -314,7 +317,7 @@
     background: color-mix(in srgb, var(--color-accent) 10%, transparent);
     color: var(--color-text-secondary);
     font-size: var(--font-size-xs);
-    line-height: 1.45;
+    line-height: var(--line-height-base);
   }
 
   .fts-match {
@@ -368,8 +371,8 @@
     color: var(--color-text-primary);
     background: var(--surface-input);
     border: 1px solid var(--border-subtle);
-    border-radius: 4px;
-    padding: 2px 6px;
+    border-radius: var(--radius-xs);
+    padding: 2px var(--space-2);
     flex: 1;
   }
 
@@ -443,7 +446,7 @@
     background: var(--surface-card);
     overflow: hidden;
     color: var(--color-text-tertiary, var(--color-text-secondary));
-    font-size: 10px;
+    font-size: 11px;
     font-weight: var(--font-weight-semibold);
     letter-spacing: 0.04em;
   }
@@ -480,7 +483,7 @@
     display: -webkit-box;
     color: var(--color-text-secondary);
     font-size: var(--font-size-xs);
-    line-height: 1.45;
+    line-height: var(--line-height-base);
     overflow: hidden;
     -webkit-box-orient: vertical;
     -webkit-line-clamp: 3;
@@ -495,7 +498,7 @@
   .similar-technical-meta {
     margin: 0 var(--space-3) var(--space-2) calc(72px + var(--space-3) + var(--space-3));
     color: var(--color-text-tertiary, var(--color-text-secondary));
-    font-size: 10px;
+    font-size: 11px;
   }
 
   .similar-technical-meta summary {
@@ -516,7 +519,7 @@
     background: var(--surface-input);
     border: 1px solid var(--border-subtle);
     border-radius: var(--radius-control);
-    padding: 2px 7px;
+    padding: 2px var(--space-2);
     white-space: nowrap;
     font-weight: var(--font-weight-semibold);
   }

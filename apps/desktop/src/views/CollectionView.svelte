@@ -1061,7 +1061,7 @@
   }
 
   .collection-view__header {
-    align-items: center;
+    align-items: flex-start;
   }
 
   .collection-toolbar {
@@ -1168,7 +1168,7 @@
   .import-summary__counts dd {
     margin: 0;
     color: var(--color-text-primary);
-    font-weight: 700;
+    font-weight: var(--font-weight-semibold);
   }
 
   .import-summary__detail {

@@ -68,7 +68,7 @@ describe('design system visual contract', () => {
 
     expect(iconButton).toContain('width: 28px;')
     expect(iconButton).toContain('width: 32px;')
-    expect(iconButton).toContain('width: 40px;')
+    expect(iconButton).toContain('width: var(--control-height-lg);')
 
     expect(statusBadge).toContain('var(--state-ai-soft)')
     expect(statusBadge).toContain('var(--state-evidence-soft)')

@@ -323,7 +323,7 @@
     font-size: var(--font-size-xs);
     font-weight: var(--font-weight-medium);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.075em;
     color: var(--color-text-muted);
   }
 
@@ -342,7 +342,7 @@
   .entity-viewer__pill {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1);
     padding: 2px var(--space-2);
     border-radius: var(--radius-control);
     font-size: var(--font-size-xs);
@@ -428,8 +428,8 @@
   }
 
   .entity-viewer__delete-label {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: var(--font-weight-bold);
     letter-spacing: 0.01em;
     line-height: 1;
     white-space: nowrap;
@@ -472,8 +472,8 @@
   }
 
   .entity-viewer__tag {
-    font-size: 10px;
-    font-weight: 700;
+    font-size: 11px;
+    font-weight: var(--font-weight-bold);
     letter-spacing: 0.04em;
     opacity: 0.9;
   }

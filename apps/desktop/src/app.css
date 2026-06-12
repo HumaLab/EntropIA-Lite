@@ -7,9 +7,9 @@
   --scrollbar-size: 7px;
   --scrollbar-radius: 999px;
   --scrollbar-track: rgba(255, 255, 255, 0.014);
-  --scrollbar-thumb: rgba(210, 220, 255, 0.09);
-  --scrollbar-thumb-hover: rgba(210, 220, 255, 0.22);
-  --scrollbar-thumb-active: rgba(210, 220, 255, 0.32);
+  --scrollbar-thumb: color-mix(in srgb, var(--color-text-primary) 9%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--color-text-primary) 22%, transparent);
+  --scrollbar-thumb-active: color-mix(in srgb, var(--color-text-primary) 32%, transparent);
 }
 
 :root[data-theme='light'] {
@@ -43,7 +43,7 @@ body {
 
 body {
   background:
-    radial-gradient(circle at 18% -12%, rgba(154, 164, 199, 0.028), transparent 26%),
+    radial-gradient(circle at 18% -12%, color-mix(in srgb, var(--color-accent) 2.8%, transparent), transparent 26%),
     linear-gradient(180deg, var(--color-bg-ambient), var(--color-bg) 34%), var(--color-bg);
 }
 
@@ -106,7 +106,7 @@ h1,
 h2,
 h3 {
   font-family: var(--font-display);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
   letter-spacing: -0.025em;
 }
 
@@ -222,5 +222,5 @@ p {
 }
 
 ::selection {
-  background: rgba(124, 149, 255, 0.26);
+  background: color-mix(in srgb, var(--color-accent) 26%, transparent);
 }
