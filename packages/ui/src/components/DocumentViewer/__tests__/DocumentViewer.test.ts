@@ -770,12 +770,12 @@ describe('DocumentViewer', () => {
       expect(
         screen
           .getByRole('button', { name: /rotate 90° left/i })
-          .querySelector('[data-action-icon="rotate-90-ccw"]')
+          .querySelector('svg.lucide-rotate-ccw')
       ).toBeInTheDocument()
       expect(
         screen
           .getByRole('button', { name: /rotate 90° right/i })
-          .querySelector('[data-action-icon="rotate-90-cw"]')
+          .querySelector('svg.lucide-rotate-cw')
       ).toBeInTheDocument()
       expect(
         screen

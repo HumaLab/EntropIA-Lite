@@ -398,7 +398,7 @@
         title={labels.rotateLeft}
         onclick={onRotateLeft}
       >
-        <ActionIcon name="rotate-90-ccw" size={18} />
+        <ActionIcon name="rotate-ccw" size={18} />
       </button>
 
       <button
@@ -408,7 +408,7 @@
         title={labels.rotateRight}
         onclick={onRotateRight}
       >
-        <ActionIcon name="rotate-90-cw" size={18} />
+        <ActionIcon name="rotate-cw" size={18} />
       </button>
 
       {#if fineRotationDegrees !== null}
@@ -561,7 +561,7 @@
       title={labels.collapseToolbarTitle}
       onclick={() => (collapsed = true)}
     >
-      <ActionIcon name="chevron-right" size={18} />
+      <ActionIcon name="chevron-up" size={18} />
     </button>
   </div>
 {/if}
