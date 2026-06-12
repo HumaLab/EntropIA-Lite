@@ -1,10 +1,17 @@
-//! Comando Tauri del chat RAG: `rag_ask`.
+//! Comandos Tauri del chat RAG: `rag_ask` + gestión de conversaciones
+//! persistidas (`rag_list_conversations`, `rag_get_conversation`,
+//! `rag_delete_conversation`).
 //!
-//! Pipeline: validación → settings → recuperación híbrida (en `spawn_blocking`
-//! con la conexión worker) → prompt de fragmentos numerados → LLM remoto.
+//! Pipeline de `rag_ask`: validación → settings + historial → recuperación
+//! híbrida (en `spawn_blocking` con la conexión worker) → prompt de
+//! fragmentos numerados → LLM remoto → persistencia del intercambio.
 
-use super::retrieval;
-use super::{RagAnswer, RagChatTurn, RagSource};
+use std::sync::{Arc, Mutex};
+
+use rusqlite::Connection;
+
+use super::{retrieval, store};
+use super::{RagAnswer, RagChatTurn, RagConversation, RagConversationSummary, RagSource};
 use crate::llm::openrouter::{GenerationParams, OpenRouterClient};
 
 const DEFAULT_TOP_K: u8 = 6;
@@ -15,19 +22,26 @@ const QUESTION_MAX_CHARS: usize = 4000;
 const RAG_MAX_TOKENS: i32 = 1500;
 const RAG_TEMPERATURE: f32 = 0.2;
 
-/// Resultado de la fase bloqueante (settings + recuperación).
+/// Resultado de la fase bloqueante (settings + historial + recuperación).
 struct RetrievalPhase {
     api_key: String,
     model: String,
     sources: Vec<RagSource>,
+    history: Vec<RagChatTurn>,
 }
 
 /// Responde una pregunta con RAG híbrido (vector + FTS5 fusionados con RRF)
-/// sobre la base de transcripciones, citando las fuentes con `[n]`.
+/// sobre la base de transcripciones, citando las fuentes con `[n]`. El
+/// historial se deriva de la conversación persistida (`conversation_id`) y
+/// cada intercambio exitoso se guarda en SQLite; la respuesta devuelve el id
+/// real de la conversación (fresco si no existía o fue borrada en vuelo).
+/// Si la persistencia falla DESPUÉS de una respuesta exitosa del LLM, la
+/// respuesta se devuelve igual con `conversation_id: None` — los errores de
+/// validación y del LLM sí se propagan como `Err`.
 #[tauri::command]
 pub async fn rag_ask(
     question: String,
-    history: Option<Vec<RagChatTurn>>,
+    conversation_id: Option<String>,
     top_k: Option<u8>,
     db: tauri::State<'_, crate::db::state::AppDbState>,
 ) -> Result<RagAnswer, String> {
@@ -38,10 +52,12 @@ pub async fn rag_ask(
     // bloqueante con la conexión worker (nunca en el hilo del event loop).
     let conn_arc = db.worker_conn.clone();
     let retrieval_question = question.clone();
+    let history_conversation_id = conversation_id.clone();
     let phase = tokio::task::spawn_blocking(move || -> Result<RetrievalPhase, String> {
-        // Paso 1: lecturas de settings con el lock, soltándolo antes de
-        // cualquier I/O de red (el embedding remoto puede tardar hasta 120s).
-        let (api_key, model, embedding_config) = {
+        // Paso 1: lecturas de settings + historial persistido con el lock,
+        // soltándolo antes de cualquier I/O de red (el embedding remoto
+        // puede tardar hasta 120s).
+        let (api_key, model, embedding_config, history) = {
             let conn = conn_arc.lock().map_err(|e| e.to_string())?;
 
             // `get_secret_setting` devuelve None si la referencia
@@ -57,7 +73,14 @@ pub async fn rag_ask(
                 .unwrap_or_else(|| crate::settings::DEFAULT_OPENROUTER_MODEL.to_string());
             let embedding_config = crate::nlp::embeddings::config_from_settings(&conn);
 
-            (api_key, model, embedding_config)
+            // Historial desde la conversación persistida (vacío si el id no
+            // existe o no vino); mismo presupuesto de 6 turnos/500 chars.
+            let history = match history_conversation_id.as_deref() {
+                Some(id) => store::load_history(&conn, id, HISTORY_MAX_TURNS)?,
+                None => Vec::new(),
+            };
+
+            (api_key, model, embedding_config, history)
         };
 
         // Paso 2 (sin lock): pierna vectorial con degradación elegante; si la
@@ -86,18 +109,29 @@ pub async fn rag_ask(
             api_key,
             model,
             sources,
+            history,
         })
     })
     .await
     .map_err(|e| format!("RAG retrieval task panicked: {e}"))??;
 
     // Sin contenido relevante: no llamamos al LLM; el frontend muestra su
-    // propio mensaje de "sin resultados".
+    // propio mensaje de "sin resultados". El intercambio vacío también se
+    // persiste para que la conversación quede completa.
     if phase.sources.is_empty() {
-        return Ok(empty_answer(phase.model));
+        let conversation_id = persist_exchange_or_warn(
+            db.worker_conn.clone(),
+            conversation_id,
+            question,
+            String::new(),
+            Vec::new(),
+            phase.model.clone(),
+        )
+        .await;
+        return Ok(empty_answer(phase.model, conversation_id));
     }
 
-    let prompt = build_rag_prompt(&question, &phase.sources, history.as_deref().unwrap_or(&[]));
+    let prompt = build_rag_prompt(&question, &phase.sources, &phase.history);
 
     let client = OpenRouterClient::try_new(phase.api_key, phase.model.clone())?;
     let answer = client
@@ -107,11 +141,123 @@ pub async fn rag_ask(
         )
         .await?;
 
+    // Paso 4: persistencia del intercambio en un cuarto scope de lock corto,
+    // SIEMPRE después del await del LLM (nunca cruzamos la red con el lock).
+    // Si el LLM falló, el `?` de arriba ya propagó el error sin persistir.
+    // Si la PERSISTENCIA falla, la respuesta ya pagada al LLM no se descarta:
+    // se devuelve con `conversation_id: None`.
+    let conversation_id = persist_exchange_or_warn(
+        db.worker_conn.clone(),
+        conversation_id,
+        question,
+        answer.clone(),
+        phase.sources.clone(),
+        phase.model.clone(),
+    )
+    .await;
+
     Ok(RagAnswer {
         answer,
         sources: phase.sources,
         model: phase.model,
+        conversation_id,
     })
+}
+
+/// Igual que `persist_exchange_blocking`, pero NUNCA propaga el error: una
+/// respuesta ya obtenida del LLM no se descarta porque falló la persistencia.
+/// Loguea el error y devuelve `None` (el frontend no adopta ningún id).
+async fn persist_exchange_or_warn(
+    conn_arc: Arc<Mutex<Connection>>,
+    conversation_id: Option<String>,
+    question: String,
+    answer: String,
+    sources: Vec<RagSource>,
+    model: String,
+) -> Option<String> {
+    match persist_exchange_blocking(conn_arc, conversation_id, question, answer, sources, model)
+        .await
+    {
+        Ok(id) => Some(id),
+        Err(error) => {
+            eprintln!(
+                "[rag] No se pudo persistir el intercambio (la respuesta se devuelve igual): {error}"
+            );
+            None
+        }
+    }
+}
+
+/// Persiste el intercambio pregunta/respuesta en el pool bloqueante con un
+/// lock corto sobre la conexión worker. Devuelve el id real de la
+/// conversación (fresco si no existía).
+async fn persist_exchange_blocking(
+    conn_arc: Arc<Mutex<Connection>>,
+    conversation_id: Option<String>,
+    question: String,
+    answer: String,
+    sources: Vec<RagSource>,
+    model: String,
+) -> Result<String, String> {
+    tokio::task::spawn_blocking(move || -> Result<String, String> {
+        let mut conn = conn_arc.lock().map_err(|e| e.to_string())?;
+        store::persist_exchange(
+            &mut conn,
+            conversation_id.as_deref(),
+            &question,
+            &answer,
+            &sources,
+            &model,
+            store::now_millis(),
+        )
+    })
+    .await
+    .map_err(|e| format!("RAG persistence task panicked: {e}"))?
+}
+
+/// Lista las conversaciones RAG persistidas, más reciente primero.
+#[tauri::command]
+pub async fn rag_list_conversations(
+    db: tauri::State<'_, crate::db::state::AppDbState>,
+) -> Result<Vec<RagConversationSummary>, String> {
+    let conn_arc = db.worker_conn.clone();
+    tokio::task::spawn_blocking(move || -> Result<Vec<RagConversationSummary>, String> {
+        let conn = conn_arc.lock().map_err(|e| e.to_string())?;
+        store::list_conversations(&conn)
+    })
+    .await
+    .map_err(|e| format!("RAG list task panicked: {e}"))?
+}
+
+/// Carga una conversación persistida completa, con mensajes y fuentes.
+#[tauri::command]
+pub async fn rag_get_conversation(
+    conversation_id: String,
+    db: tauri::State<'_, crate::db::state::AppDbState>,
+) -> Result<RagConversation, String> {
+    let conn_arc = db.worker_conn.clone();
+    tokio::task::spawn_blocking(move || -> Result<RagConversation, String> {
+        let conn = conn_arc.lock().map_err(|e| e.to_string())?;
+        store::get_conversation(&conn, &conversation_id)
+    })
+    .await
+    .map_err(|e| format!("RAG get task panicked: {e}"))?
+}
+
+/// Elimina una conversación persistida y sus mensajes. Borrar un id
+/// inexistente es un no-op exitoso.
+#[tauri::command]
+pub async fn rag_delete_conversation(
+    conversation_id: String,
+    db: tauri::State<'_, crate::db::state::AppDbState>,
+) -> Result<(), String> {
+    let conn_arc = db.worker_conn.clone();
+    tokio::task::spawn_blocking(move || -> Result<(), String> {
+        let mut conn = conn_arc.lock().map_err(|e| e.to_string())?;
+        store::delete_conversation(&mut conn, &conversation_id)
+    })
+    .await
+    .map_err(|e| format!("RAG delete task panicked: {e}"))?
 }
 
 /// Valida la pregunta del usuario: trim, no vacía y máximo 4000 caracteres
@@ -149,11 +295,13 @@ fn resolve_top_k(top_k: Option<u8>) -> usize {
 }
 
 /// Respuesta vacía cuando la recuperación no encontró fuentes (sin LLM).
-fn empty_answer(model: String) -> RagAnswer {
+/// `conversation_id` es `None` si la persistencia del intercambio falló.
+fn empty_answer(model: String, conversation_id: Option<String>) -> RagAnswer {
     RagAnswer {
         answer: String::new(),
         sources: Vec::new(),
         model,
+        conversation_id,
     }
 }
 
@@ -349,9 +497,79 @@ mod tests {
 
     #[test]
     fn empty_answer_skips_llm_and_returns_empty_payload() {
-        let answer = empty_answer("modelo-x".to_string());
+        let answer = empty_answer("modelo-x".to_string(), Some("conv-1".to_string()));
         assert!(answer.answer.is_empty());
         assert!(answer.sources.is_empty());
         assert_eq!(answer.model, "modelo-x");
+        assert_eq!(answer.conversation_id.as_deref(), Some("conv-1"));
+    }
+
+    #[test]
+    fn empty_answer_carries_none_when_persistence_failed() {
+        let answer = empty_answer("modelo-x".to_string(), None);
+        assert!(answer.answer.is_empty());
+        assert_eq!(answer.conversation_id, None);
+    }
+
+    /// Conexión SIN las tablas RAG: fuerza el fallo de persistencia.
+    fn conn_without_rag_tables() -> Arc<Mutex<Connection>> {
+        Arc::new(Mutex::new(
+            Connection::open_in_memory().expect("in-memory DB failed"),
+        ))
+    }
+
+    #[tokio::test]
+    async fn persist_failure_after_llm_answer_returns_none_instead_of_error() {
+        // La respuesta del LLM ya está pagada: si la persistencia falla
+        // (acá, tablas ausentes), el intercambio se pierde pero la respuesta
+        // se devuelve igual con `None` — nunca un `Err`.
+        let conversation_id = persist_exchange_or_warn(
+            conn_without_rag_tables(),
+            None,
+            "pregunta".to_string(),
+            "respuesta".to_string(),
+            Vec::new(),
+            "modelo-x".to_string(),
+        )
+        .await;
+        assert_eq!(conversation_id, None);
+    }
+
+    #[tokio::test]
+    async fn persist_success_returns_the_real_conversation_id() {
+        let conn = Connection::open_in_memory().expect("in-memory DB failed");
+        conn.execute_batch(
+            "CREATE TABLE rag_conversations (
+               id TEXT PRIMARY KEY,
+               title TEXT NOT NULL,
+               created_at INTEGER NOT NULL,
+               updated_at INTEGER NOT NULL
+             );
+             CREATE TABLE rag_messages (
+               id TEXT PRIMARY KEY,
+               conversation_id TEXT NOT NULL REFERENCES rag_conversations(id) ON DELETE CASCADE,
+               sort_index INTEGER NOT NULL,
+               role TEXT NOT NULL CHECK(role IN ('user','assistant')),
+               content TEXT NOT NULL,
+               sources TEXT,
+               model TEXT,
+               created_at INTEGER NOT NULL
+             );",
+        )
+        .expect("RAG chat schema creation failed");
+
+        let conversation_id = persist_exchange_or_warn(
+            Arc::new(Mutex::new(conn)),
+            None,
+            "pregunta".to_string(),
+            "respuesta".to_string(),
+            Vec::new(),
+            "modelo-x".to_string(),
+        )
+        .await;
+        assert!(
+            conversation_id.is_some(),
+            "successful persistence keeps returning Some(id)"
+        );
     }
 }

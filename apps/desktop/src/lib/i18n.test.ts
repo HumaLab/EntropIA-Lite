@@ -87,6 +87,14 @@ describe('i18n', () => {
     expect(t('ragChat.errorGeneric')).toBe('Ocurrió un error al consultar.')
     expect(t('ragChat.clear')).toBe('Nueva conversación')
     expect(t('ragChat.openSource')).toBe('Abrir fuente')
+    expect(t('ragChat.conversations')).toBe('Conversaciones')
+    expect(t('ragChat.noConversations')).toBe('Sin conversaciones todavía')
+    expect(t('ragChat.deleteConversation')).toBe('Eliminar conversación')
+    expect(t('ragChat.deleteConversationTitle')).toBe('¿Eliminar esta conversación?')
+    expect(t('ragChat.deleteConversationMessage')).toBe(
+      'Se va a eliminar la conversación y sus mensajes. Esta acción no se puede deshacer.'
+    )
+    expect(t('ragChat.confirmDelete')).toBe('Eliminar')
 
     locale.set('en')
 
@@ -108,6 +116,14 @@ describe('i18n', () => {
     expect(t('ragChat.errorGeneric')).toBe('Something went wrong while querying.')
     expect(t('ragChat.clear')).toBe('New conversation')
     expect(t('ragChat.openSource')).toBe('Open source')
+    expect(t('ragChat.conversations')).toBe('Conversations')
+    expect(t('ragChat.noConversations')).toBe('No conversations yet')
+    expect(t('ragChat.deleteConversation')).toBe('Delete conversation')
+    expect(t('ragChat.deleteConversationTitle')).toBe('Delete this conversation?')
+    expect(t('ragChat.deleteConversationMessage')).toBe(
+      'The conversation and its messages will be deleted. This action cannot be undone.'
+    )
+    expect(t('ragChat.confirmDelete')).toBe('Delete')
   })
 
   it('exposes settings prompts and model params copy in both locales', async () => {

@@ -116,6 +116,32 @@ describe('runMigrations — migrations 0004, 0005 and 0006', () => {
     expect(hasTimestampNormalization).toBe(true)
   })
 
+  it('executes 0022_rag_conversations migration SQL (conversations, messages and index)', async () => {
+    const client = createMockDbClient()
+    await runMigrations(client)
+
+    const hasConversationsTable = client._executedSql.some(
+      (sql) =>
+        sql.includes('CREATE TABLE IF NOT EXISTS rag_conversations') &&
+        sql.includes('updated_at INTEGER NOT NULL')
+    )
+    const hasMessagesTable = client._executedSql.some(
+      (sql) =>
+        sql.includes('CREATE TABLE IF NOT EXISTS rag_messages') &&
+        sql.includes('REFERENCES rag_conversations(id) ON DELETE CASCADE') &&
+        sql.includes("CHECK(role IN ('user','assistant'))")
+    )
+    const hasConversationIndex = client._executedSql.some((sql) =>
+      sql.includes(
+        'CREATE INDEX IF NOT EXISTS idx_rag_messages_conversation ON rag_messages(conversation_id, sort_index)'
+      )
+    )
+
+    expect(hasConversationsTable).toBe(true)
+    expect(hasMessagesTable).toBe(true)
+    expect(hasConversationIndex).toBe(true)
+  })
+
   it('executes layouts migration with blocks column and unique asset index', async () => {
     const client = createMockDbClient()
     await runMigrations(client)

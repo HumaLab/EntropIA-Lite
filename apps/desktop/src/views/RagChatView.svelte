@@ -1,24 +1,19 @@
 <script lang="ts">
   import { navigation } from '$lib/navigation'
-  import { locale, t } from '$lib/i18n'
-  import { ragAsk, type RagChatTurn, type RagSource } from '$lib/rag'
-  import { Button } from '@entropia/ui'
+  import { locale, t, type Locale } from '$lib/i18n'
+  import type { RagSource } from '$lib/rag'
+  import { ragChat, type UiMessage } from '$lib/rag-chat'
+  import { ActionIcon, Button, ConfirmDialog, IconButton, Panel } from '@entropia/ui'
 
-  interface ChatMessage {
-    role: 'user' | 'assistant'
-    content: string
-    sources?: RagSource[]
-  }
-
-  let messages = $state<ChatMessage[]>([])
-  let draft = $state('')
-  let loading = $state(false)
-  let errorMessage = $state<string | null>(null)
   let messagesEl = $state<HTMLDivElement | undefined>()
-  let askRequestId = 0
+  let pendingDeleteId = $state<string | null>(null)
 
   const currentLocale = locale
-  const canSend = $derived(!loading && draft.trim().length > 0)
+  const canSend = $derived(!$ragChat.loading && $ragChat.draft.trim().length > 0)
+
+  $effect(() => {
+    void ragChat.initialize()
+  })
 
   function formatTimestamp(seconds: number): string {
     const total = Math.max(0, Math.floor(seconds))
@@ -34,62 +29,35 @@
     return `${start}–${formatTimestamp(source.endSeconds)}`
   }
 
-  function describeError(error: unknown): string {
-    if (typeof error === 'string' && error.trim()) return error
-    if (error instanceof Error && error.message) return error.message
-    return t('ragChat.errorGeneric')
+  function messageContent(message: UiMessage): string {
+    const isEmptyAnswer =
+      message.role === 'assistant' &&
+      message.content.trim() === '' &&
+      (message.sources?.length ?? 0) === 0
+    return isEmptyAnswer ? t('ragChat.noResults') : message.content
   }
 
-  async function handleSend() {
-    const question = draft.trim()
-    if (!question || loading) return
-
-    const history: RagChatTurn[] = messages.map((message) => ({
-      role: message.role,
-      content: message.content,
-    }))
-
-    messages = [...messages, { role: 'user', content: question }]
-    draft = ''
-    errorMessage = null
-    loading = true
-    const requestId = ++askRequestId
-
-    try {
-      const response = await ragAsk(question, history)
-      if (requestId !== askRequestId) return
-
-      if (response.answer.trim() === '' && response.sources.length === 0) {
-        messages = [...messages, { role: 'assistant', content: t('ragChat.noResults') }]
-      } else {
-        messages = [
-          ...messages,
-          { role: 'assistant', content: response.answer, sources: response.sources },
-        ]
-      }
-    } catch (error) {
-      if (requestId !== askRequestId) return
-      errorMessage = describeError(error)
-    } finally {
-      if (requestId === askRequestId) {
-        loading = false
-      }
-    }
+  function formatConversationDate(timestamp: number, activeLocale: Locale): string {
+    return new Date(timestamp).toLocaleDateString(activeLocale)
   }
 
-  function handleClear() {
-    askRequestId += 1
-    messages = []
-    draft = ''
-    errorMessage = null
-    loading = false
+  function handleSend() {
+    void ragChat.send($ragChat.draft)
   }
 
   function handleComposerKeydown(event: KeyboardEvent) {
     // keyCode 229 cubre WKWebView, donde isComposing puede no reportarse durante IME.
     if (event.key === 'Enter' && !event.shiftKey && !event.isComposing && event.keyCode !== 229) {
       event.preventDefault()
-      void handleSend()
+      handleSend()
+    }
+  }
+
+  function handleDeleteConfirm() {
+    const conversationId = pendingDeleteId
+    pendingDeleteId = null
+    if (conversationId) {
+      void ragChat.remove(conversationId)
     }
   }
 
@@ -104,11 +72,22 @@
     })
   }
 
+  // Tracking previo para el autoscroll: lets planas (no $state) porque solo
+  // comparan entre ejecuciones del efecto, no disparan reactividad.
+  let lastMessageCount = -1
+  let lastLoading: boolean | null = null
+
   $effect(() => {
-    void messages.length
-    void loading
-    if (messagesEl) {
-      messagesEl.scrollTop = messagesEl.scrollHeight
+    const container = messagesEl
+    const messageCount = $ragChat.messages.length
+    const loading = $ragChat.loading
+    // El store emite en cada tecleo del borrador: solo autoscrolleamos
+    // cuando los mensajes o el loading cambiaron de verdad.
+    const changed = messageCount !== lastMessageCount || loading !== lastLoading
+    lastMessageCount = messageCount
+    lastLoading = loading
+    if (changed && container) {
+      container.scrollTop = container.scrollHeight
     }
   })
 </script>
@@ -120,99 +99,167 @@
       <p>{$currentLocale && t('ragChat.subtitle')}</p>
     </div>
     <div class="page-toolbar">
-      <Button variant="ghost" onclick={handleClear}>
+      <Button variant="ghost" onclick={() => ragChat.startNew()}>
         {$currentLocale && t('ragChat.clear')}
       </Button>
     </div>
   </section>
 
-  <div
-    class="rag-chat__messages"
-    bind:this={messagesEl}
-    role="log"
-    aria-live="polite"
-    aria-label={$currentLocale && t('ragChat.title')}
-  >
-    {#if messages.length === 0 && !loading}
-      <p class="surface-message surface-message--center rag-chat__empty">
-        {$currentLocale && t('ragChat.emptyState')}
-      </p>
-    {/if}
-
-    {#each messages as message, index (index)}
-      <article
-        class="rag-chat__bubble"
-        class:rag-chat__bubble--user={message.role === 'user'}
-        class:rag-chat__bubble--assistant={message.role === 'assistant'}
+  <div class="rag-chat__body">
+    <div class="rag-chat__main">
+      <div
+        class="rag-chat__messages"
+        bind:this={messagesEl}
+        role="log"
+        aria-live="polite"
+        aria-label={$currentLocale && t('ragChat.title')}
       >
-        <p class="rag-chat__content">{message.content}</p>
-
-        {#if message.sources && message.sources.length > 0}
-          <section class="rag-chat__sources" aria-label={$currentLocale && t('ragChat.sources')}>
-            <h2 class="rag-chat__sources-title">{$currentLocale && t('ragChat.sources')}</h2>
-            <ul class="rag-chat__sources-list">
-              {#each message.sources as source (`${source.index}-${source.assetId}`)}
-                {@const timestamp = sourceTimestamp(source)}
-                <li>
-                  <button
-                    type="button"
-                    class="rag-chat__source"
-                    onclick={() => openSource(source)}
-                    aria-label={$currentLocale &&
-                      `${t('ragChat.openSource')}: [${source.index}] ${source.itemTitle}`}
-                    title={$currentLocale && t('ragChat.openSource')}
-                  >
-                    <span class="rag-chat__source-heading">
-                      <span class="rag-chat__source-ref">[{source.index}]</span>
-                      <span class="rag-chat__source-name"
-                        >{source.itemTitle} ({source.collectionName})</span
-                      >
-                      {#if timestamp}
-                        <span class="rag-chat__source-time">{timestamp}</span>
-                      {/if}
-                    </span>
-                    <span class="rag-chat__source-snippet">{source.snippet}</span>
-                  </button>
-                </li>
-              {/each}
-            </ul>
-          </section>
+        {#if $ragChat.messages.length === 0 && !$ragChat.loading}
+          <p class="surface-message surface-message--center rag-chat__empty">
+            {$currentLocale && t('ragChat.emptyState')}
+          </p>
         {/if}
-      </article>
-    {/each}
 
-    {#if loading}
-      <p class="rag-chat__thinking" role="status">
-        {$currentLocale && t('ragChat.thinking')}
-      </p>
-    {/if}
+        {#each $ragChat.messages as message, index (index)}
+          <article
+            class="rag-chat__bubble"
+            class:rag-chat__bubble--user={message.role === 'user'}
+            class:rag-chat__bubble--assistant={message.role === 'assistant'}
+          >
+            <p class="rag-chat__content">{$currentLocale && messageContent(message)}</p>
+
+            {#if message.sources && message.sources.length > 0}
+              <section
+                class="rag-chat__sources"
+                aria-label={$currentLocale && t('ragChat.sources')}
+              >
+                <h2 class="rag-chat__sources-title">{$currentLocale && t('ragChat.sources')}</h2>
+                <ul class="rag-chat__sources-list">
+                  {#each message.sources as source (`${source.index}-${source.assetId}`)}
+                    {@const timestamp = sourceTimestamp(source)}
+                    <li>
+                      <button
+                        type="button"
+                        class="rag-chat__source"
+                        onclick={() => openSource(source)}
+                        aria-label={$currentLocale &&
+                          `${t('ragChat.openSource')}: [${source.index}] ${source.itemTitle}`}
+                        title={$currentLocale && t('ragChat.openSource')}
+                      >
+                        <span class="rag-chat__source-heading">
+                          <span class="rag-chat__source-ref">[{source.index}]</span>
+                          <span class="rag-chat__source-name"
+                            >{source.itemTitle} ({source.collectionName})</span
+                          >
+                          {#if timestamp}
+                            <span class="rag-chat__source-time">{timestamp}</span>
+                          {/if}
+                        </span>
+                        <span class="rag-chat__source-snippet">{source.snippet}</span>
+                      </button>
+                    </li>
+                  {/each}
+                </ul>
+              </section>
+            {/if}
+          </article>
+        {/each}
+
+        {#if $ragChat.loading}
+          <p class="rag-chat__thinking" role="status">
+            {$currentLocale && t('ragChat.thinking')}
+          </p>
+        {/if}
+      </div>
+
+      {#if $ragChat.error}
+        <p class="surface-message surface-message--error" role="alert">{$ragChat.error}</p>
+      {/if}
+
+      <form
+        class="rag-chat__composer"
+        onsubmit={(event) => {
+          event.preventDefault()
+          handleSend()
+        }}
+      >
+        <textarea
+          class="rag-chat__input"
+          rows="2"
+          maxlength="4000"
+          value={$ragChat.draft}
+          oninput={(event) => ragChat.setDraft(event.currentTarget.value)}
+          placeholder={$currentLocale && t('ragChat.placeholder')}
+          aria-label={$currentLocale && t('ragChat.placeholder')}
+          onkeydown={handleComposerKeydown}
+          disabled={$ragChat.loading}
+        ></textarea>
+        <Button variant="primary" type="submit" disabled={!canSend}>
+          {$currentLocale && t('ragChat.send')}
+        </Button>
+      </form>
+    </div>
+
+    <Panel variant="default" padding="none" class="rag-chat__sidebar">
+      <header class="rag-chat__sidebar-header">
+        <h2 class="rag-chat__sidebar-title">{$currentLocale && t('ragChat.conversations')}</h2>
+      </header>
+
+      {#if $ragChat.conversations.length === 0}
+        <p class="rag-chat__sidebar-empty">{$currentLocale && t('ragChat.noConversations')}</p>
+      {:else}
+        <ul class="rag-chat__conversations">
+          {#each $ragChat.conversations as conversation (conversation.id)}
+            <li
+              class="rag-chat__conversation"
+              class:rag-chat__conversation--active={conversation.id ===
+                $ragChat.activeConversationId}
+            >
+              <button
+                type="button"
+                class="rag-chat__conversation-button"
+                aria-current={conversation.id === $ragChat.activeConversationId
+                  ? 'true'
+                  : undefined}
+                onclick={() => void ragChat.select(conversation.id)}
+              >
+                <span class="rag-chat__conversation-title">{conversation.title}</span>
+                <span class="rag-chat__conversation-date">
+                  {formatConversationDate(conversation.updatedAt, $currentLocale)}
+                </span>
+              </button>
+              <IconButton
+                size="sm"
+                class="rag-chat__conversation-delete"
+                label={$currentLocale && t('ragChat.deleteConversation')}
+                title={$currentLocale && t('ragChat.deleteConversation')}
+                onclick={() => {
+                  pendingDeleteId = conversation.id
+                }}
+              >
+                <ActionIcon name="delete" size={14} />
+              </IconButton>
+            </li>
+          {/each}
+        </ul>
+      {/if}
+    </Panel>
   </div>
 
-  {#if errorMessage}
-    <p class="surface-message surface-message--error" role="alert">{errorMessage}</p>
+  {#if pendingDeleteId}
+    <ConfirmDialog
+      title={$currentLocale && t('ragChat.deleteConversationTitle')}
+      titleId="rag-chat-delete-conversation-title"
+      message={$currentLocale && t('ragChat.deleteConversationMessage')}
+      cancelLabel={$currentLocale && t('collections.cancel')}
+      confirmLabel={$currentLocale && t('ragChat.confirmDelete')}
+      variant="destructive"
+      oncancel={() => {
+        pendingDeleteId = null
+      }}
+      onconfirm={handleDeleteConfirm}
+    />
   {/if}
-
-  <form
-    class="rag-chat__composer"
-    onsubmit={(event) => {
-      event.preventDefault()
-      void handleSend()
-    }}
-  >
-    <textarea
-      class="rag-chat__input"
-      rows="2"
-      maxlength="4000"
-      bind:value={draft}
-      placeholder={$currentLocale && t('ragChat.placeholder')}
-      aria-label={$currentLocale && t('ragChat.placeholder')}
-      onkeydown={handleComposerKeydown}
-      disabled={loading}
-    ></textarea>
-    <Button variant="primary" type="submit" disabled={!canSend}>
-      {$currentLocale && t('ragChat.send')}
-    </Button>
-  </form>
 </div>
 
 <style>
@@ -223,6 +270,126 @@
 
   .rag-chat__header {
     flex-shrink: 0;
+  }
+
+  .rag-chat__body {
+    display: flex;
+    gap: var(--space-3);
+    flex: 1;
+    min-height: 0;
+  }
+
+  .rag-chat__main {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  .rag-chat :global(.rag-chat__sidebar) {
+    display: flex;
+    flex-direction: column;
+    width: 280px;
+    flex-shrink: 0;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .rag-chat__sidebar-header {
+    flex-shrink: 0;
+    padding: var(--space-3) var(--space-3) var(--space-2);
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .rag-chat__sidebar-title {
+    margin: 0;
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    letter-spacing: 0.075em;
+    text-transform: uppercase;
+    color: var(--color-text-muted);
+  }
+
+  .rag-chat__sidebar-empty {
+    margin: 0;
+    padding: var(--space-3);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+  }
+
+  .rag-chat__conversations {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    margin: 0;
+    padding: var(--space-2);
+    list-style: none;
+  }
+
+  .rag-chat__conversation {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-1);
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    transition:
+      background-color var(--transition-base),
+      border-color var(--transition-base);
+  }
+
+  .rag-chat__conversation:hover {
+    background: var(--surface-toolbar);
+    border-color: var(--border-subtle);
+  }
+
+  .rag-chat__conversation--active {
+    background: color-mix(in srgb, var(--color-accent) 14%, var(--color-surface-glass));
+    border-color: color-mix(in srgb, var(--color-accent) 24%, var(--border-subtle));
+  }
+
+  .rag-chat__conversation-button {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    flex: 1;
+    min-width: 0;
+    padding: var(--space-2);
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    font-family: var(--font-sans);
+  }
+
+  .rag-chat__conversation-button:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+    border-radius: var(--radius-sm);
+  }
+
+  .rag-chat__conversation-title {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    color: var(--color-text-primary);
+    font-size: var(--font-size-sm);
+    overflow-wrap: anywhere;
+  }
+
+  .rag-chat__conversation-date {
+    color: var(--color-text-muted);
+    font-size: var(--font-size-xs);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .rag-chat__conversation :global(.rag-chat__conversation-delete) {
+    margin: var(--space-2) var(--space-2) 0 0;
   }
 
   .rag-chat__messages {
@@ -402,6 +569,15 @@
   }
 
   @media (max-width: 720px) {
+    .rag-chat__body {
+      flex-direction: column;
+    }
+
+    .rag-chat :global(.rag-chat__sidebar) {
+      width: 100%;
+      max-height: 12rem;
+    }
+
     .rag-chat__composer {
       flex-direction: column;
       align-items: stretch;
