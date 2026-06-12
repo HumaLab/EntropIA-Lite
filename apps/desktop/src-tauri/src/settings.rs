@@ -67,8 +67,8 @@ pub async fn settings_set(
     deps: State<'_, crate::deps::DepsState>,
 ) -> Result<(), String> {
     let should_invalidate = crate::deps::should_invalidate_cache_for_setting(&key);
-    // Keyring (Windows Credential Manager) calls are blocking Win32 APIs;
-    // keep them off the async runtime workers.
+    // Keyring calls (Credential Manager on Windows, Secret Service on Linux)
+    // are blocking; keep them off the async runtime workers.
     let prepared = {
         let key = key.clone();
         let value = value.clone();

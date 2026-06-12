@@ -8,8 +8,8 @@ use crate::db::state::AppDbState;
 #[tauri::command]
 pub async fn llm_is_available(llm_queue: State<'_, LlmQueue>) -> Result<bool, String> {
     // The availability check opens a SQLite connection and may hit the
-    // Windows Credential Manager — both blocking — so keep it off the
-    // async runtime workers (the frontend polls this command).
+    // OS keyring (Credential Manager / Secret Service) — both blocking —
+    // so keep it off the async runtime workers (the frontend polls this command).
     let queue = llm_queue.inner().clone();
     tokio::task::spawn_blocking(move || queue.is_available())
         .await
