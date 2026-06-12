@@ -1,49 +1,51 @@
 Set-StrictMode -Version Latest
 
-# File-level bootstrap. Pester v5 scopes BeforeAll to a single Describe, so
-# the dot-source and helper functions must live here to be available to every
-# Describe in the file.
+# File-level bootstrap. Pester v5 runs script-body code only during Discovery,
+# so the dot-source and helper functions must live in a root BeforeAll to be
+# available to every Describe during the Run phase.
 
-function Assert-True {
-  param(
-    [bool]$Condition,
-    [string]$Message
-  )
+BeforeAll {
+  function Assert-True {
+    param(
+      [bool]$Condition,
+      [string]$Message
+    )
 
-  if (-not $Condition) {
-    throw $Message
+    if (-not $Condition) {
+      throw $Message
+    }
   }
-}
 
-function Assert-Equal {
-  param(
-    $Actual,
-    $Expected,
-    [string]$Message
-  )
+  function Assert-Equal {
+    param(
+      $Actual,
+      $Expected,
+      [string]$Message
+    )
 
-  if ($Actual -ne $Expected) {
-    throw "${Message}. Expected='$Expected' Actual='$Actual'"
+    if ($Actual -ne $Expected) {
+      throw "${Message}. Expected='$Expected' Actual='$Actual'"
+    }
   }
-}
 
-function Assert-Match {
-  param(
-    [string]$Value,
-    [string]$Pattern,
-    [string]$Message
-  )
+  function Assert-Match {
+    param(
+      [string]$Value,
+      [string]$Pattern,
+      [string]$Message
+    )
 
-  if ($Value -notmatch $Pattern) {
-    throw $Message
+    if ($Value -notmatch $Pattern) {
+      throw $Message
+    }
   }
+
+  $script:TestRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
+  $script:ScriptRoot = (Resolve-Path (Join-Path $script:TestRoot "..")).Path
+  $script:RustVerifyGatePath = (Resolve-Path (Join-Path $script:ScriptRoot "rust-verify-gate.ps1")).Path
+
+  . $script:RustVerifyGatePath
 }
-
-$script:TestRoot = if ($PSScriptRoot) { $PSScriptRoot } else { Split-Path -Parent $MyInvocation.MyCommand.Path }
-$script:ScriptRoot = (Resolve-Path (Join-Path $script:TestRoot "..")).Path
-$script:RustVerifyGatePath = (Resolve-Path (Join-Path $script:ScriptRoot "rust-verify-gate.ps1")).Path
-
-. $script:RustVerifyGatePath
 
 Describe "test bootstrap" {
   It "exposes script-scoped verify bootstrap path" {
