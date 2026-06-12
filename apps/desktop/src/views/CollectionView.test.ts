@@ -24,6 +24,12 @@ const { storeRef, navigationRef, fileImportRef, dragDropRef } = vi.hoisted(() =>
         findById: vi.fn(),
         deleteWithCascade: vi.fn(),
       },
+      extractions: {
+        findTextByCollection: vi.fn(),
+      },
+      transcriptions: {
+        findTextByCollection: vi.fn(),
+      },
     },
   },
   navigationRef: {
@@ -80,6 +86,12 @@ function createStore(items: ItemRow[], assets: AssetRow[] = []) {
       findByItem: vi.fn().mockResolvedValue(assets),
       findById: vi.fn().mockResolvedValue(assets[0] ?? null),
       deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+    },
+    extractions: {
+      findTextByCollection: vi.fn().mockResolvedValue([]),
+    },
+    transcriptions: {
+      findTextByCollection: vi.fn().mockResolvedValue([]),
     },
   }
 }
@@ -255,6 +267,12 @@ describe('CollectionView consumer compatibility', () => {
         findById: vi.fn(),
         deleteWithCascade: vi.fn().mockResolvedValue(undefined),
       },
+      extractions: {
+        findTextByCollection: vi.fn().mockResolvedValue([]),
+      },
+      transcriptions: {
+        findTextByCollection: vi.fn().mockResolvedValue([]),
+      },
     }
 
     render(CollectionView, { collectionId: 'col-1' })
@@ -323,6 +341,12 @@ describe('CollectionView consumer compatibility', () => {
         findByItem: vi.fn(),
         findById: vi.fn(),
         deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+      extractions: {
+        findTextByCollection: vi.fn().mockResolvedValue([]),
+      },
+      transcriptions: {
+        findTextByCollection: vi.fn().mockResolvedValue([]),
       },
     }
 
@@ -405,6 +429,12 @@ describe('CollectionView consumer compatibility', () => {
         findById: vi.fn().mockResolvedValue(null),
         deleteWithCascade: vi.fn().mockResolvedValue(undefined),
       },
+      extractions: {
+        findTextByCollection: vi.fn().mockResolvedValue([]),
+      },
+      transcriptions: {
+        findTextByCollection: vi.fn().mockResolvedValue([]),
+      },
     }
 
     render(CollectionView, { collectionId: 'col-1' })
@@ -471,6 +501,12 @@ describe('CollectionView consumer compatibility', () => {
         findByItem: vi.fn().mockResolvedValue([]),
         findById: vi.fn().mockResolvedValue(null),
         deleteWithCascade: vi.fn().mockResolvedValue(undefined),
+      },
+      extractions: {
+        findTextByCollection: vi.fn().mockResolvedValue([]),
+      },
+      transcriptions: {
+        findTextByCollection: vi.fn().mockResolvedValue([]),
       },
     }
 
@@ -1054,5 +1090,142 @@ describe('CollectionView PDF thumbnail', () => {
     const confirmBtn = screen.getByRole('button', { name: 'Eliminar asset' })
     expect(confirmBtn.querySelector('svg')).toBeInTheDocument()
     expect(confirmBtn).not.toHaveTextContent('Eliminar')
+  })
+})
+
+describe('CollectionView analysis panel', () => {
+  beforeEach(() => {
+    locale.set('es')
+    localStorage.clear()
+    navigationRef.navigate.mockReset()
+    storeRef.current = createStore([
+      {
+        id: 'item-1',
+        title: 'Acta',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        collectionId: 'col-1',
+        metadata: null,
+      },
+    ])
+  })
+
+  it('renders the toggle but does not load the corpus while the panel is closed', async () => {
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await waitFor(() => {
+      expect(storeRef.current.items.findByCollection).toHaveBeenCalledWith('col-1')
+    })
+
+    expect(
+      screen.getByRole('button', { name: 'Mostrar análisis textual' })
+    ).toBeInTheDocument()
+    expect(storeRef.current.extractions.findTextByCollection).not.toHaveBeenCalled()
+    expect(storeRef.current.transcriptions.findTextByCollection).not.toHaveBeenCalled()
+  })
+
+  it('loads the corpus lazily on open and renders cloud and bar chart', async () => {
+    storeRef.current.extractions.findTextByCollection = vi.fn().mockResolvedValue([
+      { assetId: 'asset-1', textContent: 'fábrica fábrica huelga conserva', createdAt: 100 },
+    ])
+    storeRef.current.transcriptions.findTextByCollection = vi.fn().mockResolvedValue([
+      { assetId: 'asset-2', textContent: 'Hablante 1: la fábrica de conservas', createdAt: 200 },
+    ])
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Mostrar análisis textual' }))
+
+    await waitFor(() => {
+      expect(storeRef.current.extractions.findTextByCollection).toHaveBeenCalledWith('col-1')
+      expect(storeRef.current.transcriptions.findTextByCollection).toHaveBeenCalledWith('col-1')
+    })
+
+    expect(await screen.findByText('Análisis textual')).toBeInTheDocument()
+    // "fábrica" appears in the cloud span and in the bar chart x-label.
+    const matches = await screen.findAllByText('fábrica')
+    expect(matches.length).toBeGreaterThan(0)
+    // Speaker labels never reach the frequencies.
+    expect(screen.queryByText('hablante')).not.toBeInTheDocument()
+    // Distinct words: fábrica, huelga, conserva, conservas → meta line.
+    expect(screen.getByText('4 palabras distintas · 6 tokens')).toBeInTheDocument()
+
+    // Closing unmounts the panel.
+    await fireEvent.click(screen.getByRole('button', { name: 'Ocultar análisis textual' }))
+    await waitFor(() => {
+      expect(screen.queryByText('Análisis textual')).not.toBeInTheDocument()
+    })
+  })
+
+  it('shows the empty state when the collection has no extracted text', async () => {
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Mostrar análisis textual' }))
+
+    expect(
+      await screen.findByText(
+        'No hay texto extraído en esta colección. Ejecutá OCR o transcripción en los documentos.'
+      )
+    ).toBeInTheDocument()
+  })
+
+  it('shows the error state with retry when the corpus load fails', async () => {
+    storeRef.current.extractions.findTextByCollection = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('DB locked'))
+      .mockResolvedValueOnce([
+        { assetId: 'asset-1', textContent: 'fábrica conserva', createdAt: 100 },
+      ])
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Mostrar análisis textual' }))
+
+    expect(
+      await screen.findByText('No se pudo analizar el texto de la colección.')
+    ).toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }))
+
+    const matches = await screen.findAllByText('fábrica')
+    expect(matches.length).toBeGreaterThan(0)
+  })
+
+  it('applies term count and custom stopwords reactively and persists them per collection', async () => {
+    storeRef.current.extractions.findTextByCollection = vi.fn().mockResolvedValue([
+      { assetId: 'asset-1', textContent: 'fábrica fábrica huelga conserva', createdAt: 100 },
+    ])
+
+    render(CollectionView, { collectionId: 'col-1' })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Mostrar análisis textual' }))
+    expect((await screen.findAllByText('fábrica')).length).toBeGreaterThan(0)
+
+    await fireEvent.click(screen.getByRole('tab', { name: 'Parámetros' }))
+
+    const termInput = screen.getByLabelText('Términos en la nube')
+    await fireEvent.change(termInput, { target: { value: '20' } })
+
+    const stopwordsArea = screen.getByLabelText('Stopwords personalizadas')
+    await fireEvent.input(stopwordsArea, { target: { value: 'fábrica' } })
+
+    // Debounced recompute drops the word from cloud and bar chart alike.
+    await waitFor(() => {
+      expect(screen.queryAllByText('fábrica')).toHaveLength(0)
+    })
+    expect(screen.queryAllByText('huelga').length).toBeGreaterThan(0)
+
+    const stored = JSON.parse(
+      localStorage.getItem('entropia-collection-analysis-settings:col-1') ?? 'null'
+    )
+    expect(stored).toEqual({ cloudTermCount: 20, customStopwords: ['fábrica'] })
+
+    // Out-of-range input clamps to the configured maximum.
+    await fireEvent.change(termInput, { target: { value: '999' } })
+    expect((termInput as HTMLInputElement).value).toBe('100')
+
+    // Back to the visualization: cloud title reflects the term count.
+    await fireEvent.click(screen.getByRole('tab', { name: 'Visualización' }))
+    expect(await screen.findByText('Top 100 palabras')).toBeInTheDocument()
   })
 })

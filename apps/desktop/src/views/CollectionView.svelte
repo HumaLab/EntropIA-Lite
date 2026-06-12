@@ -25,7 +25,8 @@
     DOCUMENT_EXPLORER_COLLECTION_CHANGED_EVENT,
     type DocumentExplorerCollectionChangedDetail,
   } from '$lib/document-explorer'
-  import { ConfirmDialog, ItemCard, SearchBar, Button } from '@entropia/ui'
+  import { ActionIcon, ConfirmDialog, IconButton, ItemCard, SearchBar, Button } from '@entropia/ui'
+  import CollectionAnalysisPanel from './CollectionAnalysisPanel.svelte'
   import { onMount, onDestroy } from 'svelte'
   import { getCurrentWebview, type DragDropEvent } from '@tauri-apps/api/webview'
   import { listen } from '@tauri-apps/api/event'
@@ -56,6 +57,75 @@
   let imageThumbnailLoadRequestId = 0
   let activeCollectionId: string | null = null
   const IMAGE_THUMBNAIL_CONCURRENCY = 4
+
+  // ── Analysis panel (right side) ──
+  const MIN_PANEL_PCT = 20
+  const MAX_PANEL_PCT = 50
+  const DEFAULT_PANEL_PCT = 33
+
+  let analysisPanelOpen = $state(false)
+  let analysisRefreshToken = $state(0)
+  let analysisPanelWidth = $state(
+    (() => {
+      try {
+        const stored = localStorage.getItem('entropia-collection-analysis-width')
+        if (stored !== null) {
+          const parsed = Number(stored)
+          if (!isNaN(parsed)) {
+            return Math.max(MIN_PANEL_PCT, Math.min(MAX_PANEL_PCT, parsed))
+          }
+        }
+      } catch {}
+      return DEFAULT_PANEL_PCT
+    })()
+  )
+
+  let collectionShellEl: HTMLElement | undefined = $state()
+  let panelDragCleanup: (() => void) | null = null
+
+  function onResizeHandlePointerDown(e: PointerEvent) {
+    e.preventDefault()
+
+    const startX = e.clientX
+    const startWidthPct = analysisPanelWidth
+    const containerEl = collectionShellEl ?? document.body
+    const containerWidth = containerEl.clientWidth
+
+    let rafId: number | null = null
+    let lastClientX = startX
+
+    function onPointerMove(e: PointerEvent) {
+      lastClientX = e.clientX
+      if (rafId !== null) return
+      rafId = requestAnimationFrame(() => {
+        const deltaX = lastClientX - startX
+        const deltaPct = (deltaX / containerWidth) * 100
+        analysisPanelWidth = Math.max(
+          MIN_PANEL_PCT,
+          Math.min(MAX_PANEL_PCT, startWidthPct - deltaPct)
+        )
+        rafId = null
+      })
+    }
+
+    function onPointerUp() {
+      try {
+        localStorage.setItem(
+          'entropia-collection-analysis-width',
+          String(Math.round(analysisPanelWidth))
+        )
+      } catch {}
+      window.removeEventListener('pointermove', onPointerMove)
+      window.removeEventListener('pointerup', onPointerUp)
+      document.body.classList.remove('no-select')
+      panelDragCleanup = null
+    }
+
+    document.body.classList.add('no-select')
+    window.addEventListener('pointermove', onPointerMove)
+    window.addEventListener('pointerup', onPointerUp)
+    panelDragCleanup = onPointerUp
+  }
 
   type ItemAssetMeta = {
     assetCount: number
@@ -456,6 +526,7 @@
 
     await loadItems()
     notifyExplorerCollectionChanged()
+    analysisRefreshToken++
 
     const hasFailures = importErrors.length > 0 || rejected.length > 0
     const lastCreated = createdItems.at(-1) ?? null
@@ -627,6 +698,8 @@
       dbCleanupFailed = true
     }
 
+    analysisRefreshToken++
+
     // Step 2b: Clean up cached PDF thumbnail if the asset was a PDF
     if (meta.primaryAssetType === 'pdf' && pendingDeleteAssetId) {
       try {
@@ -729,9 +802,15 @@
   onDestroy(() => {
     unlistenDragDrop?.()
     unlistenAssetUpdate?.()
+    panelDragCleanup?.()
   })
 </script>
 
+<div
+  class="collection-shell"
+  bind:this={collectionShellEl}
+  style="grid-template-columns: 1fr auto {analysisPanelOpen ? `6px ${analysisPanelWidth}%` : ''}"
+>
 <div class="collection-view page-shell" class:drag-active={dragActive}>
   <section class="page-header collection-view__header">
     <div class="page-header__content">
@@ -884,9 +963,101 @@
   {/if}
 </div>
 
+<!-- Analysis panel toggle -->
+<IconButton
+  class="right-panel-toggle"
+  variant="ghost"
+  size="sm"
+  label={analysisPanelOpen
+    ? $currentLocale && t('collectionAnalysis.toggleClose')
+    : $currentLocale && t('collectionAnalysis.toggleOpen')}
+  title={analysisPanelOpen
+    ? $currentLocale && t('collectionAnalysis.toggleClose')
+    : $currentLocale && t('collectionAnalysis.toggleOpen')}
+  onclick={() => {
+    analysisPanelOpen = !analysisPanelOpen
+  }}
+>
+  <ActionIcon name={analysisPanelOpen ? 'chevron-right' : 'chevron-left'} size={14} />
+</IconButton>
+
+{#if analysisPanelOpen}
+  <div
+    class="resize-handle"
+    role="separator"
+    aria-orientation="vertical"
+    aria-label={$currentLocale && t('collectionAnalysis.resizeAria')}
+    onpointerdown={onResizeHandlePointerDown}
+  ></div>
+
+  <CollectionAnalysisPanel {collectionId} refreshToken={analysisRefreshToken} />
+{/if}
+</div>
+
 <style>
+  .collection-shell {
+    display: grid;
+    /* grid-template-columns set via inline style */
+    gap: var(--space-3);
+    height: 100%;
+    min-height: 0;
+  }
+
   .collection-view {
-    min-height: 100%;
+    min-height: 0;
+    overflow-y: auto;
+  }
+
+  :global(.icon-button.right-panel-toggle) {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: auto;
+    flex-shrink: 0;
+    border-radius: var(--radius-dialog);
+    background: var(--surface-input);
+    border: 1px solid var(--border-subtle);
+    color: var(--color-text-muted);
+    cursor: pointer;
+  }
+
+  :global(.icon-button.right-panel-toggle:hover) {
+    color: var(--color-accent);
+    background: var(--color-accent-soft);
+  }
+
+  .resize-handle {
+    width: 6px;
+    position: relative;
+    cursor: col-resize;
+    z-index: 1;
+  }
+
+  .resize-handle::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 1px;
+    background-color: var(--color-border);
+    transition:
+      background-color 0.15s ease,
+      width 0.15s ease;
+  }
+
+  .resize-handle:hover::before {
+    background-color: var(--color-text-muted, var(--color-border));
+    width: 2px;
+  }
+
+  :global(body.no-select),
+  :global(body.no-select *) {
+    cursor: col-resize !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
   }
 
   .collection-view__header {
