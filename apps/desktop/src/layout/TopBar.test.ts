@@ -323,6 +323,31 @@ describe('TopBar', () => {
     })
   })
 
+  it('does not select a global search result on Enter while IME composition is active', async () => {
+    storeRef.current.items.searchGlobal.mockResolvedValueOnce([
+      { id: 'item-1', title: 'Acta fundacional', collectionId: 'col-1' },
+    ])
+    storeRef.current.collections.findById.mockResolvedValue({
+      id: 'col-1',
+      name: 'Archivo',
+    })
+
+    render(TopBar)
+
+    const input = screen.getByRole('combobox', { name: 'Buscar archivos' })
+    await fireEvent.input(input, { target: { value: 'acta' } })
+    vi.advanceTimersByTime(300)
+
+    await waitFor(() => {
+      expect(screen.getByRole('option', { name: /Acta fundacional/i })).toBeInTheDocument()
+    })
+
+    await fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await fireEvent.keyDown(input, { key: 'Enter', isComposing: true })
+
+    expect(navigateMock).not.toHaveBeenCalled()
+  })
+
   it('keeps results open while focus moves within the search container', async () => {
     storeRef.current.items.searchGlobal.mockResolvedValueOnce([
       { id: 'item-1', title: 'Acta fundacional', collectionId: 'col-1' },

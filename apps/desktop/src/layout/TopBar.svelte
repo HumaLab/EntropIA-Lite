@@ -285,7 +285,8 @@
       return
     }
 
-    if (e.key === 'Enter') {
+    // keyCode 229 cubre WKWebView, donde isComposing puede no reportarse durante IME.
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) {
       if (!showResults) return
       const activeResult = searchResults[activeResultIndex]
       if (!activeResult) return

@@ -73,6 +73,13 @@
     onCreateEntity: () => void | Promise<void>
   } = $props()
 
+  function handleNewEntityKeydown(event: KeyboardEvent) {
+    // keyCode 229 cubre WKWebView, donde isComposing puede no reportarse durante IME.
+    if (event.key === 'Enter' && !event.isComposing && event.keyCode !== 229) {
+      void onCreateEntity()
+    }
+  }
+
   function getJobStatusBadgeVariant(status: string): StatusBadgeVariant {
     if (status === 'done') return 'success'
     if (status === 'running') return 'warning'
@@ -180,7 +187,7 @@
               placeholder={translate('item.newEntityValue')}
               aria-label={translate('item.newEntityValue')}
               oninput={(event) => onNewEntityValueChange(event.currentTarget.value)}
-              onkeydown={(event) => event.key === 'Enter' && void onCreateEntity()}
+              onkeydown={handleNewEntityKeydown}
             />
             <button type="button" class="nlp-btn" onclick={onCreateEntity}
               >{translate('item.addEntity')}</button
