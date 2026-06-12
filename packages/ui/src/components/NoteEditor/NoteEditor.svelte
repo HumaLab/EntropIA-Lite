@@ -5,6 +5,21 @@
   import Underline from '@tiptap/extension-underline'
   import Link from '@tiptap/extension-link'
   import Placeholder from '@tiptap/extension-placeholder'
+  import {
+    Bold,
+    Code,
+    Heading1,
+    Heading2,
+    Heading3,
+    Italic,
+    Link as LinkIcon,
+    List,
+    ListOrdered,
+    Mic,
+    TextQuote,
+    Underline as UnderlineIcon,
+    Unlink,
+  } from '@lucide/svelte'
 
   import type { NoteEditorLabels, NoteEditorProps } from './NoteEditor.types'
   import {
@@ -123,7 +138,7 @@
 
   type ToolbarButton = {
     label: string
-    shortLabel: string
+    icon: typeof Bold
     isActive: () => boolean
     action: () => void
   }
@@ -139,25 +154,25 @@
       buttons: [
         {
           label: labels.bold,
-          shortLabel: 'B',
+          icon: Bold,
           isActive: () => editor?.isActive('bold') ?? false,
           action: () => editor?.chain().focus().toggleBold().run(),
         },
         {
           label: labels.italic,
-          shortLabel: 'I',
+          icon: Italic,
           isActive: () => editor?.isActive('italic') ?? false,
           action: () => editor?.chain().focus().toggleItalic().run(),
         },
         {
           label: labels.underline,
-          shortLabel: 'U',
+          icon: UnderlineIcon,
           isActive: () => editor?.isActive('underline') ?? false,
           action: () => editor?.chain().focus().toggleUnderline().run(),
         },
         {
           label: labels.inlineCode,
-          shortLabel: '</>',
+          icon: Code,
           isActive: () => editor?.isActive('code') ?? false,
           action: () => editor?.chain().focus().toggleCode().run(),
         },
@@ -168,37 +183,37 @@
       buttons: [
         {
           label: labels.heading1,
-          shortLabel: 'H1',
+          icon: Heading1,
           isActive: () => editor?.isActive('heading', { level: 1 }) ?? false,
           action: () => editor?.chain().focus().toggleHeading({ level: 1 }).run(),
         },
         {
           label: labels.heading2,
-          shortLabel: 'H2',
+          icon: Heading2,
           isActive: () => editor?.isActive('heading', { level: 2 }) ?? false,
           action: () => editor?.chain().focus().toggleHeading({ level: 2 }).run(),
         },
         {
           label: labels.heading3,
-          shortLabel: 'H3',
+          icon: Heading3,
           isActive: () => editor?.isActive('heading', { level: 3 }) ?? false,
           action: () => editor?.chain().focus().toggleHeading({ level: 3 }).run(),
         },
         {
           label: labels.bulletList,
-          shortLabel: labels.bulletListShort,
+          icon: List,
           isActive: () => editor?.isActive('bulletList') ?? false,
           action: () => editor?.chain().focus().toggleBulletList().run(),
         },
         {
           label: labels.orderedList,
-          shortLabel: labels.orderedListShort,
+          icon: ListOrdered,
           isActive: () => editor?.isActive('orderedList') ?? false,
           action: () => editor?.chain().focus().toggleOrderedList().run(),
         },
         {
           label: labels.quote,
-          shortLabel: labels.quoteShort,
+          icon: TextQuote,
           isActive: () => editor?.isActive('blockquote') ?? false,
           action: () => editor?.chain().focus().toggleBlockquote().run(),
         },
@@ -209,13 +224,13 @@
       buttons: [
         {
           label: labels.addLink,
-          shortLabel: labels.addLinkShort,
+          icon: LinkIcon,
           isActive: () => editor?.isActive('link') ?? false,
           action: () => updateLink(),
         },
         {
           label: labels.removeLink,
-          shortLabel: labels.removeLinkShort,
+          icon: Unlink,
           isActive: () => false,
           action: () => removeLink(),
         },
@@ -725,6 +740,7 @@
     {#each toolbarGroups as group (group.label)}
       <div class="note-editor__tool-group" role="group" aria-label={group.label}>
         {#each group.buttons as button (button.label)}
+          {@const Icon = button.icon}
           <button
             type="button"
             class="note-editor__tool"
@@ -735,35 +751,43 @@
             onmousedown={(event) => event.preventDefault()}
             onclick={button.action}
           >
-            {button.shortLabel}
+            <Icon size={16} aria-hidden="true" />
           </button>
         {/each}
       </div>
     {/each}
 
     {#if supportsDictation}
-      <div class="note-editor__tool-group" role="group" aria-label={labels.dictationGroup}>
+      <div
+        class="note-editor__tool-group note-editor__tool-group--dictation"
+        role="group"
+        aria-label={labels.dictationGroup}
+      >
         <button
           type="button"
-          class="note-editor__tool note-editor__tool--dictation"
-          class:note-editor__tool--active={dictationState === 'recording'}
+          class="note-editor__tool"
+          class:note-editor__tool--recording={dictationState === 'recording'}
           aria-label={dictationButtonLabel}
           title={dictationButtonLabel}
           disabled={dictationState === 'transcribing'}
           onmousedown={(event) => event.preventDefault()}
           onclick={toggleDictation}
         >
-          🎙
+          <Mic size={16} aria-hidden="true" />
         </button>
-        <span class="note-editor__dictation-status" data-testid="note-editor-dictation-timer">
-          {#if dictationState === 'recording'}
-            {dictationTimerLabel} / {formatDuration(dictationMaxSeconds)}
-          {:else if dictationState === 'transcribing'}
-            Procesando...
-          {:else}
-            {labels.dictationIdle}
-          {/if}
-        </span>
+        {#if dictationState === 'recording' || dictationState === 'transcribing'}
+          <span
+            class="note-editor__dictation-status"
+            class:note-editor__dictation-status--recording={dictationState === 'recording'}
+            data-testid="note-editor-dictation-timer"
+          >
+            {#if dictationState === 'recording'}
+              {dictationTimerLabel} / {formatDuration(dictationMaxSeconds)}
+            {:else}
+              {labels.dictationProcessing}
+            {/if}
+          </span>
+        {/if}
       </div>
     {/if}
   </div>
@@ -913,22 +937,34 @@
   .note-editor__toolbar {
     display: flex;
     flex-wrap: wrap;
-    gap: var(--space-1);
+    gap: 2px;
     align-items: center;
+    padding: 2px;
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-md);
+    background: var(--surface-toolbar);
   }
 
   .note-editor__tool-group {
     display: inline-flex;
     flex-wrap: wrap;
-    gap: 0;
-    padding: 0.125rem;
-    border: 1px solid color-mix(in srgb, var(--color-border) 88%, transparent);
-    border-radius: var(--radius-lg);
-    background: color-mix(in srgb, var(--color-surface) 90%, black 10%);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    align-items: center;
+    gap: 2px;
   }
 
-  .note-editor__tool,
+  .note-editor__tool-group + .note-editor__tool-group::before {
+    content: '';
+    align-self: center;
+    width: 1px;
+    height: 16px;
+    margin: 0 var(--space-1);
+    background: var(--color-hairline);
+  }
+
+  .note-editor__tool-group--dictation {
+    margin-left: auto;
+  }
+
   .note-editor__btn {
     padding: var(--space-2) var(--space-3);
     font-family: var(--font-sans);
@@ -944,35 +980,64 @@
       box-shadow var(--transition-base);
   }
 
-  .note-editor__tool:focus-visible,
-  .note-editor__btn:focus-visible {
-    outline: none;
-    box-shadow: var(--focus-ring);
-  }
-
-  .note-editor__tool--dictation {
-    min-width: 2.75rem;
-  }
-
-  .note-editor__tool {
-    min-width: 2.5rem;
-    background: color-mix(in srgb, var(--color-surface-raised) 45%, transparent);
-    color: var(--color-text-primary);
-    border-color: transparent;
-  }
-
-  .note-editor__tool:hover,
   .note-editor__btn:hover:not(:disabled) {
     border-color: var(--color-border-strong);
     color: var(--color-text-primary);
     background: color-mix(in srgb, var(--color-surface) 72%, black 28%);
   }
 
-  .note-editor__tool--active {
-    border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-border));
-    background: color-mix(in srgb, var(--color-accent) 22%, var(--color-surface));
+  .note-editor__tool {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: none;
+    border-radius: var(--radius-xs);
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    transition:
+      background-color var(--transition-base),
+      color var(--transition-base),
+      box-shadow var(--transition-base);
+  }
+
+  .note-editor__tool :global(svg) {
+    flex-shrink: 0;
+    pointer-events: none;
+  }
+
+  .note-editor__tool:hover:not(:disabled) {
+    background: var(--color-accent-faint);
     color: var(--color-text-primary);
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--color-accent) 24%, transparent);
+  }
+
+  .note-editor__tool:disabled {
+    cursor: not-allowed;
+    opacity: 0.48;
+  }
+
+  .note-editor__tool:focus-visible,
+  .note-editor__btn:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  .note-editor__tool--active {
+    background: var(--color-accent-soft);
+    color: var(--color-text-primary);
+  }
+
+  .note-editor__tool--recording {
+    background: var(--color-danger-soft);
+    color: var(--color-danger);
+  }
+
+  .note-editor__tool--recording:hover:not(:disabled) {
+    background: var(--color-danger-soft);
+    color: var(--color-danger-hover);
   }
 
   .note-editor__helper {
@@ -985,8 +1050,13 @@
     display: inline-flex;
     align-items: center;
     padding: 0 var(--space-2);
-    font-size: var(--font-size-xs);
+    font-size: var(--font-size-2xs);
+    font-variant-numeric: tabular-nums;
     color: var(--color-text-muted);
+  }
+
+  .note-editor__dictation-status--recording {
+    color: var(--color-danger);
   }
 
   .note-editor__dictation-message {
