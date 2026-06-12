@@ -73,16 +73,18 @@ describe('i18n', () => {
     expect(t('topbar.ragChatAria')).toBe('Abrir chat de investigación')
     expect(t('topbar.ragChatTitle')).toBe('Chat de investigación')
     expect(t('ragChat.title')).toBe('Chat de investigación')
-    expect(t('ragChat.subtitle')).toBe('Consultá la base de conocimiento de transcripciones')
+    expect(t('ragChat.subtitle')).toBe(
+      'Consultá la base de conocimiento de transcripciones y documentos OCR'
+    )
     expect(t('ragChat.placeholder')).toBe('Escribí tu pregunta…')
     expect(t('ragChat.send')).toBe('Enviar')
-    expect(t('ragChat.thinking')).toBe('Buscando en las transcripciones…')
+    expect(t('ragChat.thinking')).toBe('Buscando en la base de conocimiento…')
     expect(t('ragChat.sources')).toBe('Fuentes')
     expect(t('ragChat.noResults')).toBe(
-      'No encontré contenido relevante en las transcripciones para esa pregunta.'
+      'No encontré contenido relevante en la base de conocimiento para esa pregunta.'
     )
     expect(t('ragChat.emptyState')).toBe(
-      'Hacé una pregunta sobre tus transcripciones. Las respuestas citan las fuentes.'
+      'Hacé una pregunta sobre tus transcripciones y documentos. Las respuestas citan las fuentes.'
     )
     expect(t('ragChat.errorGeneric')).toBe('Ocurrió un error al consultar.')
     expect(t('ragChat.clear')).toBe('Nueva conversación')
@@ -102,16 +104,18 @@ describe('i18n', () => {
     expect(t('topbar.ragChatAria')).toBe('Open research chat')
     expect(t('topbar.ragChatTitle')).toBe('Research chat')
     expect(t('ragChat.title')).toBe('Research chat')
-    expect(t('ragChat.subtitle')).toBe('Query the transcription knowledge base')
+    expect(t('ragChat.subtitle')).toBe(
+      'Query the knowledge base of transcriptions and OCR documents'
+    )
     expect(t('ragChat.placeholder')).toBe('Type your question…')
     expect(t('ragChat.send')).toBe('Send')
-    expect(t('ragChat.thinking')).toBe('Searching the transcriptions…')
+    expect(t('ragChat.thinking')).toBe('Searching the knowledge base…')
     expect(t('ragChat.sources')).toBe('Sources')
     expect(t('ragChat.noResults')).toBe(
-      'I did not find relevant content in the transcriptions for that question.'
+      'I did not find relevant content in the knowledge base for that question.'
     )
     expect(t('ragChat.emptyState')).toBe(
-      'Ask a question about your transcriptions. Answers cite their sources.'
+      'Ask a question about your transcriptions and documents. Answers cite their sources.'
     )
     expect(t('ragChat.errorGeneric')).toBe('Something went wrong while querying.')
     expect(t('ragChat.clear')).toBe('New conversation')
@@ -138,6 +142,18 @@ describe('i18n', () => {
     expect(t('settings.modelParams.invalidParam', { flow: 'Summary', param: 'topP' })).toBe(
       'Parámetro inválido en Summary: topP'
     )
+    expect(t('settings.ragParamsTab')).toBe('RAG Params')
+    expect(t('settings.ragParams.title')).toBe('RAG Params')
+    expect(t('settings.ragParams.description')).toBe(
+      'Estos parámetros ajustan la recuperación del chat de investigación. Los valores mostrados son los vigentes.'
+    )
+    expect(t('settings.ragParams.invalidParam', { param: 'topK' })).toBe(
+      'Parámetro RAG inválido: topK'
+    )
+    expect(t('settings.ragParams.snippetVsContext')).toBe(
+      'snippetMaxChars no puede superar contextMaxChars.'
+    )
+    expect(t('settings.ragParams.restoreDefaults')).toBe('Restaurar defaults')
 
     locale.set('en')
 
@@ -150,5 +166,17 @@ describe('i18n', () => {
     expect(t('settings.modelParams.invalidParam', { flow: 'Summary', param: 'topP' })).toBe(
       'Invalid parameter in Summary: topP'
     )
+    expect(t('settings.ragParamsTab')).toBe('RAG Params')
+    expect(t('settings.ragParams.title')).toBe('RAG Params')
+    expect(t('settings.ragParams.description')).toBe(
+      'These parameters tune retrieval for the research chat. The values shown are the ones currently in effect.'
+    )
+    expect(t('settings.ragParams.invalidParam', { param: 'topK' })).toBe(
+      'Invalid RAG parameter: topK'
+    )
+    expect(t('settings.ragParams.snippetVsContext')).toBe(
+      'snippetMaxChars cannot exceed contextMaxChars.'
+    )
+    expect(t('settings.ragParams.restoreDefaults')).toBe('Restore defaults')
   })
 })

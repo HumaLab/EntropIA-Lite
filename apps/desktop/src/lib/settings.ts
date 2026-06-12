@@ -109,6 +109,16 @@ export const SETTINGS_KEYS = {
   LLM_TRIPLETS_PRESENCE_PENALTY: 'llm_triplets_presence_penalty',
   LLM_TRIPLETS_FREQUENCY_PENALTY: 'llm_triplets_frequency_penalty',
   LLM_TRIPLETS_STOP_SEQUENCES: 'llm_triplets_stop_sequences',
+  RAG_TOP_K: 'rag_top_k',
+  RAG_MIN_SIMILARITY: 'rag_min_similarity',
+  RAG_CANDIDATES_PER_LEG: 'rag_candidates_per_leg',
+  RAG_RRF_K: 'rag_rrf_k',
+  RAG_SNIPPET_MAX_CHARS: 'rag_snippet_max_chars',
+  RAG_CONTEXT_MAX_CHARS: 'rag_context_max_chars',
+  RAG_HISTORY_TURNS: 'rag_history_turns',
+  RAG_HISTORY_TURN_MAX_CHARS: 'rag_history_turn_max_chars',
+  RAG_TEMPERATURE: 'rag_temperature',
+  RAG_MAX_TOKENS: 'rag_max_tokens',
 } as const
 
 export type LlmMode = 'openrouter'
@@ -186,4 +196,17 @@ export const DEFAULT_MODEL_PARAMS_BY_FLOW = {
   summary: { ...DEFAULT_MODEL_PARAMS, maxTokens: '' },
   ner: { ...DEFAULT_MODEL_PARAMS, maxTokens: '' },
   triplets: { ...DEFAULT_MODEL_PARAMS, maxTokens: '' },
+} as const
+
+export const DEFAULT_RAG_PARAMS = {
+  topK: '6',
+  minSimilarity: '0',
+  candidatesPerLeg: '24',
+  rrfK: '60',
+  snippetMaxChars: '1600',
+  contextMaxChars: '10000',
+  historyTurns: '6',
+  historyTurnMaxChars: '500',
+  temperature: '0.2',
+  maxTokens: '1500',
 } as const

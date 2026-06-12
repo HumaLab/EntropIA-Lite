@@ -15,6 +15,7 @@
     nerPrompt: string
     tripletsPrompt: string
     modelParamsByFlow: Record<string, Record<string, string>>
+    ragParams: Record<string, string>
   }
 
   export function buildSettingsSnapshot(input: SettingsSnapshotInput): string {
@@ -49,12 +50,13 @@
     DEFAULT_PROMPTS,
     DEFAULT_MODEL_PARAMS,
     DEFAULT_MODEL_PARAMS_BY_FLOW,
+    DEFAULT_RAG_PARAMS,
     type ModelInfo,
   } from '$lib/settings'
   import { ActionIcon, Button, Card, ConfirmDialog, Input, TabButton, TabList } from '@entropia/ui'
   import LogsTab from './LogsTab.svelte'
 
-  let activeTab = $state<'api' | 'prompts' | 'modelParams' | 'logs'>('api')
+  let activeTab = $state<'api' | 'prompts' | 'modelParams' | 'ragParams' | 'logs'>('api')
 
   // State
   let apiKey = $state('')
@@ -143,6 +145,33 @@
   })
   let modelParamsError = $state<string | null>(null)
 
+  type EditableRagParams = {
+    topK: string
+    minSimilarity: string
+    candidatesPerLeg: string
+    rrfK: string
+    snippetMaxChars: string
+    contextMaxChars: string
+    historyTurns: string
+    historyTurnMaxChars: string
+    temperature: string
+    maxTokens: string
+  }
+  const RAG_PARAM_KEYS: Record<keyof EditableRagParams, string> = {
+    topK: SETTINGS_KEYS.RAG_TOP_K,
+    minSimilarity: SETTINGS_KEYS.RAG_MIN_SIMILARITY,
+    candidatesPerLeg: SETTINGS_KEYS.RAG_CANDIDATES_PER_LEG,
+    rrfK: SETTINGS_KEYS.RAG_RRF_K,
+    snippetMaxChars: SETTINGS_KEYS.RAG_SNIPPET_MAX_CHARS,
+    contextMaxChars: SETTINGS_KEYS.RAG_CONTEXT_MAX_CHARS,
+    historyTurns: SETTINGS_KEYS.RAG_HISTORY_TURNS,
+    historyTurnMaxChars: SETTINGS_KEYS.RAG_HISTORY_TURN_MAX_CHARS,
+    temperature: SETTINGS_KEYS.RAG_TEMPERATURE,
+    maxTokens: SETTINGS_KEYS.RAG_MAX_TOKENS,
+  }
+  let ragParams = $state<EditableRagParams>({ ...DEFAULT_RAG_PARAMS })
+  let ragParamsError = $state<string | null>(null)
+
   // Test connection state
   let testing = $state(false)
   let testResult = $state<{ success: boolean; message: string } | null>(null)
@@ -185,6 +214,7 @@
       nerPrompt,
       tripletsPrompt,
       modelParamsByFlow,
+      ragParams,
     })
   )
   const isDirty = $derived(hasUnsavedSettingsChanges(savedSnapshot, currentSnapshot))
@@ -267,6 +297,7 @@
       for (const flow of MODEL_PARAM_FLOWS) {
         modelParamsByFlow[flow.id] = readModelParamsFromSettings(settingsMap, flow.id)
       }
+      ragParams = readRagParamsFromSettings(settingsMap)
       savedSnapshot = currentSnapshot
     } catch (e) {
       loadSettingsError = e instanceof Error ? e.message : String(e)
@@ -286,16 +317,30 @@
     return !['0', 'false', 'no', 'off'].includes(normalized)
   }
 
+  // Los params numéricos viajan como TEXTO a Rust (str::parse): solo se acepta
+  // lo que Rust puede parsear — enteros planos y decimales planos (sin '12.0'
+  // para enteros, sin notación '1e3' ni '0x10'). Number() de JS es más laxo.
+  const INTEGER_TEXT_PATTERN = /^[+-]?\d+$/
+  const DECIMAL_TEXT_PATTERN = /^[+-]?(\d+(\.\d+)?|\.\d+)$/
+
   function validNumberText(value: string | null, min: number, max: number): string | null {
-    if (!value?.trim()) return null
-    const parsed = Number(value)
-    return Number.isFinite(parsed) && parsed >= min && parsed <= max ? value.trim() : null
+    const trimmed = value?.trim()
+    if (!trimmed || !DECIMAL_TEXT_PATTERN.test(trimmed)) return null
+    const parsed = Number(trimmed)
+    return Number.isFinite(parsed) && parsed >= min && parsed <= max ? trimmed : null
   }
 
   function validIntegerText(value: string | null, min: number, max: number): string | null {
-    if (!value?.trim()) return null
-    const parsed = Number(value)
-    return Number.isInteger(parsed) && parsed >= min && parsed <= max ? value.trim() : null
+    const trimmed = value?.trim()
+    if (!trimmed || !INTEGER_TEXT_PATTERN.test(trimmed)) return null
+    const parsed = Number(trimmed)
+    return Number.isInteger(parsed) && parsed >= min && parsed <= max ? trimmed : null
+  }
+
+  /** Canonicaliza texto numérico ya validado ('007' → '7', '.5' → '0.5'); vacío queda vacío. */
+  function normalizedNumericText(value: string): string {
+    const trimmed = value.trim()
+    return trimmed ? String(Number(trimmed)) : ''
   }
 
   function readModelParamsFromSettings(
@@ -330,6 +375,62 @@
       ]
       const invalid = checks.find(([_, value, isValid]) => !isValid(value))
       if (invalid) return t('settings.modelParams.invalidParam', { flow: flow.label, param: invalid[0] })
+    }
+    return null
+  }
+
+  function readRagParamsFromSettings(settingsMap: Map<string, string>): EditableRagParams {
+    const keys = RAG_PARAM_KEYS
+    return {
+      topK: validIntegerText(settingsMap.get(keys.topK) ?? null, 1, 20) ?? DEFAULT_RAG_PARAMS.topK,
+      minSimilarity:
+        validNumberText(settingsMap.get(keys.minSimilarity) ?? null, 0, 1) ?? DEFAULT_RAG_PARAMS.minSimilarity,
+      candidatesPerLeg:
+        validIntegerText(settingsMap.get(keys.candidatesPerLeg) ?? null, 4, 200) ??
+        DEFAULT_RAG_PARAMS.candidatesPerLeg,
+      rrfK: validIntegerText(settingsMap.get(keys.rrfK) ?? null, 1, 500) ?? DEFAULT_RAG_PARAMS.rrfK,
+      snippetMaxChars:
+        validIntegerText(settingsMap.get(keys.snippetMaxChars) ?? null, 200, 8000) ??
+        DEFAULT_RAG_PARAMS.snippetMaxChars,
+      contextMaxChars:
+        validIntegerText(settingsMap.get(keys.contextMaxChars) ?? null, 1000, 60000) ??
+        DEFAULT_RAG_PARAMS.contextMaxChars,
+      historyTurns:
+        validIntegerText(settingsMap.get(keys.historyTurns) ?? null, 0, 20) ?? DEFAULT_RAG_PARAMS.historyTurns,
+      historyTurnMaxChars:
+        validIntegerText(settingsMap.get(keys.historyTurnMaxChars) ?? null, 100, 4000) ??
+        DEFAULT_RAG_PARAMS.historyTurnMaxChars,
+      temperature:
+        validNumberText(settingsMap.get(keys.temperature) ?? null, 0, 2) ?? DEFAULT_RAG_PARAMS.temperature,
+      maxTokens:
+        validIntegerText(settingsMap.get(keys.maxTokens) ?? null, 64, 32000) ?? DEFAULT_RAG_PARAMS.maxTokens,
+    }
+  }
+
+  /** Valor RAG efectivo para chequeos cross-field: texto editado o default si quedó vacío. */
+  function effectiveRagNumber(param: keyof EditableRagParams): number {
+    return Number(ragParams[param].trim() || DEFAULT_RAG_PARAMS[param])
+  }
+
+  function validateRagParams(): string | null {
+    const checks: Array<[keyof EditableRagParams, (value: string) => boolean]> = [
+      ['topK', (value) => !value.trim() || validIntegerText(value, 1, 20) !== null],
+      ['minSimilarity', (value) => !value.trim() || validNumberText(value, 0, 1) !== null],
+      ['candidatesPerLeg', (value) => !value.trim() || validIntegerText(value, 4, 200) !== null],
+      ['rrfK', (value) => !value.trim() || validIntegerText(value, 1, 500) !== null],
+      ['snippetMaxChars', (value) => !value.trim() || validIntegerText(value, 200, 8000) !== null],
+      ['contextMaxChars', (value) => !value.trim() || validIntegerText(value, 1000, 60000) !== null],
+      ['historyTurns', (value) => !value.trim() || validIntegerText(value, 0, 20) !== null],
+      ['historyTurnMaxChars', (value) => !value.trim() || validIntegerText(value, 100, 4000) !== null],
+      ['temperature', (value) => !value.trim() || validNumberText(value, 0, 2) !== null],
+      ['maxTokens', (value) => !value.trim() || validIntegerText(value, 64, 32000) !== null],
+    ]
+    const invalid = checks.find(([param, isValid]) => !isValid(ragParams[param]))
+    if (invalid) return t('settings.ragParams.invalidParam', { param: invalid[0] })
+    // Invariante cross-field (espejo del clamp del backend): el snippet no
+    // puede superar el presupuesto total de contexto.
+    if (effectiveRagNumber('snippetMaxChars') > effectiveRagNumber('contextMaxChars')) {
+      return t('settings.ragParams.snippetVsContext')
     }
     return null
   }
@@ -476,6 +577,14 @@
     if (modelParamsError) {
       saving = false
       saveFeedback = { tone: 'error', text: modelParamsError }
+      activeTab = 'modelParams'
+      return
+    }
+    ragParamsError = validateRagParams()
+    if (ragParamsError) {
+      saving = false
+      saveFeedback = { tone: 'error', text: ragParamsError }
+      activeTab = 'ragParams'
       return
     }
     try {
@@ -499,13 +608,23 @@
         const params = modelParamsByFlow[flow.id]
         const keys = MODEL_PARAM_KEYS[flow.id]
         writes.push(
-          settingsSet(keys.temperature, params.temperature.trim() || DEFAULT_MODEL_PARAMS.temperature),
-          settingsSet(keys.maxTokens, params.maxTokens.trim()),
-          settingsSet(keys.topP, params.topP.trim()),
-          settingsSet(keys.topK, params.topK.trim()),
-          settingsSet(keys.presencePenalty, params.presencePenalty.trim()),
-          settingsSet(keys.frequencyPenalty, params.frequencyPenalty.trim()),
+          settingsSet(keys.temperature, normalizedNumericText(params.temperature) || DEFAULT_MODEL_PARAMS.temperature),
+          settingsSet(keys.maxTokens, normalizedNumericText(params.maxTokens)),
+          settingsSet(keys.topP, normalizedNumericText(params.topP)),
+          settingsSet(keys.topK, normalizedNumericText(params.topK)),
+          settingsSet(keys.presencePenalty, normalizedNumericText(params.presencePenalty)),
+          settingsSet(keys.frequencyPenalty, normalizedNumericText(params.frequencyPenalty)),
           settingsSet(keys.stopSequences, params.stopSequences)
+        )
+      }
+      for (const param of Object.keys(RAG_PARAM_KEYS) as Array<keyof EditableRagParams>) {
+        // Se persiste el valor canónico ('0.20' → '0.2') para que el texto
+        // guardado coincida con lo que Rust parsea y la UI relee.
+        writes.push(
+          settingsSet(
+            RAG_PARAM_KEYS[param],
+            normalizedNumericText(ragParams[param]) || DEFAULT_RAG_PARAMS[param]
+          )
         )
       }
       if (apiKey.trim()) writes.push(settingsSet(SETTINGS_KEYS.OPENROUTER_API_KEY, apiKey.trim()))
@@ -551,6 +670,11 @@
     modelParamsError = null
   }
 
+  function resetRagParams() {
+    ragParams = { ...DEFAULT_RAG_PARAMS }
+    ragParamsError = null
+  }
+
   async function openProviderLink(event: MouseEvent, url: string, providerName: string) {
     try {
       await openExternalUrlFromClick(event, url)
@@ -586,6 +710,9 @@
       </TabButton>
       <TabButton active={activeTab === 'modelParams'} onclick={() => (activeTab = 'modelParams')}>
         {t('settings.modelParamsTab')}
+      </TabButton>
+      <TabButton active={activeTab === 'ragParams'} onclick={() => (activeTab = 'ragParams')}>
+        {t('settings.ragParamsTab')}
       </TabButton>
       <TabButton active={activeTab === 'logs'} onclick={() => (activeTab = 'logs')}>
         {t('settings.logsTab')}
@@ -971,6 +1098,48 @@
                 <Button variant="secondary" size="sm" onclick={() => resetModelParams(flow.id)}>{t('settings.modelParams.restoreDefaults')}</Button>
               </div>
             {/each}
+          </div>
+        </section>
+      </Card>
+
+    {:else if activeTab === 'ragParams'}
+      {#if saveFeedback}
+        <p
+          class="surface-message"
+          class:surface-message--error={saveFeedback.tone === 'error'}
+          class:surface-message--success={saveFeedback.tone === 'success'}
+        >
+          {saveFeedback.text}
+        </p>
+      {/if}
+
+      <Card>
+        <section class="settings-card-section settings-card-section--vertical">
+          <div class="settings-card-section__copy">
+            <h2>{t('settings.ragParams.title')}</h2>
+            <p>{t('settings.ragParams.description')}</p>
+          </div>
+
+          {#if ragParamsError}
+            <p class="surface-message surface-message--error">{ragParamsError}</p>
+          {/if}
+
+          <div class="settings__params-grid">
+            <div class="settings__field settings__field--stacked settings__param-card">
+              <div class="settings__param-card-grid">
+                <Input label="topK (1-20)" type="text" bind:value={ragParams.topK} />
+                <Input label="minSimilarity (0-1, 0 = off)" type="text" bind:value={ragParams.minSimilarity} />
+                <Input label="candidatesPerLeg (4-200)" type="text" bind:value={ragParams.candidatesPerLeg} />
+                <Input label="rrfK (1-500)" type="text" bind:value={ragParams.rrfK} />
+                <Input label="snippetMaxChars (200-8000)" type="text" bind:value={ragParams.snippetMaxChars} />
+                <Input label="contextMaxChars (1000-60000)" type="text" bind:value={ragParams.contextMaxChars} />
+                <Input label="historyTurns (0-20)" type="text" bind:value={ragParams.historyTurns} />
+                <Input label="historyTurnMaxChars (100-4000)" type="text" bind:value={ragParams.historyTurnMaxChars} />
+                <Input label="temperature (0-2)" type="text" bind:value={ragParams.temperature} />
+                <Input label="maxTokens (64-32000)" type="text" bind:value={ragParams.maxTokens} />
+              </div>
+              <Button variant="secondary" size="sm" onclick={resetRagParams}>{t('settings.ragParams.restoreDefaults')}</Button>
+            </div>
           </div>
         </section>
       </Card>

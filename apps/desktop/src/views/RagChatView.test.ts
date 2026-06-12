@@ -159,11 +159,11 @@ describe('RagChatView', () => {
 
     expect(screen.getByRole('heading', { name: 'Chat de investigación' })).toBeInTheDocument()
     expect(
-      screen.getByText('Consultá la base de conocimiento de transcripciones')
+      screen.getByText('Consultá la base de conocimiento de transcripciones y documentos OCR')
     ).toBeInTheDocument()
     expect(
       screen.getByText(
-        'Hacé una pregunta sobre tus transcripciones. Las respuestas citan las fuentes.'
+        'Hacé una pregunta sobre tus transcripciones y documentos. Las respuestas citan las fuentes.'
       )
     ).toBeInTheDocument()
     expect(getComposer()).toBeInTheDocument()
@@ -298,7 +298,7 @@ describe('RagChatView', () => {
     await waitFor(() => {
       expect(
         screen.getByText(
-          'No encontré contenido relevante en las transcripciones para esa pregunta.'
+          'No encontré contenido relevante en la base de conocimiento para esa pregunta.'
         )
       ).toBeInTheDocument()
     })
@@ -324,7 +324,7 @@ describe('RagChatView', () => {
     render(RagChatView)
     await sendQuestion('¿Cuándo comenzó la huelga?')
 
-    expect(screen.getByRole('status')).toHaveTextContent('Buscando en las transcripciones…')
+    expect(screen.getByRole('status')).toHaveTextContent('Buscando en la base de conocimiento…')
     expect(getComposer()).toBeDisabled()
     expect(screen.getByRole('button', { name: 'Enviar' })).toBeDisabled()
 
@@ -480,7 +480,7 @@ describe('RagChatView', () => {
 
     expect(
       screen.getByText(
-        'Hacé una pregunta sobre tus transcripciones. Las respuestas citan las fuentes.'
+        'Hacé una pregunta sobre tus transcripciones y documentos. Las respuestas citan las fuentes.'
       )
     ).toBeInTheDocument()
     expect(

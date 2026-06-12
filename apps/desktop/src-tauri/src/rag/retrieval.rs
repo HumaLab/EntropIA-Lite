@@ -1,30 +1,33 @@
-//! Recuperación híbrida (vector + FTS5) sobre la base de transcripciones.
+//! Recuperación híbrida (vector + FTS5) sobre la base documental
+//! (extracciones OCR + transcripciones).
 //!
 //! Todo el pipeline opera sobre una `&Connection` para que el comando Tauri
 //! pueda envolverlo en `spawn_blocking`. El embedding de la pregunta llega
 //! como parámetro — este módulo nunca toca la red, lo que mantiene cada
-//! función testeable contra una base en memoria.
+//! función testeable contra una base en memoria. Los parámetros de
+//! recuperación (candidatos por pierna, RRF, presupuestos de snippet y
+//! contexto) llegan vía [`RagParams`].
 
 use std::collections::{HashMap, HashSet};
 
 use rusqlite::{Connection, OptionalExtension};
 use serde::Deserialize;
 
+use super::params::RagParams;
 use super::RagSource;
 use crate::nlp::vector::{cosine_distance, decode_embedding_blob};
 
-/// Constante de amortiguación RRF: score(asset) = Σ 1 / (RRF_K + rank).
-const RRF_K: f64 = 60.0;
-/// Candidatos retenidos por pierna de recuperación antes de la fusión.
-const LEG_CANDIDATES: usize = 24;
-/// Máximo de caracteres por snippet de fuente.
-const SNIPPET_MAX_CHARS: usize = 1600;
-/// Máximo total de caracteres de contexto enviados al LLM.
-const CONTEXT_MAX_CHARS: usize = 10_000;
 /// Longitud mínima (en chars) de un término de la pregunta para anclar snippets.
 const MIN_TERM_CHARS: usize = 4;
 
-/// Metadatos de transcripción necesarios para construir la cita de un asset.
+/// Metadatos y texto combinado necesarios para construir la cita de un asset.
+///
+/// `text_content` es el MISMO texto combinado que produce
+/// `nlp::text_provider::get_asset_text`: extracción más antigua primero,
+/// después la transcripción, unidas con un espacio cuando hay ambas.
+/// `transcription_offset_chars` marca el char (en el texto combinado) donde
+/// arranca la porción de transcripción — `None` si el asset no tiene
+/// transcripción con texto.
 #[derive(Debug, Clone)]
 pub(crate) struct SourceRecord {
     pub asset_id: String,
@@ -34,6 +37,7 @@ pub(crate) struct SourceRecord {
     pub collection_name: String,
     pub text_content: String,
     pub segments_json: Option<String>,
+    pub transcription_offset_chars: Option<usize>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -45,19 +49,25 @@ struct TranscriptSegment {
 
 /// Recuperación híbrida completa: pierna vectorial (si hay embedding de la
 /// pregunta) + pierna léxica, fusión RRF, snippets/timestamps y tope de
-/// contexto total.
+/// contexto total. `params.top_k` ya llega resuelto (override del comando
+/// incluido).
 pub(crate) fn hybrid_retrieve(
     conn: &Connection,
     question: &str,
     query_embedding: Option<&[f32]>,
-    top_k: usize,
+    params: &RagParams,
 ) -> Result<Vec<RagSource>, String> {
     let vector = match query_embedding {
-        Some(embedding) => vector_leg(conn, embedding, LEG_CANDIDATES)?,
+        Some(embedding) => vector_leg(
+            conn,
+            embedding,
+            params.candidates_per_leg,
+            params.min_similarity,
+        )?,
         None => Vec::new(),
     };
-    let lexical = lexical_leg(conn, question, LEG_CANDIDATES)?;
-    let fused = rrf_fuse(&[vector, lexical], top_k);
+    let lexical = lexical_leg(conn, question, params.candidates_per_leg)?;
+    let fused = rrf_fuse(&[vector, lexical], params.top_k, params.rrf_k as f64);
 
     let mut records = Vec::with_capacity(fused.len());
     for (asset_id, score) in fused {
@@ -69,24 +79,33 @@ pub(crate) fn hybrid_retrieve(
     Ok(build_sources(
         records,
         question,
-        SNIPPET_MAX_CHARS,
-        CONTEXT_MAX_CHARS,
+        params.snippet_max_chars,
+        params.context_max_chars,
     ))
 }
 
 /// Pierna vectorial: kNN por similitud coseno sobre `vec_assets`, restringida
-/// a assets con transcripción. Devuelve asset_ids ordenados (mejor primero).
-/// Embeddings con dimensión distinta a la del query se saltean.
+/// a assets con texto (extracción O transcripción no vacía, mismo idioma que
+/// `summarize_asset_embedding_coverage`). Devuelve asset_ids ordenados (mejor
+/// primero). Embeddings con dimensión distinta a la del query se saltean.
+/// `min_similarity > 0.0` descarta candidatos con similitud menor ANTES del
+/// ranking; `0.0` deshabilita el filtro (las similitudes negativas se quedan).
 pub(crate) fn vector_leg(
     conn: &Connection,
     query_embedding: &[f32],
     limit: usize,
+    min_similarity: f64,
 ) -> Result<Vec<String>, String> {
     let mut stmt = conn
         .prepare(
             "SELECT v.asset_id, v.embedding
              FROM vec_assets v
-             JOIN transcriptions t ON t.asset_id = v.asset_id",
+             WHERE EXISTS(SELECT 1 FROM extractions e
+                          WHERE e.asset_id = v.asset_id
+                            AND LENGTH(TRIM(COALESCE(e.text_content, ''))) > 0)
+                OR EXISTS(SELECT 1 FROM transcriptions t
+                          WHERE t.asset_id = v.asset_id
+                            AND LENGTH(TRIM(COALESCE(t.text_content, ''))) > 0)",
         )
         .map_err(|e| format!("Failed to prepare RAG vector query: {e}"))?;
 
@@ -106,7 +125,11 @@ pub(crate) fn vector_leg(
                 return None;
             }
             let distance = cosine_distance(query_embedding, &embedding)?;
-            Some((asset_id, 1.0 - distance))
+            let similarity = 1.0 - distance;
+            if min_similarity > 0.0 && similarity < min_similarity {
+                return None;
+            }
+            Some((asset_id, similarity))
         })
         .collect();
 
@@ -118,9 +141,10 @@ pub(crate) fn vector_leg(
         .collect())
 }
 
-/// Pierna léxica: BM25 a nivel ítem vía FTS5, aplanada a los assets con
-/// transcripción de cada ítem preservando el orden de relevancia. El rank
-/// léxico de un asset es su posición en esta lista aplanada.
+/// Pierna léxica: BM25 a nivel ítem vía FTS5, aplanada a los assets con texto
+/// (extracción O transcripción no vacía) de cada ítem preservando el orden de
+/// relevancia. El rank léxico de un asset es su posición en esta lista
+/// aplanada.
 pub(crate) fn lexical_leg(
     conn: &Connection,
     question: &str,
@@ -132,8 +156,13 @@ pub(crate) fn lexical_leg(
         .prepare(
             "SELECT a.id
              FROM assets a
-             JOIN transcriptions tr ON tr.asset_id = a.id
              WHERE a.item_id = ?1
+               AND (EXISTS(SELECT 1 FROM extractions e
+                           WHERE e.asset_id = a.id
+                             AND LENGTH(TRIM(COALESCE(e.text_content, ''))) > 0)
+                    OR EXISTS(SELECT 1 FROM transcriptions t
+                              WHERE t.asset_id = a.id
+                                AND LENGTH(TRIM(COALESCE(t.text_content, ''))) > 0))
              ORDER BY a.created_at ASC, a.id ASC",
         )
         .map_err(|e| format!("Failed to prepare RAG lexical asset query: {e}"))?;
@@ -158,15 +187,15 @@ pub(crate) fn lexical_leg(
     Ok(assets)
 }
 
-/// Reciprocal Rank Fusion: score(asset) = Σ sobre piernas de 1/(60 + rank),
+/// Reciprocal Rank Fusion: score(asset) = Σ sobre piernas de 1/(rrf_k + rank),
 /// con rank arrancando en 1. Orden descendente por score; los empates se
 /// resuelven determinísticamente por asset_id ascendente.
-pub(crate) fn rrf_fuse(legs: &[Vec<String>], top_k: usize) -> Vec<(String, f64)> {
+pub(crate) fn rrf_fuse(legs: &[Vec<String>], top_k: usize, rrf_k: f64) -> Vec<(String, f64)> {
     let mut scores: HashMap<String, f64> = HashMap::new();
     for leg in legs {
         for (rank0, asset_id) in leg.iter().enumerate() {
             let rank = (rank0 + 1) as f64;
-            *scores.entry(asset_id.clone()).or_default() += 1.0 / (RRF_K + rank);
+            *scores.entry(asset_id.clone()).or_default() += 1.0 / (rrf_k + rank);
         }
     }
 
@@ -180,41 +209,102 @@ pub(crate) fn rrf_fuse(legs: &[Vec<String>], top_k: usize) -> Vec<(String, f64)>
     fused
 }
 
-/// Carga los metadatos de citación de un asset transcrito. `None` si el asset
-/// ya no existe (carrera con un borrado, por ejemplo).
+/// Carga los metadatos de citación y el texto combinado de un asset. `None`
+/// si el asset ya no existe (carrera con un borrado, por ejemplo).
+///
+/// El texto combinado replica la semántica de `get_asset_text`: texto de la
+/// extracción más antigua primero, después el de la transcripción más
+/// antigua, unidos con un solo espacio cuando hay ambos. El offset de la
+/// porción de transcripción queda registrado para gatear los timestamps.
 pub(crate) fn load_source_record(
     conn: &Connection,
     asset_id: &str,
 ) -> Result<Option<SourceRecord>, String> {
-    conn.query_row(
-        "SELECT t.asset_id, a.item_id, i.title,
-                COALESCE(i.collection_id, ''), COALESCE(c.name, ''),
-                t.text_content, t.segments
-         FROM transcriptions t
-         JOIN assets a ON a.id = t.asset_id
-         JOIN items i ON i.id = a.item_id
-         LEFT JOIN collections c ON c.id = i.collection_id
-         WHERE t.asset_id = ?1
-         LIMIT 1",
-        rusqlite::params![asset_id],
-        |row| {
-            Ok(SourceRecord {
-                asset_id: row.get(0)?,
-                item_id: row.get(1)?,
-                item_title: row.get(2)?,
-                collection_id: row.get(3)?,
-                collection_name: row.get(4)?,
-                text_content: row.get(5)?,
-                segments_json: row.get(6)?,
-            })
-        },
-    )
-    .optional()
-    .map_err(|e| format!("Failed to load RAG source metadata for asset '{asset_id}': {e}"))
+    let metadata = conn
+        .query_row(
+            "SELECT a.id, a.item_id, i.title,
+                    COALESCE(i.collection_id, ''), COALESCE(c.name, '')
+             FROM assets a
+             JOIN items i ON i.id = a.item_id
+             LEFT JOIN collections c ON c.id = i.collection_id
+             WHERE a.id = ?1
+             LIMIT 1",
+            rusqlite::params![asset_id],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            },
+        )
+        .optional()
+        .map_err(|e| format!("Failed to load RAG source metadata for asset '{asset_id}': {e}"))?;
+
+    let Some((asset_id, item_id, item_title, collection_id, collection_name)) = metadata else {
+        return Ok(None);
+    };
+
+    // Extracción más antigua (misma convención que get_asset_text).
+    let extraction_text: String = conn
+        .query_row(
+            "SELECT COALESCE(text_content, '')
+             FROM extractions
+             WHERE asset_id = ?1
+             ORDER BY created_at ASC
+             LIMIT 1",
+            rusqlite::params![asset_id],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to load RAG extraction text for asset '{asset_id}': {e}"))?
+        .unwrap_or_default();
+
+    // Transcripción más antigua: texto + segments para los timestamps.
+    let (transcription_text, segments_json): (String, Option<String>) = conn
+        .query_row(
+            "SELECT COALESCE(text_content, ''), segments
+             FROM transcriptions
+             WHERE asset_id = ?1
+             ORDER BY created_at ASC
+             LIMIT 1",
+            rusqlite::params![asset_id],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(|e| format!("Failed to load RAG transcription for asset '{asset_id}': {e}"))?
+        .unwrap_or((String::new(), None));
+
+    // Texto combinado con la MISMA semántica de get_asset_text: partes no
+    // vacías unidas con un espacio, extracción primero.
+    let mut text_content = extraction_text;
+    let mut transcription_offset_chars = None;
+    if !transcription_text.is_empty() {
+        if !text_content.is_empty() {
+            text_content.push(' ');
+        }
+        transcription_offset_chars = Some(text_content.chars().count());
+        text_content.push_str(&transcription_text);
+    }
+
+    Ok(Some(SourceRecord {
+        asset_id,
+        item_id,
+        item_title,
+        collection_id,
+        collection_name,
+        text_content,
+        segments_json,
+        transcription_offset_chars,
+    }))
 }
 
 /// Convierte los registros fusionados (en orden) en fuentes citables con
 /// snippet y timestamps, frenando cuando el contexto total supera el tope.
+/// Si el PRIMER snippet ya supera el tope, se trunca en vez de descartarse:
+/// con registros disponibles nunca se devuelven cero fuentes.
 pub(crate) fn build_sources(
     records: Vec<(SourceRecord, f64)>,
     question: &str,
@@ -226,16 +316,21 @@ pub(crate) fn build_sources(
     let mut total_chars = 0usize;
 
     for (record, score) in records {
-        let (snippet, window_start) =
+        let (mut snippet, window_start) =
             snippet_window(&record.text_content, &terms, snippet_max_chars);
         let snippet_chars = snippet.chars().count();
         if total_chars + snippet_chars > context_max_chars {
-            // La lista de fuentes debe reflejar exactamente lo que entra al prompt.
-            break;
+            if !sources.is_empty() {
+                // La lista de fuentes debe reflejar exactamente lo que entra al prompt.
+                break;
+            }
+            // Garantía defensiva: el primer registro nunca deja la respuesta
+            // sin fuentes — se trunca (char-safe) al presupuesto de contexto.
+            snippet = snippet.chars().take(context_max_chars).collect();
         }
-        total_chars += snippet_chars;
+        total_chars += snippet.chars().count();
 
-        let timestamps = resolve_timestamps(record.segments_json.as_deref(), &terms, window_start);
+        let timestamps = resolve_source_timestamps(&record, &terms, window_start);
 
         sources.push(RagSource {
             index: (sources.len() + 1) as u32,
@@ -316,6 +411,35 @@ fn find_chars(haystack: &[char], needle: &str) -> Option<usize> {
     haystack
         .windows(needle.len())
         .position(|window| window == needle.as_slice())
+}
+
+/// Timestamps de un registro con texto combinado: SOLO se resuelven cuando el
+/// ancla del snippet (el término matcheado o, sin match, el inicio de la
+/// ventana) cae dentro de la porción de transcripción. La posición se traduce
+/// a chars relativos a la transcripción antes de la resolución de segmentos
+/// existente. Snippets anclados en la extracción → `None`.
+fn resolve_source_timestamps(
+    record: &SourceRecord,
+    terms: &[String],
+    window_start: usize,
+) -> Option<(f64, f64)> {
+    let offset = record.transcription_offset_chars?;
+    let anchor = find_term_anchor(&record.text_content, terms).unwrap_or(window_start);
+    if anchor < offset {
+        return None;
+    }
+    resolve_timestamps(record.segments_json.as_deref(), terms, anchor - offset)
+}
+
+/// Posición (en chars) de la primera ocurrencia del término más largo que
+/// aparece en el texto, con el mismo lowering 1:1 por char de `snippet_window`
+/// (los términos llegan ordenados del más largo al más corto).
+fn find_term_anchor(text: &str, terms: &[String]) -> Option<usize> {
+    let lowered: Vec<char> = text
+        .chars()
+        .map(|c| c.to_lowercase().next().unwrap_or(c))
+        .collect();
+    terms.iter().find_map(|term| find_chars(&lowered, term))
 }
 
 /// Resuelve timestamps desde el JSON de `transcriptions.segments`:
@@ -403,6 +527,15 @@ mod tests {
                 created_at INTEGER NOT NULL
             );
 
+            CREATE TABLE extractions (
+                id TEXT PRIMARY KEY,
+                asset_id TEXT NOT NULL,
+                text_content TEXT NOT NULL,
+                method TEXT,
+                confidence REAL,
+                created_at INTEGER NOT NULL
+            );
+
             CREATE TABLE vec_assets (
                 asset_id TEXT PRIMARY KEY,
                 item_id TEXT NOT NULL,
@@ -463,6 +596,56 @@ mod tests {
         crate::nlp::fts::fts_index_item(conn, item.0, item.1, "", text).expect("fts index");
     }
 
+    fn insert_extraction(conn: &Connection, asset_id: &str, text: &str, created_at: i64) {
+        conn.execute(
+            "INSERT INTO extractions(id, asset_id, text_content, method, confidence, created_at)
+             VALUES (?1, ?2, ?3, 'ocr', 0.9, ?4)",
+            params![
+                format!("ext-{asset_id}-{created_at}"),
+                asset_id,
+                text,
+                created_at
+            ],
+        )
+        .expect("extraction insert");
+    }
+
+    /// Documento SOLO-OCR: colección + ítem + asset + extracción (sin
+    /// transcripción), indexado en FTS y con embedding opcional.
+    fn insert_ocr_doc(
+        conn: &Connection,
+        collection: (&str, &str),
+        item: (&str, &str),
+        asset_id: &str,
+        text: &str,
+        embedding: Option<&[f32]>,
+    ) {
+        conn.execute(
+            "INSERT OR IGNORE INTO collections(id, name) VALUES (?1, ?2)",
+            params![collection.0, collection.1],
+        )
+        .expect("collection insert");
+        conn.execute(
+            "INSERT INTO items(id, collection_id, title, metadata) VALUES (?1, ?2, ?3, '{}')",
+            params![item.0, collection.0, item.1],
+        )
+        .expect("item insert");
+        conn.execute(
+            "INSERT INTO assets(id, item_id, path, type, created_at) VALUES (?1, ?2, 'scan.png', 'image', 1)",
+            params![asset_id, item.0],
+        )
+        .expect("asset insert");
+        insert_extraction(conn, asset_id, text, 1);
+        if let Some(embedding) = embedding {
+            conn.execute(
+                "INSERT INTO vec_assets(asset_id, item_id, embedding) VALUES (?1, ?2, ?3)",
+                params![asset_id, item.0, floats_to_blob(embedding)],
+            )
+            .expect("embedding insert");
+        }
+        crate::nlp::fts::fts_index_item(conn, item.0, item.1, "", text).expect("fts index");
+    }
+
     fn record(asset_id: &str, text: &str) -> SourceRecord {
         SourceRecord {
             asset_id: asset_id.to_string(),
@@ -472,6 +655,7 @@ mod tests {
             collection_name: "Colección".to_string(),
             text_content: text.to_string(),
             segments_json: None,
+            transcription_offset_chars: None,
         }
     }
 
@@ -483,7 +667,7 @@ mod tests {
             vec!["a".to_string(), "b".to_string()],
             vec!["a".to_string(), "c".to_string()],
         ];
-        let fused = rrf_fuse(&legs, 10);
+        let fused = rrf_fuse(&legs, 10, 60.0);
         assert_eq!(fused[0].0, "a");
         let expected = 2.0 / 61.0;
         assert!((fused[0].1 - expected).abs() < 1e-12);
@@ -494,7 +678,7 @@ mod tests {
     #[test]
     fn rrf_fuse_orders_by_rank_within_leg() {
         let legs = vec![vec!["a".to_string(), "b".to_string(), "c".to_string()]];
-        let fused = rrf_fuse(&legs, 10);
+        let fused = rrf_fuse(&legs, 10, 60.0);
         let ids: Vec<&str> = fused.iter().map(|(id, _)| id.as_str()).collect();
         assert_eq!(ids, vec!["a", "b", "c"]);
         assert!(fused[0].1 > fused[1].1 && fused[1].1 > fused[2].1);
@@ -504,7 +688,7 @@ mod tests {
     fn rrf_fuse_breaks_ties_deterministically_by_asset_id() {
         // Mismo rank (1) en piernas distintas → mismo score → orden por id.
         let legs = vec![vec!["zeta".to_string()], vec!["alfa".to_string()]];
-        let fused = rrf_fuse(&legs, 10);
+        let fused = rrf_fuse(&legs, 10, 60.0);
         assert_eq!(fused[0].0, "alfa");
         assert_eq!(fused[1].0, "zeta");
         assert!((fused[0].1 - fused[1].1).abs() < 1e-12);
@@ -518,7 +702,7 @@ mod tests {
             "c".to_string(),
             "d".to_string(),
         ]];
-        let fused = rrf_fuse(&legs, 2);
+        let fused = rrf_fuse(&legs, 2, 60.0);
         assert_eq!(fused.len(), 2);
         assert_eq!(fused[0].0, "a");
     }
@@ -644,6 +828,22 @@ mod tests {
     }
 
     #[test]
+    fn build_sources_truncates_first_snippet_larger_than_context_budget() {
+        // El snippet del mejor registro (60 chars, multibyte) excede el
+        // presupuesto total (25): se trunca char-safe en vez de devolver cero
+        // fuentes, y el siguiente registro ya no entra.
+        let records = vec![
+            (record("a", &"ñ".repeat(60)), 0.9),
+            (record("b", &"b".repeat(10)), 0.8),
+        ];
+        let sources = build_sources(records, "pregunta", 100, 25);
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].asset_id, "a");
+        assert_eq!(sources[0].snippet.chars().count(), 25);
+        assert_eq!(sources[0].snippet, "ñ".repeat(25));
+    }
+
+    #[test]
     fn build_sources_caps_each_snippet() {
         let records = vec![(record("a", &"palabra ".repeat(100)), 1.0)];
         let sources = build_sources(records, "pregunta", 50, 1000);
@@ -702,8 +902,13 @@ mod tests {
             Some(&[0.5, 0.5]),
         );
 
-        let sources = hybrid_retrieve(&conn, "cabildo", Some(&query_embedding), 6)
-            .expect("hybrid retrieval should succeed");
+        let sources = hybrid_retrieve(
+            &conn,
+            "cabildo",
+            Some(&query_embedding),
+            &RagParams::default(),
+        )
+        .expect("hybrid retrieval should succeed");
 
         let ids: Vec<&str> = sources.iter().map(|s| s.asset_id.as_str()).collect();
         assert_eq!(ids, vec!["asset-both", "asset-vec", "asset-fts"]);
@@ -742,8 +947,8 @@ mod tests {
             None,
         );
 
-        let sources =
-            hybrid_retrieve(&conn, "cabildo", None, 6).expect("fts-only retrieval should work");
+        let sources = hybrid_retrieve(&conn, "cabildo", None, &RagParams::default())
+            .expect("fts-only retrieval should work");
         assert_eq!(sources.len(), 1);
         assert_eq!(sources[0].asset_id, "asset-fts");
     }
@@ -751,22 +956,267 @@ mod tests {
     #[test]
     fn hybrid_retrieve_empty_db_returns_no_sources() {
         let conn = setup_rag_db();
-        let sources = hybrid_retrieve(&conn, "cabildo", Some(&[1.0, 0.0]), 6)
+        let sources = hybrid_retrieve(&conn, "cabildo", Some(&[1.0, 0.0]), &RagParams::default())
             .expect("empty retrieval should succeed");
         assert!(sources.is_empty());
     }
 
     #[test]
-    fn vector_leg_only_considers_transcribed_assets() {
+    fn vector_leg_only_considers_assets_with_text() {
         let conn = setup_rag_db();
-        // Asset con embedding pero sin transcripción → fuera de la base RAG.
+        // Asset con embedding pero sin extracción NI transcripción → fuera de
+        // la base RAG.
         conn.execute(
             "INSERT INTO vec_assets(asset_id, item_id, embedding) VALUES ('a1', 'i1', ?1)",
             params![floats_to_blob(&[1.0, 0.0])],
         )
         .expect("embedding insert");
 
-        let ranked = vector_leg(&conn, &[1.0, 0.0], 10).expect("vector leg should succeed");
+        let ranked = vector_leg(&conn, &[1.0, 0.0], 10, 0.0).expect("vector leg should succeed");
         assert!(ranked.is_empty());
+    }
+
+    // ── OCR en retrieval (Cambio 1) ──────────────────────────────────────────
+
+    #[test]
+    fn vector_leg_includes_ocr_only_assets() {
+        let conn = setup_rag_db();
+        insert_ocr_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-ocr", "Panfleto digitalizado"),
+            "asset-ocr",
+            "El panfleto convoca al cabildo abierto",
+            Some(&[1.0, 0.0, 0.0]),
+        );
+
+        let ranked =
+            vector_leg(&conn, &[1.0, 0.0, 0.0], 10, 0.0).expect("vector leg should succeed");
+        assert_eq!(ranked, vec!["asset-ocr".to_string()]);
+    }
+
+    #[test]
+    fn lexical_leg_includes_ocr_only_assets() {
+        let conn = setup_rag_db();
+        insert_ocr_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-ocr", "Panfleto digitalizado"),
+            "asset-ocr",
+            "El panfleto convoca al cabildo abierto",
+            None,
+        );
+
+        let ranked = lexical_leg(&conn, "cabildo", 10).expect("lexical leg should succeed");
+        assert_eq!(ranked, vec!["asset-ocr".to_string()]);
+    }
+
+    #[test]
+    fn hybrid_retrieve_ocr_only_asset_yields_snippet_without_timestamps() {
+        let conn = setup_rag_db();
+        insert_ocr_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-ocr", "Panfleto digitalizado"),
+            "asset-ocr",
+            "El panfleto convoca al cabildo abierto en la plaza",
+            Some(&[1.0, 0.0, 0.0]),
+        );
+
+        let sources = hybrid_retrieve(
+            &conn,
+            "cabildo",
+            Some(&[1.0, 0.0, 0.0]),
+            &RagParams::default(),
+        )
+        .expect("OCR-only retrieval should succeed");
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].asset_id, "asset-ocr");
+        assert!(sources[0].snippet.contains("cabildo"));
+        assert_eq!(sources[0].start_seconds, None);
+        assert_eq!(sources[0].end_seconds, None);
+    }
+
+    #[test]
+    fn vector_leg_min_similarity_filters_candidates_below_threshold() {
+        let conn = setup_rag_db();
+        // Similitud 1.0 contra el query [1, 0, 0].
+        insert_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-near", "Cercano"),
+            "asset-near",
+            "texto cercano",
+            None,
+            Some(&[1.0, 0.0, 0.0]),
+        );
+        // Ortogonal: similitud 0.0.
+        insert_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-far", "Lejano"),
+            "asset-far",
+            "texto lejano",
+            None,
+            Some(&[0.0, 1.0, 0.0]),
+        );
+        // Opuesto: similitud -1.0.
+        insert_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-anti", "Opuesto"),
+            "asset-anti",
+            "texto opuesto",
+            None,
+            Some(&[-1.0, 0.0, 0.0]),
+        );
+
+        let query = [1.0_f32, 0.0, 0.0];
+
+        // Umbral 0.5: solo sobrevive el cercano.
+        let ranked = vector_leg(&conn, &query, 10, 0.5).expect("vector leg should succeed");
+        assert_eq!(ranked, vec!["asset-near".to_string()]);
+
+        // Umbral 0.0 = deshabilitado: quedan TODOS, incluso similitud negativa.
+        let ranked = vector_leg(&conn, &query, 10, 0.0).expect("vector leg should succeed");
+        assert_eq!(
+            ranked,
+            vec![
+                "asset-near".to_string(),
+                "asset-far".to_string(),
+                "asset-anti".to_string()
+            ]
+        );
+    }
+
+    // ── Texto combinado extracción + transcripción ───────────────────────────
+
+    #[test]
+    fn load_source_record_combines_extraction_then_transcription() {
+        let conn = setup_rag_db();
+        insert_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-both", "Acta mixta"),
+            "asset-both",
+            "audio transcripto",
+            None,
+            None,
+        );
+        // Dos extracciones: la convención lee la MÁS ANTIGUA.
+        insert_extraction(&conn, "asset-both", "ocr más nuevo", 50);
+        insert_extraction(&conn, "asset-both", "ocr original", 10);
+
+        let record = load_source_record(&conn, "asset-both")
+            .expect("load should succeed")
+            .expect("record should exist");
+
+        // Misma semántica que get_asset_text: extracción + espacio + transcripción.
+        assert_eq!(record.text_content, "ocr original audio transcripto");
+        assert_eq!(
+            record.text_content,
+            crate::nlp::text_provider::get_asset_text(&conn, "asset-both")
+                .expect("get_asset_text should succeed"),
+            "combined text must match get_asset_text semantics"
+        );
+        // La transcripción arranca después de "ocr original " (13 chars).
+        assert_eq!(record.transcription_offset_chars, Some(13));
+        assert_eq!(record.item_id, "item-both");
+        assert_eq!(record.collection_name, "Archivo");
+    }
+
+    #[test]
+    fn load_source_record_ocr_only_has_no_transcription_offset() {
+        let conn = setup_rag_db();
+        insert_ocr_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-ocr", "Panfleto"),
+            "asset-ocr",
+            "texto del panfleto",
+            None,
+        );
+
+        let record = load_source_record(&conn, "asset-ocr")
+            .expect("load should succeed")
+            .expect("record should exist");
+        assert_eq!(record.text_content, "texto del panfleto");
+        assert_eq!(record.transcription_offset_chars, None);
+        assert_eq!(record.segments_json, None);
+    }
+
+    #[test]
+    fn load_source_record_transcription_only_offset_is_zero() {
+        let conn = setup_rag_db();
+        insert_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-audio", "Entrevista"),
+            "asset-audio",
+            "solo transcripción",
+            Some(r#"[{"start":0.0,"end":2.0,"text":"solo transcripción"}]"#),
+            None,
+        );
+
+        let record = load_source_record(&conn, "asset-audio")
+            .expect("load should succeed")
+            .expect("record should exist");
+        assert_eq!(record.text_content, "solo transcripción");
+        assert_eq!(record.transcription_offset_chars, Some(0));
+        assert!(record.segments_json.is_some());
+    }
+
+    #[test]
+    fn build_sources_term_in_transcription_part_yields_timestamps() {
+        let conn = setup_rag_db();
+        insert_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-both", "Acta mixta"),
+            "asset-both",
+            "el cabildo abierto de mayo",
+            Some(r#"[{"start":2.0,"end":5.5,"text":"el cabildo abierto de mayo"}]"#),
+            None,
+        );
+        insert_extraction(&conn, "asset-both", "panfleto repartido en la plaza", 1);
+
+        let record = load_source_record(&conn, "asset-both")
+            .expect("load should succeed")
+            .expect("record should exist");
+        let sources = build_sources(vec![(record, 1.0)], "cabildo", 1600, 10_000);
+
+        assert_eq!(sources.len(), 1);
+        assert_eq!(sources[0].start_seconds, Some(2.0));
+        assert_eq!(sources[0].end_seconds, Some(5.5));
+    }
+
+    #[test]
+    fn build_sources_term_in_extraction_part_yields_no_timestamps() {
+        let conn = setup_rag_db();
+        insert_doc(
+            &conn,
+            ("col-1", "Archivo"),
+            ("item-both", "Acta mixta"),
+            "asset-both",
+            "una memoria sobre la vida en la aldea",
+            Some(r#"[{"start":0.0,"end":9.0,"text":"una memoria sobre la vida en la aldea"}]"#),
+            None,
+        );
+        insert_extraction(
+            &conn,
+            "asset-both",
+            "el cabildo abierto convocado en mayo",
+            1,
+        );
+
+        let record = load_source_record(&conn, "asset-both")
+            .expect("load should succeed")
+            .expect("record should exist");
+        let sources = build_sources(vec![(record, 1.0)], "cabildo", 1600, 10_000);
+
+        assert_eq!(sources.len(), 1);
+        assert!(sources[0].snippet.contains("cabildo"));
+        assert_eq!(sources[0].start_seconds, None);
+        assert_eq!(sources[0].end_seconds, None);
     }
 }

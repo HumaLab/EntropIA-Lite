@@ -1,10 +1,12 @@
-//! RAG (Retrieval-Augmented Generation) chat sobre la base de transcripciones.
+//! RAG (Retrieval-Augmented Generation) chat sobre la base documental
+//! (extracciones OCR + transcripciones).
 //!
 //! Recuperación híbrida (embeddings + FTS5 fusionados con Reciprocal Rank
 //! Fusion) que alimenta un prompt de fragmentos numerados para que el modelo
 //! responda con citas `[n]`.
 
 pub mod commands;
+pub(crate) mod params;
 pub(crate) mod retrieval;
 pub(crate) mod store;
 

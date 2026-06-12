@@ -10,17 +10,12 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
+use super::params::{rag_params_from_settings, RagParams, TOP_K_MAX, TOP_K_MIN};
 use super::{retrieval, store};
 use super::{RagAnswer, RagChatTurn, RagConversation, RagConversationSummary, RagSource};
 use crate::llm::openrouter::{GenerationParams, OpenRouterClient};
 
-const DEFAULT_TOP_K: u8 = 6;
-const MAX_TOP_K: u8 = 12;
-const HISTORY_MAX_TURNS: usize = 6;
-const HISTORY_TURN_MAX_CHARS: usize = 500;
 const QUESTION_MAX_CHARS: usize = 4000;
-const RAG_MAX_TOKENS: i32 = 1500;
-const RAG_TEMPERATURE: f32 = 0.2;
 
 /// Resultado de la fase bloqueante (settings + historial + recuperación).
 struct RetrievalPhase {
@@ -28,6 +23,7 @@ struct RetrievalPhase {
     model: String,
     sources: Vec<RagSource>,
     history: Vec<RagChatTurn>,
+    params: RagParams,
 }
 
 /// Responde una pregunta con RAG híbrido (vector + FTS5 fusionados con RRF)
@@ -46,7 +42,7 @@ pub async fn rag_ask(
     db: tauri::State<'_, crate::db::state::AppDbState>,
 ) -> Result<RagAnswer, String> {
     let question = validate_question(&question)?;
-    let top_k = resolve_top_k(top_k);
+    let requested_top_k = top_k;
 
     // Fase de recuperación: settings + embedding + SQL corren en el pool
     // bloqueante con la conexión worker (nunca en el hilo del event loop).
@@ -57,7 +53,7 @@ pub async fn rag_ask(
         // Paso 1: lecturas de settings + historial persistido con el lock,
         // soltándolo antes de cualquier I/O de red (el embedding remoto
         // puede tardar hasta 120s).
-        let (api_key, model, embedding_config, history) = {
+        let (api_key, model, embedding_config, history, params) = {
             let conn = conn_arc.lock().map_err(|e| e.to_string())?;
 
             // `get_secret_setting` devuelve None si la referencia
@@ -73,14 +69,19 @@ pub async fn rag_ask(
                 .unwrap_or_else(|| crate::settings::DEFAULT_OPENROUTER_MODEL.to_string());
             let embedding_config = crate::nlp::embeddings::config_from_settings(&conn);
 
+            // Parámetros RAG runtime (rag_top_k, rag_min_similarity, etc.);
+            // el argumento `top_k` del comando pisa al setting si vino.
+            let mut params = rag_params_from_settings(&conn);
+            params.top_k = resolve_top_k(requested_top_k, params.top_k);
+
             // Historial desde la conversación persistida (vacío si el id no
-            // existe o no vino); mismo presupuesto de 6 turnos/500 chars.
+            // existe o no vino); presupuesto de turnos/chars configurable.
             let history = match history_conversation_id.as_deref() {
-                Some(id) => store::load_history(&conn, id, HISTORY_MAX_TURNS)?,
+                Some(id) => store::load_history(&conn, id, params.history_turns)?,
                 None => Vec::new(),
             };
 
-            (api_key, model, embedding_config, history)
+            (api_key, model, embedding_config, history, params)
         };
 
         // Paso 2 (sin lock): pierna vectorial con degradación elegante; si la
@@ -102,7 +103,7 @@ pub async fn rag_ask(
             &conn,
             &retrieval_question,
             query_embedding.as_deref(),
-            top_k,
+            &params,
         )?;
 
         Ok(RetrievalPhase {
@@ -110,6 +111,7 @@ pub async fn rag_ask(
             model,
             sources,
             history,
+            params,
         })
     })
     .await
@@ -131,13 +133,13 @@ pub async fn rag_ask(
         return Ok(empty_answer(phase.model, conversation_id));
     }
 
-    let prompt = build_rag_prompt(&question, &phase.sources, &phase.history);
+    let prompt = build_rag_prompt(&question, &phase.sources, &phase.history, &phase.params);
 
     let client = OpenRouterClient::try_new(phase.api_key, phase.model.clone())?;
     let answer = client
         .generate_with_params(
             &prompt,
-            &GenerationParams::with_defaults(RAG_MAX_TOKENS, RAG_TEMPERATURE),
+            &GenerationParams::with_defaults(phase.params.max_tokens, phase.params.temperature),
         )
         .await?;
 
@@ -289,9 +291,14 @@ fn validate_chat_api_key(raw: Option<String>) -> Result<String, String> {
         })
 }
 
-/// top_k final: default 6, clamp 1..=12.
-fn resolve_top_k(top_k: Option<u8>) -> usize {
-    usize::from(top_k.unwrap_or(DEFAULT_TOP_K).clamp(1, MAX_TOP_K))
+/// top_k final: el argumento del comando (clamp 1..=20) pisa el setting
+/// `rag_top_k`; sin argumento queda el valor del setting (ya validado por
+/// `rag_params_from_settings`).
+fn resolve_top_k(requested: Option<u8>, settings_top_k: usize) -> usize {
+    match requested {
+        Some(value) => usize::from(value).clamp(TOP_K_MIN, TOP_K_MAX),
+        None => settings_top_k,
+    }
 }
 
 /// Respuesta vacía cuando la recuperación no encontró fuentes (sin LLM).
@@ -306,9 +313,15 @@ fn empty_answer(model: String, conversation_id: Option<String>) -> RagAnswer {
 }
 
 /// Prompt completo: instrucciones + fragmentos numerados + historial + pregunta.
-fn build_rag_prompt(question: &str, sources: &[RagSource], history: &[RagChatTurn]) -> String {
+fn build_rag_prompt(
+    question: &str,
+    sources: &[RagSource],
+    history: &[RagChatTurn],
+    params: &RagParams,
+) -> String {
     let context = format_fragments(sources);
-    let history_block = format_history(history);
+    let history_block =
+        format_history(history, params.history_turns, params.history_turn_max_chars);
     crate::llm::prompt::raw_rag_answer(question, &context, &history_block)
 }
 
@@ -326,12 +339,12 @@ fn format_fragments(sources: &[RagSource]) -> String {
         .join("\n\n")
 }
 
-/// Últimos 6 turnos, cada uno truncado a 500 chars (por chars, no bytes),
-/// con prefijo Usuario:/Asistente:.
-fn format_history(history: &[RagChatTurn]) -> String {
+/// Últimos `max_turns` turnos, cada uno truncado a `turn_max_chars` (por
+/// chars, no bytes), con prefijo Usuario:/Asistente:.
+fn format_history(history: &[RagChatTurn], max_turns: usize, turn_max_chars: usize) -> String {
     history
         .iter()
-        .skip(history.len().saturating_sub(HISTORY_MAX_TURNS))
+        .skip(history.len().saturating_sub(max_turns))
         .filter(|turn| !turn.content.trim().is_empty())
         .map(|turn| {
             let prefix = if turn.role == "assistant" {
@@ -339,12 +352,7 @@ fn format_history(history: &[RagChatTurn]) -> String {
             } else {
                 "Usuario"
             };
-            let content: String = turn
-                .content
-                .trim()
-                .chars()
-                .take(HISTORY_TURN_MAX_CHARS)
-                .collect();
+            let content: String = turn.content.trim().chars().take(turn_max_chars).collect();
             format!("{prefix}: {content}")
         })
         .collect::<Vec<String>>()
@@ -381,11 +389,15 @@ mod tests {
 
     #[test]
     fn resolve_top_k_defaults_and_clamps() {
-        assert_eq!(resolve_top_k(None), 6);
-        assert_eq!(resolve_top_k(Some(0)), 1);
-        assert_eq!(resolve_top_k(Some(3)), 3);
-        assert_eq!(resolve_top_k(Some(12)), 12);
-        assert_eq!(resolve_top_k(Some(200)), 12);
+        // Sin argumento: pasa el valor del setting tal cual.
+        assert_eq!(resolve_top_k(None, 6), 6);
+        assert_eq!(resolve_top_k(None, 13), 13);
+        // Con argumento: pisa el setting, clamp 1..=20.
+        assert_eq!(resolve_top_k(Some(0), 6), 1);
+        assert_eq!(resolve_top_k(Some(3), 6), 3);
+        assert_eq!(resolve_top_k(Some(15), 6), 15);
+        assert_eq!(resolve_top_k(Some(20), 6), 20);
+        assert_eq!(resolve_top_k(Some(200), 6), 20);
     }
 
     #[test]
@@ -448,7 +460,7 @@ mod tests {
         }
         history.push(turn("user", &"x".repeat(600)));
 
-        let formatted = format_history(&history);
+        let formatted = format_history(&history, 6, 500);
         let lines: Vec<&str> = formatted.lines().collect();
         assert_eq!(lines.len(), 6, "only the last 6 turns survive");
         assert!(!formatted.contains("turno 0"));
@@ -467,7 +479,22 @@ mod tests {
 
     #[test]
     fn format_history_empty_returns_empty_string() {
-        assert!(format_history(&[]).is_empty());
+        assert!(format_history(&[], 6, 500).is_empty());
+    }
+
+    #[test]
+    fn format_history_respects_configured_turns_and_chars() {
+        let history = vec![
+            turn("user", "primer turno"),
+            turn("assistant", "segundo turno"),
+            turn("user", &"y".repeat(200)),
+        ];
+        let formatted = format_history(&history, 2, 100);
+        let lines: Vec<&str> = formatted.lines().collect();
+        assert_eq!(lines.len(), 2, "only the last 2 turns survive");
+        assert!(!formatted.contains("primer turno"));
+        let last = lines.last().expect("history should have lines");
+        assert_eq!(last.chars().count(), "Usuario: ".chars().count() + 100);
     }
 
     #[test]
@@ -477,7 +504,12 @@ mod tests {
             source(2, "Crónica", "Hemeroteca", "fragmento dos"),
         ];
         let history = vec![turn("user", "hola"), turn("assistant", "buenas")];
-        let prompt = build_rag_prompt("¿Qué pasó en mayo?", &sources, &history);
+        let prompt = build_rag_prompt(
+            "¿Qué pasó en mayo?",
+            &sources,
+            &history,
+            &RagParams::default(),
+        );
 
         assert!(prompt.contains("[1] «Acta del Cabildo» (Archivo General):\nfragmento uno"));
         assert!(prompt.contains("[2] «Crónica» (Hemeroteca):\nfragmento dos"));
@@ -490,7 +522,7 @@ mod tests {
     #[test]
     fn build_rag_prompt_without_history_omits_history_block() {
         let sources = vec![source(1, "Acta", "Archivo", "fragmento")];
-        let prompt = build_rag_prompt("pregunta", &sources, &[]);
+        let prompt = build_rag_prompt("pregunta", &sources, &[], &RagParams::default());
         assert!(!prompt.contains("Conversación previa"));
         assert!(prompt.contains("Pregunta: pregunta"));
     }

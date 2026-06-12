@@ -85,6 +85,7 @@ describe('SettingsView', () => {
     expect(screen.getByRole('tab', { name: 'APIs remotas' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Prompts' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Model Params' })).toBeInTheDocument()
+    expect(screen.getByRole('tab', { name: 'RAG Params' })).toBeInTheDocument()
     expect(screen.getByRole('tab', { name: 'Logs' })).toBeInTheDocument()
     expect(screen.queryByRole('button', { name: 'Dependencias de IA' })).not.toBeInTheDocument()
   })
@@ -111,6 +112,243 @@ describe('SettingsView', () => {
     expect(settingsSetMock).toHaveBeenCalledWith('prompt_ocr_correction', 'Custom OCR {text}')
     expect(settingsSetMock).toHaveBeenCalledWith('llm_ocr_correction_temperature', '0.6')
     expect(settingsSetMock).toHaveBeenCalledWith('llm_ocr_correction_max_tokens', '1234')
+  })
+
+  it('rejects model param formats that the Rust parser cannot parse', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'Model Params' }))
+
+    const maxTokensInput = screen.getAllByLabelText('maxTokens (1-32000, vacío = default)')[0]
+    const temperatureInput = screen.getAllByLabelText('temperature (0-2)')[0]
+
+    // Number('12.0') es 12 para JS, pero "12.0".parse::<i32>() falla en Rust.
+    await fireEvent.input(maxTokensInput!, { target: { value: '12.0' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(
+      await screen.findAllByText('Parámetro inválido en OCR correction: maxTokens')
+    ).not.toHaveLength(0)
+    expect(settingsSetMock).not.toHaveBeenCalled()
+
+    await fireEvent.input(maxTokensInput!, { target: { value: '1e3' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(settingsSetMock).not.toHaveBeenCalled()
+
+    // '0x1' vale 1 para Number() (en rango 0-2), pero parse::<f32> lo rechaza.
+    await fireEvent.input(maxTokensInput!, { target: { value: '' } })
+    await fireEvent.input(temperatureInput!, { target: { value: '0x1' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(
+      await screen.findAllByText('Parámetro inválido en OCR correction: temperature')
+    ).not.toHaveLength(0)
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('normalizes model param text to plain numbers when saving', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'Model Params' }))
+
+    const temperatureInput = screen.getAllByLabelText('temperature (0-2)')[0]
+    const maxTokensInput = screen.getAllByLabelText('maxTokens (1-32000, vacío = default)')[0]
+    await fireEvent.input(temperatureInput!, { target: { value: '.5' } })
+    await fireEvent.input(maxTokensInput!, { target: { value: '007' } })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() =>
+      expect(settingsSetMock).toHaveBeenCalledWith('llm_ocr_correction_temperature', '0.5')
+    )
+    expect(settingsSetMock).toHaveBeenCalledWith('llm_ocr_correction_max_tokens', '7')
+  })
+
+  it('switches to the Model Params tab when validation fails from another tab', async () => {
+    invokeMock.mockImplementation(async (cmd: string) => (cmd === 'logs_get' ? [] : undefined))
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'Model Params' }))
+
+    const maxTokensInput = screen.getAllByLabelText('maxTokens (1-32000, vacío = default)')[0]
+    await fireEvent.input(maxTokensInput!, { target: { value: '12.0' } })
+
+    // El error debe ser visible aunque el guardado se dispare desde otra tab.
+    await fireEvent.click(screen.getByRole('tab', { name: 'Logs' }))
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(
+      await screen.findAllByText('Parámetro inválido en OCR correction: maxTokens')
+    ).not.toHaveLength(0)
+    expect(screen.getByRole('tab', { name: 'Model Params' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('switches to the RAG params tab and shows defaults when no settings are stored', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+
+    expect(screen.getByRole('heading', { name: 'RAG Params' })).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        'Estos parámetros ajustan la recuperación del chat de investigación. Los valores mostrados son los vigentes.'
+      )
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('topK (1-20)')).toHaveValue('6')
+    expect(screen.getByLabelText('minSimilarity (0-1, 0 = off)')).toHaveValue('0')
+    expect(screen.getByLabelText('candidatesPerLeg (4-200)')).toHaveValue('24')
+    expect(screen.getByLabelText('rrfK (1-500)')).toHaveValue('60')
+    expect(screen.getByLabelText('snippetMaxChars (200-8000)')).toHaveValue('1600')
+    expect(screen.getByLabelText('contextMaxChars (1000-60000)')).toHaveValue('10000')
+    expect(screen.getByLabelText('historyTurns (0-20)')).toHaveValue('6')
+    expect(screen.getByLabelText('historyTurnMaxChars (100-4000)')).toHaveValue('500')
+    expect(screen.getByLabelText('temperature (0-2)')).toHaveValue('0.2')
+    expect(screen.getByLabelText('maxTokens (64-32000)')).toHaveValue('1500')
+  })
+
+  it('shows stored RAG params overrides instead of defaults', async () => {
+    settingsGetAllMock.mockResolvedValue([
+      { key: 'rag_top_k', value: '12' },
+      { key: 'rag_temperature', value: '0.7' },
+    ])
+
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+
+    await waitFor(() => expect(screen.getByLabelText('topK (1-20)')).toHaveValue('12'))
+    expect(screen.getByLabelText('temperature (0-2)')).toHaveValue('0.7')
+    expect(screen.getByLabelText('rrfK (1-500)')).toHaveValue('60')
+  })
+
+  it('edits and saves RAG params, persisting defaults for untouched fields', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+
+    await fireEvent.input(screen.getByLabelText('topK (1-20)'), { target: { value: '9' } })
+    await fireEvent.input(screen.getByLabelText('contextMaxChars (1000-60000)'), {
+      target: { value: '20000' },
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(settingsSetMock).toHaveBeenCalledWith('rag_top_k', '9'))
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_context_max_chars', '20000')
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_min_similarity', '0')
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_candidates_per_leg', '24')
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_rrf_k', '60')
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_snippet_max_chars', '1600')
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_history_turns', '6')
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_history_turn_max_chars', '500')
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_temperature', '0.2')
+    expect(settingsSetMock).toHaveBeenCalledWith('rag_max_tokens', '1500')
+  })
+
+  it('blocks saving out-of-range RAG params and shows the validation error', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+
+    await fireEvent.input(screen.getByLabelText('topK (1-20)'), { target: { value: '50' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findAllByText('Parámetro RAG inválido: topK')).not.toHaveLength(0)
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('blocks saving when snippetMaxChars exceeds contextMaxChars', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+
+    // Ambos dentro de su rango individual, pero snippet > context.
+    await fireEvent.input(screen.getByLabelText('snippetMaxChars (200-8000)'), {
+      target: { value: '5000' },
+    })
+    await fireEvent.input(screen.getByLabelText('contextMaxChars (1000-60000)'), {
+      target: { value: '2000' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(
+      await screen.findAllByText('snippetMaxChars no puede superar contextMaxChars.')
+    ).not.toHaveLength(0)
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('rejects RAG numeric text that Rust cannot parse, like 12.0 for an integer', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+
+    // Number('12.0') es 12 para JS, pero "12.0".parse::<usize>() falla en Rust.
+    await fireEvent.input(screen.getByLabelText('topK (1-20)'), { target: { value: '12.0' } })
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findAllByText('Parámetro RAG inválido: topK')).not.toHaveLength(0)
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('normalizes RAG numeric text to its canonical form on save', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+
+    await fireEvent.input(screen.getByLabelText('temperature (0-2)'), {
+      target: { value: '0.20' },
+    })
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    await waitFor(() => expect(settingsSetMock).toHaveBeenCalledWith('rag_temperature', '0.2'))
+  })
+
+  it('switches to the RAG params tab when validation fails from another tab', async () => {
+    invokeMock.mockImplementation(async (cmd: string) => (cmd === 'logs_get' ? [] : undefined))
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+    await fireEvent.input(screen.getByLabelText('topK (1-20)'), { target: { value: '50' } })
+
+    // El error debe ser visible aunque el guardado se dispare desde otra tab.
+    await fireEvent.click(screen.getByRole('tab', { name: 'Logs' }))
+    expect(screen.queryByRole('heading', { name: 'RAG Params' })).not.toBeInTheDocument()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }))
+
+    expect(await screen.findByRole('heading', { name: 'RAG Params' })).toBeInTheDocument()
+    expect(screen.getAllByText('Parámetro RAG inválido: topK')).not.toHaveLength(0)
+    expect(settingsSetMock).not.toHaveBeenCalled()
+  })
+
+  it('restores RAG params defaults from the tab button', async () => {
+    render(SettingsView)
+
+    await screen.findByText(/sk-o\*\*\*\*\.\.\.\*\*\*\*-key/)
+    await fireEvent.click(screen.getByRole('tab', { name: 'RAG Params' }))
+
+    await fireEvent.input(screen.getByLabelText('topK (1-20)'), { target: { value: '15' } })
+    expect(screen.getByLabelText('topK (1-20)')).toHaveValue('15')
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Restaurar defaults' }))
+
+    expect(screen.getByLabelText('topK (1-20)')).toHaveValue('6')
   })
 
   it('blocks saving OCR and Summary prompts without the text placeholder', async () => {
@@ -380,6 +618,7 @@ describe('settings dirty detection helpers', () => {
     modelParamsByFlow: {
       summary: { temperature: '0.2', maxTokens: '' },
     },
+    ragParams: { topK: '6', temperature: '0.2' },
   }
 
   it('is clean when the current snapshot matches the saved baseline', () => {
@@ -409,6 +648,12 @@ describe('settings dirty detection helpers', () => {
           ...baseInput,
           modelParamsByFlow: { summary: { temperature: '0.9', maxTokens: '' } },
         })
+      )
+    ).toBe(true)
+    expect(
+      hasUnsavedSettingsChanges(
+        saved,
+        buildSettingsSnapshot({ ...baseInput, ragParams: { topK: '12', temperature: '0.2' } })
       )
     ).toBe(true)
   })
