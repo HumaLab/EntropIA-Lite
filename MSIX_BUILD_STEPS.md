@@ -118,6 +118,21 @@ El manifiesto debe validar exactamente estos valores antes de subir a Partner Ce
   - `apps/desktop/src-tauri/target/release/bundle/msi/EntropIA Lite_<version>_x64_en-US.msi`
   - `.tmp/msix-vm/EntropIALite-Store-HLab-<version>.msix`
 
+### Release `1.0.3.0` ya verificada
+
+El MSIX `1.0.3.0` fue producido con el repack host-side y verificado contra manifiesto:
+
+- Ruta: `.tmp/msix-vm/EntropIALite-Store-HLab-1.0.3.0.msix`
+- Tamaño: 8,435,525 bytes
+- SHA256: `CD7E425D325E435B88922FA2D2ACF12A96DEF4A78DA7C9088D7181F82963154E`
+- Payload: `entropia-lite-desktop.exe` 1.0.3 (13,634,048 bytes), hash idéntico al build de release
+- Identidad leída del manifiesto:
+  - `Name` = `CONICET.EntropIALite`
+  - `Publisher` = `CN=89DF40E5-581A-4120-9A24-F701205485D6`
+  - `Version` = `1.0.3.0`
+  - `PublisherDisplayName` = `HLab`
+  - `DisplayName` = `EntropIA Lite`
+
 ### Release `1.0.2.0` ya verificada
 
 Para referencia, el MSIX `1.0.2.0` ya fue producido y verificado contra manifiesto:
