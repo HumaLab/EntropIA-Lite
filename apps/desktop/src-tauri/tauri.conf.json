@@ -1,6 +1,6 @@
 {
   "productName": "EntropIA Lite",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "identifier": "com.entropia.lite",
   "build": {
     "beforeDevCommand": "pnpm --filter @entropia/desktop dev",

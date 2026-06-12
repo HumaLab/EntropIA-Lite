@@ -29,7 +29,15 @@ Artefactos esperados:
 - `apps/desktop/src-tauri/target/release/entropia-lite-desktop.exe`
 - `apps/desktop/src-tauri/target/release/bundle/msi/EntropIA Lite_<version>_x64_en-US.msi`
 
-4. Reempaquetar MSIX de Store desde el host con el pipeline en `.tmp/msix-vm`:
+4. Actualizar la versión hardcodeada en el pipeline de repack (no se deriva de los manifiestos):
+
+- `.tmp/msix-vm/repack-store-msix-on-host.ps1` → `$storeVersion` y la ruta `$output`.
+- `.tmp/msix-vm/repack-store-msix-from-good-payload.ps1` → `$storeVersion`, `$hostDest` y `$vmOutput`.
+- `.tmp/msix-vm/EntropIALite-StoreTemplate.xml` → `PackagePath`, `Installer Path` (MSI de 3 segmentos) y `Version`.
+
+Si se omite este paso, el repack regenera un MSIX con la versión anterior y Partner Center lo rechaza por versión duplicada.
+
+5. Reempaquetar MSIX de Store desde el host con el pipeline en `.tmp/msix-vm`:
 
 ```powershell
 powershell -NoProfile -ExecutionPolicy Bypass -File .tmp\msix-vm\repack-store-msix-on-host.ps1
@@ -42,14 +50,14 @@ El script:
 - reemplaza el `entropia-lite-desktop.exe` por el build más reciente,
 - reempaqueta el MSIX final en `.tmp/msix-vm\EntropIALite-Store-HLab-<version>.msix`.
 
-5. Validar identidad y checksum del MSIX resultante:
+6. Validar identidad y checksum del MSIX resultante:
 
 ```powershell
 Get-FileHash -Algorithm SHA256 `
   ".tmp\msix-vm\EntropIALite-Store-HLab-<version>.msix"
 ```
 
-6. Subir el `.msix` a **Partner Center**.
+7. Subir el `.msix` a **Partner Center**.
 
 ## Details
 
@@ -128,6 +136,7 @@ Para referencia, el MSIX `1.0.2.0` ya fue producido y verificado contra manifies
 
 - [ ] Identidad Store confirmada contra Partner Center.
 - [ ] Versión app/base bumpeada en los tres archivos.
+- [ ] Versión hardcodeada actualizada en los scripts de repack y el template (`.tmp/msix-vm`).
 - [ ] `tauri build --bundles msi` finalizado OK.
 - [ ] MSIX base disponible (host) o generado vía VM completa.
 - [ ] `repack-store-msix-on-host.ps1` ejecutado OK.
