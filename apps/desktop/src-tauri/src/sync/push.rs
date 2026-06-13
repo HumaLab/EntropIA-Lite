@@ -484,29 +484,36 @@ where
             is_lost && row_dirty_after_snapshot(&tx, &result.table, &result.row_id, snapshot)?;
 
         if !dirty_and_lost {
-            // Advance the row version cursor to the server's seq.
-            tx.execute(
-                "INSERT INTO sync_row_versions(table_name, row_id, server_seq)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(table_name, row_id) DO UPDATE SET server_seq = excluded.server_seq",
-                rusqlite::params![result.table, result.row_id, result.server_seq],
-            )
-            .map_err(|e| format!("[sync] failed to update row version: {e}"))?;
-
-            // For a clean `lww_lost`, apply the remote winner locally.
-            if is_lost {
+            // For a clean `lww_lost` WITH a winner, apply the winner FIRST: the
+            // apply machinery records `sync_row_versions` for the row to the
+            // winner's own `server_seq` as part of writing the data. We must NOT
+            // pre-advance the version here — doing so poisons the apply's
+            // idempotency guard (`known_version >= row.server_seq`), which would
+            // then SKIP the winner write and leave the losing local row in place
+            // forever while the cursor falsely claims convergence (the bug this
+            // ordering fixes; surfaced by the multi-device E2E LWW scenario).
+            let winner_applied = if is_lost {
                 if let Some(winner) = &result.winner {
                     winner_apply(&tx, winner)?;
-                    // The winner's own server_seq is the authoritative cursor for
-                    // the row (it may differ from `result.server_seq`).
-                    tx.execute(
-                        "INSERT INTO sync_row_versions(table_name, row_id, server_seq)
-                         VALUES (?1, ?2, ?3)
-                         ON CONFLICT(table_name, row_id) DO UPDATE SET server_seq = excluded.server_seq",
-                        rusqlite::params![winner.table, winner.row_id, winner.server_seq],
-                    )
-                    .map_err(|e| format!("[sync] failed to record winner version: {e}"))?;
+                    true
+                } else {
+                    false
                 }
+            } else {
+                false
+            };
+
+            if !winner_applied {
+                // `applied` / `lww_won` (our change reached the server), or a
+                // `lww_lost` with no winner payload (defensive): advance the row
+                // version cursor to the server's seq so the next pull skips it.
+                tx.execute(
+                    "INSERT INTO sync_row_versions(table_name, row_id, server_seq)
+                     VALUES (?1, ?2, ?3)
+                     ON CONFLICT(table_name, row_id) DO UPDATE SET server_seq = excluded.server_seq",
+                    rusqlite::params![result.table, result.row_id, result.server_seq],
+                )
+                .map_err(|e| format!("[sync] failed to update row version: {e}"))?;
             }
         }
     }
@@ -1049,9 +1056,22 @@ mod tests {
         };
 
         let mut applied = Vec::new();
-        apply_push_results(&conn, snap, std::slice::from_ref(&result), |_, w| {
+        // The real `winner_apply` (the engine wires `apply_row`) records the
+        // row version to the WINNER's own server_seq as part of writing the data.
+        // The stub mirrors that so the test reflects the real contract: with the
+        // winner applied, `apply_push_results` does NOT pre-advance the version
+        // (that pre-advance used to poison the apply idempotency guard and skip
+        // the winner write — see the inline comment in `apply_push_results`).
+        apply_push_results(&conn, snap, std::slice::from_ref(&result), |c, w| {
             applied.push(w.row_id.clone());
-            Ok(())
+            c.execute(
+                "INSERT INTO sync_row_versions(table_name, row_id, server_seq)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(table_name, row_id) DO UPDATE SET server_seq = excluded.server_seq",
+                rusqlite::params![w.table, w.row_id, w.server_seq],
+            )
+            .map(|_| ())
+            .map_err(|e| e.to_string())
         })
         .expect("apply results");
 
@@ -1059,7 +1079,7 @@ mod tests {
         assert_eq!(
             base_seq(&conn, "items", "i1").unwrap(),
             200,
-            "winner version recorded"
+            "winner version recorded by the winner apply"
         );
     }
 
