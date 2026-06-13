@@ -86,6 +86,11 @@ pub struct SyncStatus {
     pub pending: i64,
     /// Rows awaiting blob download (`COUNT(sync_pending_blobs)`).
     pub blobs_pending: i64,
+    /// Estimated bytes of own blobs not yet uploaded (sum of `sync_blob_index.size`
+    /// where `uploaded = 0`). Drives the first-sync preflight in the UI (DESIGN §11:
+    /// confirm when pending blob bytes exceed the threshold). A free estimate — no
+    /// filesystem stat, just the cached sizes.
+    pub pending_blob_bytes: i64,
     /// Unacknowledged conflicts.
     pub conflicts: i64,
     /// True when |clock offset| exceeds 5 min (PROTOCOL "Reloj"; non-blocking).
@@ -102,6 +107,7 @@ impl SyncStatus {
             last_sync_at: None,
             pending: 0,
             blobs_pending: 0,
+            pending_blob_bytes: 0,
             conflicts: 0,
             clock_warning: false,
             message: None,
@@ -657,6 +663,19 @@ fn blobs_pending_count(conn: &Connection) -> i64 {
     .unwrap_or(0)
 }
 
+/// Estimated bytes of own blobs not yet uploaded (DESIGN §11 first-sync preflight).
+/// Sums the cached `sync_blob_index.size` for rows with `uploaded = 0`; this is a
+/// free, content-derived estimate — no filesystem stat. `COALESCE` keeps the empty
+/// table at `0` instead of NULL.
+fn pending_blob_bytes(conn: &Connection) -> i64 {
+    conn.query_row(
+        "SELECT COALESCE(SUM(size), 0) FROM sync_blob_index WHERE uploaded = 0",
+        [],
+        |row| row.get(0),
+    )
+    .unwrap_or(0)
+}
+
 fn conflicts_count(conn: &Connection) -> i64 {
     conn.query_row(
         "SELECT COUNT(*) FROM sync_conflicts WHERE acknowledged = 0",
@@ -675,6 +694,7 @@ pub fn build_status(conn: &Connection, state: SyncState, message: Option<String>
         last_sync_at,
         pending: pending_count(conn),
         blobs_pending: blobs_pending_count(conn),
+        pending_blob_bytes: pending_blob_bytes(conn),
         conflicts: conflicts_count(conn),
         clock_warning: offset.abs() > CLOCK_WARNING_MS,
         message,

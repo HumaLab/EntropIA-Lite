@@ -208,7 +208,15 @@ fn build_status_reports_pending_blobs_and_conflicts() {
          INSERT INTO sync_conflicts(id,table_name,row_id,reason,created_at,acknowledged)
            VALUES('cf1','items','i1','lww_lost',1,0);
          INSERT INTO sync_conflicts(id,table_name,row_id,reason,created_at,acknowledged)
-           VALUES('cf2','items','i2','lww_lost',1,1);",
+           VALUES('cf2','items','i2','lww_lost',1,1);
+         -- Two own blobs not yet uploaded (100 + 200) and one already uploaded (999):
+         -- the preflight estimate must sum only the un-uploaded sizes.
+         INSERT INTO sync_blob_index(asset_id,sha256,size,file_mtime_ms,uploaded)
+           VALUES('b1','h1',100,1,0);
+         INSERT INTO sync_blob_index(asset_id,sha256,size,file_mtime_ms,uploaded)
+           VALUES('b2','h2',200,1,0);
+         INSERT INTO sync_blob_index(asset_id,sha256,size,file_mtime_ms,uploaded)
+           VALUES('b3','h3',999,1,1);",
     )
     .unwrap();
     meta_set(&conn, "last_sync_at", "1700000000000").unwrap();
@@ -217,6 +225,10 @@ fn build_status_reports_pending_blobs_and_conflicts() {
     assert_eq!(status.state, SyncState::Idle);
     assert_eq!(status.pending, 2, "coalesced distinct (table,row) count");
     assert_eq!(status.blobs_pending, 1);
+    assert_eq!(
+        status.pending_blob_bytes, 300,
+        "only un-uploaded blob sizes (100 + 200) feed the preflight estimate"
+    );
     assert_eq!(status.conflicts, 1, "only unacknowledged conflicts counted");
     assert_eq!(status.last_sync_at, Some(1_700_000_000_000));
     assert!(!status.clock_warning, "no offset stored → no warning");
@@ -226,6 +238,7 @@ fn build_status_reports_pending_blobs_and_conflicts() {
     assert_eq!(json["state"], "idle");
     assert!(json.get("message").is_none(), "message omitted when None");
     assert!(json.get("blobs_pending").is_some());
+    assert!(json.get("pending_blob_bytes").is_some());
 }
 
 #[test]
