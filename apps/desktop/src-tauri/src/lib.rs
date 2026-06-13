@@ -13,6 +13,7 @@ mod rag;
 // Runtime structs remain for Tauri contracts; Lite commands return no-op status.
 mod runtime;
 mod settings;
+mod sync;
 mod transcription;
 
 use db::state::AppDbState;
@@ -263,6 +264,16 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
 
             app.manage(AppDbState::new(ui_conn, worker_conn, db_path.clone()));
 
+            // Sync capture bootstrap (DESIGN §6.1): ensure the sync schema and the
+            // 45 capture triggers AFTER every ensure_*/migrate_* patch above. On a
+            // fresh install the JS migrations haven't run yet, so this only covers
+            // tables that already exist; the frontend re-invokes sync_ensure_capture
+            // after initStore() to cover the rest. Non-fatal — never block startup.
+            match sync::ensure_capture_on_path(&db_path) {
+                Ok(()) => eprintln!("[sync] capture triggers ensured at setup"),
+                Err(error) => eprintln!("[sync] capture bootstrap failed (will retry from UI): {error}"),
+            }
+
             // Dependency manager: kept for source UI contracts; Lite reports no-op dependency state.
             app.manage(deps::DepsState::new());
 
@@ -457,6 +468,7 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             app_logs::logs_clear,
             app_logs::logs_open_dir,
             open_external_url,
+            sync::sync_ensure_capture,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
