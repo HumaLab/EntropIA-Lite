@@ -13,7 +13,11 @@ mod rag;
 // Runtime structs remain for Tauri contracts; Lite commands return no-op status.
 mod runtime;
 mod settings;
-mod sync;
+// `pub` so the multi-device E2E integration test (`tests/sync_e2e.rs`, DESIGN
+// §13.4) can drive the engine's internal API (run_cycle / ensure_capture /
+// session helpers) directly against a real server. Nothing else in the binary
+// depends on this visibility; the Tauri command surface is unchanged.
+pub mod sync;
 mod transcription;
 
 use db::state::AppDbState;
