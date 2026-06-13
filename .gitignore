@@ -7,6 +7,8 @@ scripts/
 !apps/desktop/src-tauri/scripts/materialize_windows_runtime_payload.py
 !apps/desktop/src-tauri/resources/runtime-pack/*/scripts/
 !apps/desktop/src-tauri/resources/runtime-pack/*/scripts/*.py
+!packages/store/scripts/
+!packages/store/scripts/*.mjs
 
 # Ignore
 .gga

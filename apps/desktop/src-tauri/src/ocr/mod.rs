@@ -811,7 +811,9 @@ fn save_extraction(
     text_content: &str,
     method: &str,
 ) -> Result<(), String> {
-    let id = uuid::Uuid::new_v4().to_string();
+    // Deterministic id (DESIGN §4.6): one extraction per asset, so derive the id
+    // from asset_id to converge duplicates across devices.
+    let id = format!("ext-{asset_id}");
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -821,6 +823,7 @@ fn save_extraction(
         "INSERT INTO extractions(id, asset_id, text_content, method, confidence, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)
          ON CONFLICT(asset_id) DO UPDATE SET
+           id = excluded.id,
            text_content = excluded.text_content,
            method = excluded.method,
            confidence = excluded.confidence,
@@ -837,7 +840,8 @@ fn save_layout(
     asset_id: &str,
     layout: &LayoutPersistencePayload,
 ) -> Result<(), String> {
-    let id = uuid::Uuid::new_v4().to_string();
+    // Deterministic id (DESIGN §4.6): one layout per asset.
+    let id = format!("lay-{asset_id}");
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -851,6 +855,7 @@ fn save_layout(
         "INSERT INTO layouts(id, asset_id, regions, blocks, model, image_width, image_height, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
          ON CONFLICT(asset_id) DO UPDATE SET
+           id = excluded.id,
            regions = excluded.regions,
            blocks = excluded.blocks,
            model = excluded.model,
@@ -1049,6 +1054,48 @@ mod tests {
             .expect("count layouts");
         assert_eq!(extractions, 1);
         assert_eq!(layouts, 1);
+
+        // Deterministic ids (DESIGN §4.6).
+        let extraction_id: String = conn
+            .query_row(
+                "SELECT id FROM extractions WHERE asset_id = 'asset-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read extraction id");
+        let layout_id: String = conn
+            .query_row(
+                "SELECT id FROM layouts WHERE asset_id = 'asset-1'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read layout id");
+        assert_eq!(extraction_id, "ext-asset-1");
+        assert_eq!(layout_id, "lay-asset-1");
+    }
+
+    #[test]
+    fn save_extraction_id_converges_on_re_ocr() {
+        // A re-OCR (UPSERT by asset_id) must keep the deterministic id even if a
+        // legacy UUID row was present first (DESIGN §4.6: id = excluded.id).
+        let conn = open_extractions_only_db();
+        conn.execute(
+            "INSERT INTO extractions(id, asset_id, text_content, method, confidence, created_at)
+             VALUES ('legacy-uuid', 'asset-9', 'old', 'native', NULL, 1)",
+            [],
+        )
+        .expect("seed legacy row");
+
+        save_extraction(&conn, "asset-9", "nuevo", "glm_ocr").expect("re-ocr upsert");
+
+        let id: String = conn
+            .query_row(
+                "SELECT id FROM extractions WHERE asset_id = 'asset-9'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("read converged id");
+        assert_eq!(id, "ext-asset-9");
     }
 
     #[test]

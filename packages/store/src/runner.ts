@@ -3,8 +3,19 @@ import type { DbClient } from './types'
 // ---------------------------------------------------------------------------
 // Migration registry — SQL inlined as strings for Tauri bundling.
 // Cannot use dynamic fs reads at runtime in a Tauri webview.
+//
+// Sync authoring convention (DESIGN §6.4): any migration that does a rebuild
+// (DROP+RENAME) of a SYNCED table (collections, items, assets, notes,
+// annotations, extractions, transcriptions, layouts, entities, triples, topics,
+// item_topics, llm_results, rag_conversations, rag_messages) MUST, in the same
+// flow: (a) let the Rust `sync_ensure_capture` re-create that table's 3 capture
+// triggers, and (b) when a sync session exists, re-seed that table's oplog.
+// Prefer additive `ALTER TABLE … DEFAULT` over rebuilds for synced tables.
+// `sync_ensure_capture` runs after migrations finish and self-heals triggers,
+// but a rebuild still loses any oplog entries for in-flight writes — the re-seed
+// covers that residual window.
 // ---------------------------------------------------------------------------
-const MIGRATIONS: Record<string, string> = {
+export const MIGRATIONS: Record<string, string> = {
   '0001_initial': `
 -- Migration tracking table
 CREATE TABLE IF NOT EXISTS _migrations (
@@ -381,7 +392,39 @@ CREATE TABLE IF NOT EXISTS rag_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_rag_messages_conversation ON rag_messages(conversation_id, sort_index);
   `.trim(),
+
+  '0023_sync_ids': `
+-- Deterministic ids for one-per-asset tables (DESIGN §4.6). Rewrites existing
+-- rows so two devices that OCR/transcribe the same asset converge on a single
+-- server row. Nothing references these ids by FK (verified), so the rewrite is
+-- safe. Additive — no rebuild of a synced table, so no re-seed is required.
+UPDATE extractions SET id = 'ext-' || asset_id;
+UPDATE transcriptions SET id = 'trx-' || asset_id;
+UPDATE layouts SET id = 'lay-' || asset_id;
+  `.trim(),
 }
+
+/**
+ * Programmatic DDL for the `layouts` table and its indexes (migration 0020 runs
+ * imperatively in {@link applyLayoutsMigration} because legacy desktop DBs may
+ * already have a column-less layouts table). Exported so the schema-fixture
+ * export script can reproduce the canonical final shape of a fresh install
+ * without replaying the legacy-migration branches.
+ */
+export const LAYOUTS_DDL: string = `
+CREATE TABLE IF NOT EXISTS layouts (
+  id TEXT PRIMARY KEY,
+  asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  regions TEXT NOT NULL,
+  blocks TEXT NOT NULL DEFAULT '[]',
+  model TEXT NOT NULL,
+  image_width INTEGER NOT NULL,
+  image_height INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_layouts_asset_id_unique ON layouts(asset_id);
+CREATE INDEX IF NOT EXISTS idx_layouts_asset_id ON layouts(asset_id);
+`.trim()
 
 async function applyLayoutsMigration(client: DbClient): Promise<void> {
   const now = Date.now()
@@ -422,6 +465,42 @@ async function applyLayoutsMigration(client: DbClient): Promise<void> {
     SET created_at = ${now}
     WHERE created_at IS NULL OR created_at = 0
   `)
+}
+
+/**
+ * Builds the full application schema as a single SQL string, in migration
+ * order, for use as a fixture by the Rust sync tests. This reproduces what a
+ * FRESH install ends up with after `runMigrations`:
+ *
+ * - every registry migration's SQL, applied in sorted (lexicographic) order;
+ * - the `0020_layouts` registry entry (a no-op marker) is replaced by the
+ *   canonical programmatic {@link LAYOUTS_DDL}, mirroring how
+ *   {@link applyLayoutsMigration} runs imperatively at runtime.
+ *
+ * The output is deterministic so a checked-in artifact can be diffed against it
+ * (see `scripts/export-schema.mjs` and the matching vitest freshness test).
+ */
+export function buildSchemaFixture(): string {
+  const header = [
+    '-- AUTO-GENERATED schema fixture for the Rust sync tests. DO NOT EDIT BY HAND.',
+    '-- Regenerate with: pnpm --filter @entropia/store export-schema',
+    '-- Source of truth: packages/store/src/runner.ts (MIGRATIONS + LAYOUTS_DDL).',
+    '',
+  ].join('\n')
+
+  const sections = Object.keys(MIGRATIONS)
+    .sort()
+    .map((name) => {
+      const sql = (name === '0020_layouts' ? LAYOUTS_DDL : MIGRATIONS[name]!).trim()
+      // Several registry entries omit the trailing semicolon on their last
+      // statement (harmless at runtime — the runner splits per migration on
+      // ';'). The fixture is fed to one execute_batch, so each section must be
+      // self-terminated or the next migration's CREATE runs into it.
+      const terminated = sql.endsWith(';') ? sql : `${sql};`
+      return `-- ${name}\n${terminated}`
+    })
+
+  return `${header}\n${sections.join('\n\n')}\n`
 }
 
 /**
