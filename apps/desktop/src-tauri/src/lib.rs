@@ -469,6 +469,9 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             app_logs::logs_open_dir,
             open_external_url,
             sync::sync_ensure_capture,
+            sync::session::sync_register_account,
+            sync::session::sync_login,
+            sync::session::sync_logout,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,7 +3,9 @@
 //! contends on `ui_conn`.
 
 pub mod capture;
+pub mod http;
 pub mod schema;
+pub mod session;
 
 #[cfg(test)]
 pub mod test_support;
@@ -14,8 +16,10 @@ use tauri::State;
 use crate::db::state::AppDbState;
 
 /// Opens a dedicated sync connection with the standard pragmas. The sync module
-/// must never share `ui_conn`/`worker_conn` (DESIGN §3, house rules).
-fn open_sync_connection(db_path: &std::path::Path) -> Result<Connection, String> {
+/// must never share `ui_conn`/`worker_conn` (DESIGN §3, house rules). Shared by
+/// the capture bootstrap and the session/push commands so every sync path uses
+/// an identically-configured connection.
+pub(crate) fn open_sync_connection(db_path: &std::path::Path) -> Result<Connection, String> {
     let conn = Connection::open(db_path)
         .map_err(|e| format!("[sync] failed to open sync connection: {e}"))?;
     conn.execute_batch(
