@@ -83,6 +83,201 @@ pub fn trg_sync_count(conn: &Connection) -> i64 {
     .expect("count sync triggers")
 }
 
+// ---------------------------------------------------------------------------
+// MockSyncApi — in-memory [`SyncApi`] for push/blob tests (no server needed).
+// ---------------------------------------------------------------------------
+
+use crate::sync::http::{
+    BlobExists, DeleteAccountRequest, DevicesResponse, HealthResponse, LoginRequest, LoginResponse,
+    PullResponse, PushChange, PushRequest, PushResponse, PushResult, RegisterRequest,
+    RegisterResponse, SyncApi, SyncError, UsageResponse,
+};
+use std::sync::Mutex;
+
+/// Configurable in-memory [`SyncApi`] double. Records pushed changes and returns
+/// canned per-row results. Optionally rejects any push batch larger than
+/// `max_batch_changes` with a `413 payload_too_large` so the bisection path can
+/// be exercised. Blob HEADs return whatever is in `existing_blobs`.
+pub struct MockSyncApi {
+    /// All changes the mock received across every (sub)batch, in order.
+    pub pushed: Mutex<Vec<PushChange>>,
+    /// SHAs the server already has (HEAD → 200).
+    pub existing_blobs: Mutex<std::collections::HashSet<String>>,
+    /// SHAs that were PUT during the test.
+    pub put_blobs: Mutex<Vec<String>>,
+    /// When `Some(n)`, any batch with more than `n` changes is rejected 413.
+    pub max_batch_changes: Option<usize>,
+    /// Status assigned to every result row ("applied" by default).
+    pub result_status: String,
+    /// Monotonic server_seq assigned to results.
+    next_seq: Mutex<i64>,
+    pub server_now_ms: i64,
+    pub server_epoch: String,
+}
+
+impl Default for MockSyncApi {
+    fn default() -> Self {
+        Self {
+            pushed: Mutex::new(Vec::new()),
+            existing_blobs: Mutex::new(std::collections::HashSet::new()),
+            put_blobs: Mutex::new(Vec::new()),
+            max_batch_changes: None,
+            result_status: "applied".to_string(),
+            next_seq: Mutex::new(1),
+            server_now_ms: 1_700_000_000_000,
+            server_epoch: "mock-epoch".to_string(),
+        }
+    }
+}
+
+impl MockSyncApi {
+    pub fn with_max_batch(max: usize) -> Self {
+        Self {
+            max_batch_changes: Some(max),
+            ..Default::default()
+        }
+    }
+
+    /// Total number of changes recorded across all (sub)batches.
+    pub fn pushed_count(&self) -> usize {
+        self.pushed.lock().unwrap().len()
+    }
+}
+
+impl SyncApi for MockSyncApi {
+    async fn register(&self, _req: RegisterRequest) -> Result<RegisterResponse, SyncError> {
+        Ok(RegisterResponse {
+            account_id: "mock-account".to_string(),
+        })
+    }
+
+    async fn login(&self, _req: LoginRequest) -> Result<LoginResponse, SyncError> {
+        Ok(LoginResponse {
+            account_id: "mock-account".to_string(),
+            device_id: "mock-device".to_string(),
+            device_token: "mock-token".to_string(),
+        })
+    }
+
+    async fn logout(&self, _token: &str) -> Result<(), SyncError> {
+        Ok(())
+    }
+
+    async fn devices(&self, _token: &str) -> Result<DevicesResponse, SyncError> {
+        Ok(DevicesResponse {
+            devices: Vec::new(),
+        })
+    }
+
+    async fn revoke(&self, _token: &str, _device_id: &str) -> Result<(), SyncError> {
+        Ok(())
+    }
+
+    async fn delete_account(
+        &self,
+        _token: &str,
+        _req: DeleteAccountRequest,
+    ) -> Result<(), SyncError> {
+        Ok(())
+    }
+
+    async fn usage(&self, _token: &str) -> Result<UsageResponse, SyncError> {
+        Ok(UsageResponse {
+            rows: 0,
+            blobs_count: 0,
+            blobs_bytes: 0,
+            quota_bytes: 0,
+        })
+    }
+
+    async fn health(&self) -> Result<HealthResponse, SyncError> {
+        Ok(HealthResponse {
+            status: "ok".to_string(),
+            version: "test".to_string(),
+            epoch: self.server_epoch.clone(),
+            server_now_ms: self.server_now_ms,
+            limits: Default::default(),
+        })
+    }
+
+    async fn push(
+        &self,
+        _token: &str,
+        _schema_tag: &str,
+        req: PushRequest,
+    ) -> Result<PushResponse, SyncError> {
+        if let Some(max) = self.max_batch_changes {
+            if req.changes.len() > max {
+                return Err(SyncError::Api {
+                    status: 413,
+                    code: "payload_too_large".to_string(),
+                    message: "batch too large".to_string(),
+                });
+            }
+        }
+
+        let mut results = Vec::with_capacity(req.changes.len());
+        {
+            let mut seq = self.next_seq.lock().unwrap();
+            for change in &req.changes {
+                let server_seq = *seq;
+                *seq += 1;
+                results.push(PushResult {
+                    table: change.table.clone(),
+                    row_id: change.row_id.clone(),
+                    status: self.result_status.clone(),
+                    server_seq,
+                    winner: None,
+                });
+            }
+        }
+        self.pushed.lock().unwrap().extend(req.changes);
+
+        Ok(PushResponse {
+            results,
+            max_server_seq: *self.next_seq.lock().unwrap() - 1,
+            server_epoch: self.server_epoch.clone(),
+            server_now_ms: self.server_now_ms,
+        })
+    }
+
+    async fn pull(
+        &self,
+        _token: &str,
+        _schema_tag: &str,
+        since: i64,
+        _limit: i64,
+    ) -> Result<PullResponse, SyncError> {
+        Ok(PullResponse {
+            rows: Vec::new(),
+            next_since: since,
+            has_more: false,
+            schema_tag: String::new(),
+            server_epoch: self.server_epoch.clone(),
+            server_now_ms: self.server_now_ms,
+        })
+    }
+
+    async fn blob_head(&self, _token: &str, sha256: &str) -> Result<BlobExists, SyncError> {
+        Ok(self.existing_blobs.lock().unwrap().contains(sha256))
+    }
+
+    async fn blob_put(&self, _token: &str, sha256: &str, _bytes: Vec<u8>) -> Result<(), SyncError> {
+        self.put_blobs.lock().unwrap().push(sha256.to_string());
+        self.existing_blobs
+            .lock()
+            .unwrap()
+            .insert(sha256.to_string());
+        Ok(())
+    }
+
+    async fn blob_get(&self, _token: &str, _sha256: &str) -> Result<reqwest::Response, SyncError> {
+        Err(SyncError::Network(
+            "blob_get not supported by mock".to_string(),
+        ))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
