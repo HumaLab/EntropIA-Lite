@@ -270,6 +270,140 @@ pub fn asset_payload_to_wire(
 }
 
 // ---------------------------------------------------------------------------
+// Blob upload orchestration (DESIGN §7, PROTOCOL "Transformación de assets" —
+// PUSH direction). The engine calls [`prepare_asset_push`] for each dirty asset
+// `upsert` change BEFORE the row goes into a push batch: blob first, row after,
+// so no device ever sees a row whose blob is absent.
+// ---------------------------------------------------------------------------
+
+/// What to do with an asset `upsert` change after the blob step (DESIGN §7).
+#[derive(Debug)]
+pub enum AssetPushOutcome {
+    /// The blob is present on the server (HEAD/PUT confirmed); the change's
+    /// payload was rewritten to the wire shape (`rel_path`/`sha256`/`size`).
+    Ready,
+    /// The row must NOT be pushed (local file missing and not confirmed
+    /// uploaded, or path outside the app-data dir). The caller journals
+    /// `apply_error`, purges the oplog entry, and skips the row.
+    Skip(String),
+}
+
+/// Prepares one asset `upsert` [`PushChange`](crate::sync::http::PushChange) for
+/// the wire (DESIGN §7, PROTOCOL "Transformación de assets"). Mutates `change`
+/// in place. Steps:
+///
+/// 1. Read the absolute `path` from the raw payload; derive `rel_path` (a path
+///    outside the app-data dir ⇒ [`AssetPushOutcome::Skip`]).
+/// 2. If the local file exists: hash (mtime cache), HEAD the server, PUT if
+///    missing, mark `uploaded=1`, then rewrite the payload to the wire shape.
+/// 3. If the local file is MISSING: only push when `uploaded=1` is confirmed by
+///    a fresh HEAD (a HEAD 404 resets `uploaded=0`); otherwise skip (the row
+///    would reference a blob no device can fetch).
+///
+/// Non-asset changes and `delete` ops must NOT be passed here.
+pub async fn prepare_asset_push<A: crate::sync::http::SyncApi>(
+    api: &A,
+    token: &str,
+    conn: &Connection,
+    app_data_dir: &Path,
+    change: &mut crate::sync::http::PushChange,
+) -> Result<AssetPushOutcome, String> {
+    let Some(payload) = change.payload.as_ref() else {
+        return Ok(AssetPushOutcome::Skip(
+            "asset upsert has no payload".to_string(),
+        ));
+    };
+    let asset_id = change.row_id.clone();
+    let abs_path = payload
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+
+    let rel_path = match derive_rel_path(&abs_path, app_data_dir) {
+        Ok(rel) => rel,
+        Err(err) => return Ok(AssetPushOutcome::Skip(err.to_string())),
+    };
+
+    let local_path = Path::new(&abs_path);
+    if local_path.is_file() {
+        // File present: hash (cache), ensure the blob is on the server.
+        let digest = resolve_blob_digest(conn, &asset_id, local_path)?;
+        ensure_blob_on_server(api, token, conn, &asset_id, &digest, local_path).await?;
+        let wire = asset_payload_to_wire(
+            change.payload.take().unwrap_or(serde_json::Value::Null),
+            &rel_path,
+            &digest.sha256,
+            digest.size,
+        );
+        change.payload = Some(wire);
+        Ok(AssetPushOutcome::Ready)
+    } else {
+        // File missing: only safe to push if a prior upload is HEAD-confirmed.
+        let cached: Option<(String, i64, i64)> = conn
+            .query_row(
+                "SELECT sha256, size, uploaded FROM sync_blob_index WHERE asset_id = ?1",
+                [&asset_id],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .ok();
+        let Some((sha256, size, uploaded)) = cached else {
+            return Ok(AssetPushOutcome::Skip(
+                "asset file missing and never hashed".to_string(),
+            ));
+        };
+        if uploaded != 1 {
+            return Ok(AssetPushOutcome::Skip(
+                "asset file missing and blob not uploaded".to_string(),
+            ));
+        }
+        // Confirm with HEAD (uploaded=1 is only trusted post-HEAD, DESIGN §6.3).
+        if api.blob_head(token, &sha256).await.map_err(String::from)? {
+            let wire = asset_payload_to_wire(
+                change.payload.take().unwrap_or(serde_json::Value::Null),
+                &rel_path,
+                &sha256,
+                size,
+            );
+            change.payload = Some(wire);
+            Ok(AssetPushOutcome::Ready)
+        } else {
+            // Server lost the blob and we have no local file to re-upload.
+            reset_blob_uploaded(conn, &asset_id)?;
+            Ok(AssetPushOutcome::Skip(
+                "asset file missing and server blob gone (HEAD 404)".to_string(),
+            ))
+        }
+    }
+}
+
+/// HEAD → PUT the blob for `digest` if the server does not already have it, then
+/// mark `uploaded=1` (DESIGN §7). `uploaded=1` is always re-confirmed by the
+/// HEAD here, so a server restore that dropped the blob triggers a fresh PUT.
+async fn ensure_blob_on_server<A: crate::sync::http::SyncApi>(
+    api: &A,
+    token: &str,
+    conn: &Connection,
+    asset_id: &str,
+    digest: &BlobDigest,
+    local_path: &Path,
+) -> Result<(), String> {
+    let exists = api
+        .blob_head(token, &digest.sha256)
+        .await
+        .map_err(String::from)?;
+    if !exists {
+        let bytes = std::fs::read(local_path)
+            .map_err(|e| format!("[sync] failed to read blob {}: {e}", local_path.display()))?;
+        api.blob_put(token, &digest.sha256, bytes)
+            .await
+            .map_err(String::from)?;
+    }
+    mark_blob_uploaded(conn, asset_id)?;
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Blob download (DESIGN §7, PROTOCOL "Blobs" — PULL direction, C3)
 // ---------------------------------------------------------------------------
 

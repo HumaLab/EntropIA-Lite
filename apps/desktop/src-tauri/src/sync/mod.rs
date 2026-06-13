@@ -6,6 +6,8 @@ pub mod apply;
 pub mod blobs;
 pub mod capture;
 pub mod cascade;
+pub mod commands;
+pub mod engine;
 pub mod http;
 pub mod pull;
 pub mod push;

@@ -6,7 +6,6 @@
 //!
 //! The async network orchestration is generic over [`SyncApi`] so the whole
 //! cycle is testable against the in-memory mock with no server.
-#![allow(dead_code)]
 
 use std::path::Path;
 

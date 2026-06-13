@@ -215,7 +215,7 @@ pub struct LoginResponse {
     pub device_token: String,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct DeviceInfo {
     pub id: String,
     #[serde(default)]
@@ -243,7 +243,7 @@ pub struct DeleteAccountRequest {
     pub password: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct UsageResponse {
     #[serde(default)]
     pub rows: i64,

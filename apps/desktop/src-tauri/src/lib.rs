@@ -283,6 +283,14 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
                 Err(error) => eprintln!("[sync] orphan .part cleanup failed: {error}"),
             }
 
+            // Sync engine (DESIGN §3.1): single long-lived task owning its own
+            // connection. Spawned PAUSED — it runs no cycle until the gate opens
+            // (capture ensured + a session exists). Held in managed state so the
+            // sync_now / sync_status commands can reach it.
+            let sync_engine = sync::engine::start_engine(app.handle().clone(), db_path.clone());
+            app.manage(sync_engine);
+            eprintln!("[sync] engine spawned (gated until capture + session)");
+
             // Dependency manager: kept for source UI contracts; Lite reports no-op dependency state.
             app.manage(deps::DepsState::new());
 
@@ -482,9 +490,27 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             sync::session::sync_register_account,
             sync::session::sync_login,
             sync::session::sync_logout,
+            sync::commands::sync_status,
+            sync::commands::sync_now,
+            sync::commands::sync_set_auto,
+            sync::commands::sync_list_devices,
+            sync::commands::sync_revoke_device,
+            sync::commands::sync_list_conflicts,
+            sync::commands::sync_ack_conflict,
+            sync::commands::sync_get_usage,
+            sync::commands::sync_delete_account,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Signal the sync engine to tear down cleanly on app exit (DESIGN
+            // §3.1) instead of being killed mid-cycle.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(engine) = app_handle.try_state::<sync::engine::SyncEngine>() {
+                    engine.shutdown();
+                }
+            }
+        });
 }
 
 fn migrate_legacy_app_dir(app_dir: &Path) -> Result<(), String> {
