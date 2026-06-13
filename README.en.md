@@ -4,7 +4,11 @@
 
 EntropIA Lite is a desktop app for organizing corpora, processing documents, and enriching sources with AI through remote providers. It keeps the EntropIA experience where it makes sense, but removes the heavy local stack: it does not download or run local models for LLMs, embeddings, NER, OCR, or transcription.
 
-Current version: `0.1.0`.
+Current version: `1.0.3`.
+
+## What's New
+
+This release introduces a conversational chat over your collections: you can now ask EntropIA Lite about the content of your transcriptions and documents and get answers drawn from a hybrid semantic-and-keyword search across your knowledge base. Conversations are saved and can be resumed from a history sidebar. The chat now also draws on text extracted from your documents via OCR, and a new settings tab lets you fine-tune the retrieval parameters. This version further adds a per-collection text analysis panel with a word cloud, and improves how long texts are processed so that embedding generation, entity recognition, and relation extraction are more stable and reliable. Rounding out the release is a set of visual refinements across the interface along with usability fixes, including correct handling of input-method (IME) composition while typing. EntropIA Lite is now also available as a `.deb` package for Linux, in addition to the `.msi` and `.exe` installers for Windows.
 
 ## Quick Path
 
@@ -54,6 +58,8 @@ Works today for:
 - transcribing audio through an API;
 - enriching with embeddings, NER, summaries, and triples;
 - searching through FTS and similarity when embeddings have been generated;
+- chatting with your collections through a RAG chat with persistent history;
+- analyzing a collection's text with a metrics panel and word cloud;
 - reviewing results, metadata, notes, and annotations in the UI.
 
 Out of scope for Lite:
@@ -120,4 +126,4 @@ Do not run `tauri build` unless you actually want to generate a local package.
 
 ## Status
 
-EntropIA Lite is in an early stage (`0.1.0`). It is usable for API-only document workflows, but should still be treated as beta: UX, data, and provider details may change.
+EntropIA Lite is at version `1.0.3`. It is usable for API-only document workflows, but should still be treated as beta: UX, data, and provider details may change.
