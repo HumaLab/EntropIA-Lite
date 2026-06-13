@@ -967,6 +967,7 @@ dependencies = [
  "base64 0.22.1",
  "encoding_rs",
  "hound",
+ "http",
  "image",
  "imageproc",
  "keyring",

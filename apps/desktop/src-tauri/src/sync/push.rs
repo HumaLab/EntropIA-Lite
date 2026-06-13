@@ -206,6 +206,37 @@ fn sql_value_to_json(row: &rusqlite::Row, idx: usize) -> Result<Value, String> {
     })
 }
 
+/// Rewrites an `item_topics` payload's `topic_id` from the LOCAL topic id back to
+/// the canonical server (remote) id when a topic alias exists (DESIGN §4.7). The
+/// alias table maps `remote_id → local_id`; the push direction needs the reverse
+/// lookup so a row whose `topic_id` is the local survivor of a name collision is
+/// pushed under the id the server already knows. No-op when no alias matches.
+pub fn rewrite_item_topics_topic_id_for_push(
+    conn: &Connection,
+    payload: &mut Value,
+) -> Result<(), String> {
+    let Some(local_topic) = payload
+        .get("topic_id")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+    else {
+        return Ok(());
+    };
+    let remote: Option<String> = conn
+        .query_row(
+            "SELECT remote_id FROM sync_topic_aliases WHERE local_id = ?1 LIMIT 1",
+            [&local_topic],
+            |row| row.get(0),
+        )
+        .ok();
+    if let Some(remote_id) = remote {
+        if let Some(obj) = payload.as_object_mut() {
+            obj.insert("topic_id".to_string(), Value::String(remote_id));
+        }
+    }
+    Ok(())
+}
+
 /// The last server version seen for `(table, row_id)` from `sync_row_versions`,
 /// or `0` when never synced (PROTOCOL `base_seq`).
 pub fn base_seq(conn: &Connection, table: &str, row_id: &str) -> Result<i64, String> {
@@ -267,14 +298,23 @@ pub fn build_change(
     }
 
     match read_row_payload(conn, &op.table, &op.row_id)? {
-        Some(payload) => Ok(PushChange {
-            table: op.table.clone(),
-            row_id: op.row_id.clone(),
-            op: "upsert".to_string(),
-            changed_at,
-            base_seq: base,
-            payload: Some(payload),
-        }),
+        Some(mut payload) => {
+            // item_topics: rewrite a locally-aliased topic_id back to the canonical
+            // server (remote) id so both devices converge on one topic (DESIGN
+            // §4.7 — "reescribir topic_id por el alias en cada item_topics
+            // pusheado").
+            if op.table == "item_topics" {
+                rewrite_item_topics_topic_id_for_push(conn, &mut payload)?;
+            }
+            Ok(PushChange {
+                table: op.table.clone(),
+                row_id: op.row_id.clone(),
+                op: "upsert".to_string(),
+                changed_at,
+                base_seq: base,
+                payload: Some(payload),
+            })
+        }
         None => Ok(PushChange {
             table: op.table.clone(),
             row_id: op.row_id.clone(),

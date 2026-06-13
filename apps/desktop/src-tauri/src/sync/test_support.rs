@@ -113,6 +113,15 @@ pub struct MockSyncApi {
     next_seq: Mutex<i64>,
     pub server_now_ms: i64,
     pub server_epoch: String,
+    /// Canned pull pages served in order on each `pull` call (queue popped from
+    /// the front). When empty, `pull` returns an empty terminal page.
+    pub pull_pages: Mutex<std::collections::VecDeque<PullResponse>>,
+    /// Bytes the server serves for `blob_get`, keyed by sha256. A missing key
+    /// produces a `404`.
+    pub blob_bytes: Mutex<std::collections::HashMap<String, Vec<u8>>>,
+    /// When `Some(n)`, the first `n` `pull` calls return `409 cursor_ahead`
+    /// before serving normally (drives the reconciliation path). Decrements.
+    pub cursor_ahead_remaining: Mutex<i64>,
 }
 
 impl Default for MockSyncApi {
@@ -126,6 +135,9 @@ impl Default for MockSyncApi {
             next_seq: Mutex::new(1),
             server_now_ms: 1_700_000_000_000,
             server_epoch: "mock-epoch".to_string(),
+            pull_pages: Mutex::new(std::collections::VecDeque::new()),
+            blob_bytes: Mutex::new(std::collections::HashMap::new()),
+            cursor_ahead_remaining: Mutex::new(0),
         }
     }
 }
@@ -141,6 +153,24 @@ impl MockSyncApi {
     /// Total number of changes recorded across all (sub)batches.
     pub fn pushed_count(&self) -> usize {
         self.pushed.lock().unwrap().len()
+    }
+
+    /// Queues a canned pull page (served FIFO on subsequent `pull` calls).
+    pub fn queue_pull_page(&self, page: PullResponse) {
+        self.pull_pages.lock().unwrap().push_back(page);
+    }
+
+    /// Stores blob bytes the server will serve for `blob_get`.
+    pub fn put_blob_bytes(&self, sha256: &str, bytes: Vec<u8>) {
+        self.blob_bytes
+            .lock()
+            .unwrap()
+            .insert(sha256.to_string(), bytes);
+    }
+
+    /// Makes the next `n` `pull` calls return `409 cursor_ahead`.
+    pub fn set_cursor_ahead(&self, n: i64) {
+        *self.cursor_ahead_remaining.lock().unwrap() = n;
     }
 }
 
@@ -248,6 +278,22 @@ impl SyncApi for MockSyncApi {
         since: i64,
         _limit: i64,
     ) -> Result<PullResponse, SyncError> {
+        // Optionally emit cursor_ahead first (reconciliation path).
+        {
+            let mut remaining = self.cursor_ahead_remaining.lock().unwrap();
+            if *remaining > 0 {
+                *remaining -= 1;
+                return Err(SyncError::Api {
+                    status: 409,
+                    code: "cursor_ahead".to_string(),
+                    message: "cursor ahead".to_string(),
+                });
+            }
+        }
+        // Serve a canned page if one is queued, else a terminal empty page.
+        if let Some(page) = self.pull_pages.lock().unwrap().pop_front() {
+            return Ok(page);
+        }
         Ok(PullResponse {
             rows: Vec::new(),
             next_since: since,
@@ -271,10 +317,23 @@ impl SyncApi for MockSyncApi {
         Ok(())
     }
 
-    async fn blob_get(&self, _token: &str, _sha256: &str) -> Result<reqwest::Response, SyncError> {
-        Err(SyncError::Network(
-            "blob_get not supported by mock".to_string(),
-        ))
+    async fn blob_get(&self, _token: &str, sha256: &str) -> Result<reqwest::Response, SyncError> {
+        let bytes = self.blob_bytes.lock().unwrap().get(sha256).cloned();
+        match bytes {
+            Some(bytes) => {
+                // Build a 200 reqwest::Response from raw bytes via http::Response.
+                let http_resp = http::Response::builder()
+                    .status(200)
+                    .body(bytes)
+                    .map_err(|e| SyncError::Network(format!("mock response build: {e}")))?;
+                Ok(reqwest::Response::from(http_resp))
+            }
+            None => Err(SyncError::Api {
+                status: 404,
+                code: "not_found".to_string(),
+                message: "blob not found".to_string(),
+            }),
+        }
     }
 }
 

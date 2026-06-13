@@ -2,9 +2,12 @@
 //! capture triggers. The sync engine opens its OWN SQLite connection and never
 //! contends on `ui_conn`.
 
+pub mod apply;
 pub mod blobs;
 pub mod capture;
+pub mod cascade;
 pub mod http;
+pub mod pull;
 pub mod push;
 pub mod schema;
 pub mod session;
@@ -13,7 +16,7 @@ pub mod session;
 pub mod test_support;
 
 use rusqlite::Connection;
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::db::state::AppDbState;
 
@@ -50,4 +53,28 @@ pub async fn sync_ensure_capture(db: State<'_, AppDbState>) -> Result<(), String
     tokio::task::spawn_blocking(move || ensure_capture_on_path(&db_path))
         .await
         .map_err(|e| format!("[sync] ensure_capture task failed: {e}"))?
+}
+
+/// Tauri command: resets `uploaded=0` for every owned asset so the next push
+/// re-confirms each blob via HEAD/PUT (DESIGN §7). Repopulates a restored server
+/// (HEAD answers from the filesystem). Opens its own connection on the blocking
+/// pool. Returns the number of blob index rows reset.
+#[tauri::command]
+pub async fn sync_reverify_blobs(
+    db: State<'_, AppDbState>,
+    app_handle: AppHandle,
+) -> Result<usize, String> {
+    let db_path = db.db_path.clone();
+    let reset = tokio::task::spawn_blocking(move || -> Result<usize, String> {
+        let conn = open_sync_connection(&db_path)?;
+        blobs::reverify_all_blobs(&conn)
+    })
+    .await
+    .map_err(|e| format!("[sync] reverify_blobs task failed: {e}"))??;
+    crate::app_logs::info(
+        &app_handle,
+        "sync",
+        format!("Re-verificación de blobs: {reset} marcados para re-subir"),
+    );
+    Ok(reset)
 }
