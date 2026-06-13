@@ -274,6 +274,15 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
                 Err(error) => eprintln!("[sync] capture bootstrap failed (will retry from UI): {error}"),
             }
 
+            // Sync blob cleanup (DESIGN §7): remove orphaned `*.part` temp files
+            // under assets/ left by a download interrupted before the atomic
+            // rename. Best-effort — never blocks startup.
+            match sync::blobs::cleanup_orphan_parts(&app_dir) {
+                Ok(0) => {}
+                Ok(removed) => eprintln!("[sync] cleaned {removed} orphan .part file(s)"),
+                Err(error) => eprintln!("[sync] orphan .part cleanup failed: {error}"),
+            }
+
             // Dependency manager: kept for source UI contracts; Lite reports no-op dependency state.
             app.manage(deps::DepsState::new());
 
@@ -469,6 +478,7 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             app_logs::logs_open_dir,
             open_external_url,
             sync::sync_ensure_capture,
+            sync::sync_reverify_blobs,
             sync::session::sync_register_account,
             sync::session::sync_login,
             sync::session::sync_logout,
