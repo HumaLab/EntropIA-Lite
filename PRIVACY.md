@@ -41,6 +41,23 @@ Tratá las claves como credenciales:
 - Quitá la clave desde Configuración para deshabilitar esa ruta remota.
 - Eliminá el directorio de datos local de la app si querés borrar bases, logs, salidas generadas y referencias de configuración.
 
+## Sincronización en la nube (opcional)
+
+La sincronización multi-dispositivo es **opt-in**: no viaja nada al servidor hasta que iniciás sesión en una cuenta de sync. Si nunca la activás, esta sección no aplica y el resto de la app funciona igual, 100% local.
+
+Cuando la activás, tené en cuenta:
+
+| Tema | Detalle |
+| ---- | ------- |
+| Qué viaja | Las filas de las 15 tablas sincronizadas (colecciones, ítems, assets, notas, anotaciones, extracciones OCR, transcripciones, layouts, entidades, triples, topics, asociaciones, resultados LLM y conversaciones/mensajes RAG) y los archivos asociados (imágenes, PDFs renderizados, audio). **No viajan** `app_settings`, embeddings vectoriales, FTS ni el historial de undo de imágenes (`_vN`). |
+| Sin cifrado de extremo a extremo | El servidor **ve** tus datos. La protección en tránsito es TLS (HTTPS obligatorio salvo `localhost`); no hay E2E en v1. Sincronizá solo contra un servidor que controlés o en el que confíes. |
+| Journal de conflictos | Ante una edición concurrente, la resolución es "última escritura gana" por fila. La versión **perdedora se guarda completa** en un journal local de conflictos para que no se pierda nada y puedas revisarla. Ese payload perdedor queda en tu base local hasta que lo borres o cierres la sesión. |
+| Persistencia de blobs | Los archivos subidos **persisten en el servidor hasta que borres la cuenta**. No hay recolección automática: borrar un asset localmente no borra su blob del servidor. |
+| Borrado de cuenta | "Borrar mis datos del servidor" (con confirmación por password) elimina filas, conflictos, metadata de blobs, contadores y dispositivos, y borra el directorio de blobs de tu cuenta. Tus datos **locales** quedan intactos. |
+| Logs del servidor | El servidor registra por request la cuenta y el dispositivo (id, no el token) para diagnóstico y observabilidad. |
+| Backups del operador | Si el operador del servidor corre backups (Litestream para la base, restic/rclone para los blobs), esos backups **retienen datos borrados hasta su rotación**. El borrado de cuenta no purga réplicas ni snapshots de backup. |
+| Token de dispositivo | Cada login crea un dispositivo nuevo con un token opaco guardado **solo en el keyring del SO**. El token nunca se loguea ni se guarda en la base. Podés revocar dispositivos desde la app. |
+
 ## Términos de proveedores
 
 Los proveedores remotos tienen sus propias políticas de privacidad, reglas de retención y controles de cuenta. Revisá los términos de OpenRouter, Z.ai/GLM-OCR y AssemblyAI antes de procesar material sensible.
