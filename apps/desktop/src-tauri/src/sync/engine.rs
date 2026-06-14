@@ -453,6 +453,15 @@ fn classify_error(error: SyncError) -> CycleError {
                 (_, "clock_skew") => {
                     "Revisá el reloj del dispositivo: la hora está demasiado desfasada.".to_string()
                 }
+                (_, "account_suspended") => {
+                    "Tu cuenta está suspendida. Contactá al administrador para reactivarla."
+                        .to_string()
+                }
+                (_, "subscription_expired") => {
+                    "Tu suscripción venció. Podés seguir descargando, pero no vas a poder subir \
+                     cambios hasta renovarla."
+                        .to_string()
+                }
                 (507, _) => "El almacenamiento del servidor está lleno.".to_string(),
                 _ => format!("Error del servidor {status} ({code}): {message}"),
             };

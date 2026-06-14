@@ -196,6 +196,10 @@ const es = {
   'sync.error.426': 'Actualizá la app: el servidor pide un esquema más nuevo.',
   'sync.error.507': 'Almacenamiento del servidor lleno.',
   'sync.error.clockSkew': 'Revisá el reloj del dispositivo.',
+  'sync.error.accountSuspended':
+    'Tu cuenta está suspendida. Contactá al administrador para reactivarla.',
+  'sync.error.subscriptionExpired':
+    'Tu suscripción venció. Podés seguir descargando, pero no vas a poder subir cambios hasta renovarla.',
   'sync.error.registrationClosed':
     'El registro está cerrado en este servidor.',
   'sync.error.unauthorized': 'Credenciales inválidas o sesión revocada.',
@@ -957,6 +961,10 @@ const en: Record<keyof typeof es | ExtraI18nKey, string> = {
   'sync.error.426': 'Update the app: the server requires a newer schema.',
   'sync.error.507': 'Server storage is full.',
   'sync.error.clockSkew': 'Check the device clock.',
+  'sync.error.accountSuspended':
+    'Your account is suspended. Contact the administrator to reactivate it.',
+  'sync.error.subscriptionExpired':
+    'Your subscription has expired. You can still download, but you cannot upload changes until you renew.',
   'sync.error.registrationClosed': 'Registration is closed on this server.',
   'sync.error.unauthorized': 'Invalid credentials or revoked session.',
   'sync.error.emailTaken': 'An account with that email already exists.',

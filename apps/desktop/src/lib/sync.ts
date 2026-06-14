@@ -232,6 +232,8 @@ export function describeSyncError(error: unknown): string {
   if (lower.includes('426') || lower.includes('schema_upgrade_required')) return t('sync.error.426')
   if (lower.includes('507') || lower.includes('insufficient_storage')) return t('sync.error.507')
   if (lower.includes('clock_skew')) return t('sync.error.clockSkew')
+  if (lower.includes('account_suspended')) return t('sync.error.accountSuspended')
+  if (lower.includes('subscription_expired')) return t('sync.error.subscriptionExpired')
   if (lower.includes('registration_closed')) return t('sync.error.registrationClosed')
   if (lower.includes('email_taken')) return t('sync.error.emailTaken')
   if (lower.includes('401') || lower.includes('unauthorized')) return t('sync.error.unauthorized')

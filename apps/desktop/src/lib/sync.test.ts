@@ -132,12 +132,24 @@ describe('describeSyncError', () => {
     expect(describeSyncError('api error 401 (unauthorized): nope')).toBe(
       'Credenciales inválidas o sesión revocada.'
     )
+    expect(describeSyncError('api error 403 (account_suspended): blocked')).toBe(
+      'Tu cuenta está suspendida. Contactá al administrador para reactivarla.'
+    )
+    expect(describeSyncError('api error 403 (subscription_expired): lapsed')).toBe(
+      'Tu suscripción venció. Podés seguir descargando, pero no vas a poder subir cambios hasta renovarla.'
+    )
   })
 
   it('maps in English too', () => {
     locale.set('en')
     expect(describeSyncError('api error 426 (schema_upgrade_required): old')).toBe(
       'Update the app: the server requires a newer schema.'
+    )
+    expect(describeSyncError('api error 403 (account_suspended): blocked')).toBe(
+      'Your account is suspended. Contact the administrator to reactivate it.'
+    )
+    expect(describeSyncError('api error 403 (subscription_expired): lapsed')).toBe(
+      'Your subscription has expired. You can still download, but you cannot upload changes until you renew.'
     )
   })
 

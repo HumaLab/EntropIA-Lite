@@ -190,6 +190,35 @@ fn classify_426_507_clock_skew_are_fatal_with_specific_messages() {
     assert!(skew.contains("reloj"), "clock_skew → clock message: {skew}");
 }
 
+#[test]
+fn classify_account_suspended_and_subscription_expired_are_fatal_with_specific_messages() {
+    let suspended = match classify_error(SyncError::Api {
+        status: 403,
+        code: "account_suspended".into(),
+        message: "suspended".into(),
+    }) {
+        CycleError::Fatal { message } => message,
+        other => panic!("account_suspended must be Fatal, got {other:?}"),
+    };
+    assert!(
+        suspended.contains("suspendida"),
+        "account_suspended → suspended message: {suspended}"
+    );
+
+    let expired = match classify_error(SyncError::Api {
+        status: 403,
+        code: "subscription_expired".into(),
+        message: "expired".into(),
+    }) {
+        CycleError::Fatal { message } => message,
+        other => panic!("subscription_expired must be Fatal, got {other:?}"),
+    };
+    assert!(
+        expired.contains("venció"),
+        "subscription_expired → expired message: {expired}"
+    );
+}
+
 // --------------------------------------------------------------------------
 // Status payload shape (DESIGN §11)
 // --------------------------------------------------------------------------
