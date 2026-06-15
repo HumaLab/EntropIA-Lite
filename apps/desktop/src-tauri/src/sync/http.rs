@@ -257,6 +257,112 @@ pub struct UsageResponse {
     /// no tiene plan asignado o el servidor no lo reporta.
     #[serde(default)]
     pub plan_name: Option<String>,
+    /// Vencimiento de la suscripción en ms (`None` = nunca vence; p.ej. cuentas Free o
+    /// servidor viejo que no reporta el campo). Aditivo (PROTOCOL `/v1/usage`).
+    #[serde(default)]
+    pub expires_at: Option<i64>,
+    /// Notificaciones in-app NO leídas de la cuenta (badge del inbox). `0` por defecto si
+    /// el servidor no lo reporta. Aditivo (PROTOCOL `/v1/usage`).
+    #[serde(default)]
+    pub unread_notifications: i64,
+    /// Nombre del plan solicitado si hay una solicitud de cambio de plan en estado
+    /// `pending`; `None` si no hay ninguna o el servidor no lo reporta. Aditivo. El cliente
+    /// lo usa para mostrar "Solicitud en revisión" de forma persistente.
+    #[serde(default)]
+    pub pending_plan_request: Option<String>,
+}
+
+/// Un plan del catálogo (PROTOCOL `GET /v1/plans`). Replica `PlanView` del servidor.
+/// El cliente lo usa para poblar el `<select>` del modal "solicitar upgrade".
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PlanCatalogItem {
+    pub id: String,
+    #[serde(default)]
+    pub name: String,
+    /// Cuota del plan en bytes; `0` = ilimitada.
+    #[serde(default)]
+    pub quota_bytes: i64,
+    /// Precio en centavos; `0` = gratuito.
+    #[serde(default)]
+    pub price_cents: i64,
+    #[serde(default)]
+    pub currency: String,
+    /// Período de cobro (`monthly` | `yearly` | `none`).
+    #[serde(default)]
+    pub period: String,
+    /// Descripción del plan (`None` si no tiene).
+    #[serde(default)]
+    pub description: Option<String>,
+    /// `true` solo en el plan actual de la cuenta autenticada.
+    #[serde(default)]
+    pub is_current: bool,
+}
+
+/// Envoltura de `GET /v1/plans`.
+#[derive(Debug, Deserialize)]
+struct PlansResponse {
+    #[serde(default)]
+    plans: Vec<PlanCatalogItem>,
+}
+
+/// Una notificación in-app del inbox del usuario (PROTOCOL `GET /v1/notifications`).
+/// Replica `NotificationView` del servidor: `{ id, kind, severity, title, body,
+/// created_at, read_at }`. `category` no viaja hoy en el wire pero se tolera con
+/// `#[serde(default)]` por si una versión futura del servidor lo agrega (aditivo).
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct NotificationItem {
+    pub id: String,
+    #[serde(default)]
+    pub kind: String,
+    /// Categoría server-side (`transactional` | `reminder` | `operator`). No la manda el
+    /// servidor en el inbox del usuario hoy; tolerada para compat futura.
+    #[serde(default)]
+    pub category: String,
+    #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub body: String,
+    #[serde(default)]
+    pub created_at: i64,
+    /// `None` si no fue leída todavía.
+    #[serde(default)]
+    pub read_at: Option<i64>,
+}
+
+/// Envoltura de `GET /v1/notifications`.
+#[derive(Debug, Deserialize)]
+struct NotificationsResponse {
+    #[serde(default)]
+    notifications: Vec<NotificationItem>,
+}
+
+/// Body de `POST /v1/plan-change-request`.
+#[derive(Debug, Serialize)]
+pub struct PlanChangeRequestBody {
+    pub requested_plan_id: String,
+    /// Nota opcional del usuario para el equipo.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub note: Option<String>,
+}
+
+/// Solicitud de cambio de plan creada (PROTOCOL `POST /v1/plan-change-request`).
+/// Replica `PlanChangeRequestView` del servidor.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PlanChangeRequestResponse {
+    pub id: String,
+    /// Plan actual de la cuenta al momento de pedir (`None` = sin plan / Free).
+    #[serde(default)]
+    pub current_plan_id: Option<String>,
+    #[serde(default)]
+    pub requested_plan_id: String,
+    #[serde(default)]
+    pub note: Option<String>,
+    #[serde(default)]
+    pub status: String,
+    #[serde(default)]
+    pub created_at: i64,
 }
 
 /// One outbound change in a push batch (PROTOCOL `POST /v1/sync/push`).
@@ -417,6 +523,42 @@ pub trait SyncApi {
         &self,
         token: &str,
     ) -> impl std::future::Future<Output = Result<UsageResponse, SyncError>> + Send;
+
+    /// Lists the plan catalog (PROTOCOL `GET /v1/plans`). No subscription gating:
+    /// an expired/suspended account still gets the full catalog.
+    fn list_plans(
+        &self,
+        token: &str,
+    ) -> impl std::future::Future<Output = Result<Vec<PlanCatalogItem>, SyncError>> + Send;
+
+    /// Requests a plan change (PROTOCOL `POST /v1/plan-change-request`). The
+    /// `409 plan_request_pending` server code surfaces as a [`SyncError::Api`]
+    /// with that code so the UI can show "ya tenés una solicitud en revisión".
+    fn request_plan_change(
+        &self,
+        token: &str,
+        requested_plan_id: &str,
+        note: Option<&str>,
+    ) -> impl std::future::Future<Output = Result<PlanChangeRequestResponse, SyncError>> + Send;
+
+    /// Lists the user's in-app notifications (PROTOCOL `GET /v1/notifications`).
+    /// `since` is an exclusive cursor by id (empty/`"0"` ⇒ from the start);
+    /// `limit` is capped server-side at 100.
+    fn list_notifications(
+        &self,
+        token: &str,
+        since: Option<&str>,
+        limit: Option<i64>,
+    ) -> impl std::future::Future<Output = Result<Vec<NotificationItem>, SyncError>> + Send;
+
+    /// Marks a notification as read (PROTOCOL `POST /v1/notifications/{id}/read`).
+    /// Idempotent: re-marking returns 204. A 404 means the notification does not
+    /// exist or belongs to another account.
+    fn mark_notification_read(
+        &self,
+        token: &str,
+        id: &str,
+    ) -> impl std::future::Future<Output = Result<(), SyncError>> + Send;
 
     fn health(&self)
         -> impl std::future::Future<Output = Result<HealthResponse, SyncError>> + Send;
@@ -616,6 +758,78 @@ impl SyncApi for HttpSyncApi {
             .await
             .map_err(|e| Self::network_err("usage request", e))?;
         parse_json(response).await
+    }
+
+    async fn list_plans(&self, token: &str) -> Result<Vec<PlanCatalogItem>, SyncError> {
+        let response = self
+            .client
+            .get(self.url("/v1/plans"))
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| Self::network_err("list plans request", e))?;
+        let body: PlansResponse = parse_json(response).await?;
+        Ok(body.plans)
+    }
+
+    async fn request_plan_change(
+        &self,
+        token: &str,
+        requested_plan_id: &str,
+        note: Option<&str>,
+    ) -> Result<PlanChangeRequestResponse, SyncError> {
+        let body = PlanChangeRequestBody {
+            requested_plan_id: requested_plan_id.to_string(),
+            note: note.map(str::to_string),
+        };
+        let response = self
+            .client
+            .post(self.url("/v1/plan-change-request"))
+            .bearer_auth(token)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|e| Self::network_err("plan change request", e))?;
+        // The 409 `plan_request_pending` (and 404/400) come back as the structured
+        // `{ error: { code, message } }` envelope, so `parse_json` → `ensure_success`
+        // already maps them to `SyncError::Api { code, .. }`. Callers branch on the code.
+        parse_json(response).await
+    }
+
+    async fn list_notifications(
+        &self,
+        token: &str,
+        since: Option<&str>,
+        limit: Option<i64>,
+    ) -> Result<Vec<NotificationItem>, SyncError> {
+        let mut query: Vec<(&str, String)> = Vec::new();
+        if let Some(since) = since.filter(|s| !s.is_empty()) {
+            query.push(("since", since.to_string()));
+        }
+        if let Some(limit) = limit {
+            query.push(("limit", limit.to_string()));
+        }
+        let response = self
+            .client
+            .get(self.url("/v1/notifications"))
+            .bearer_auth(token)
+            .query(&query)
+            .send()
+            .await
+            .map_err(|e| Self::network_err("list notifications request", e))?;
+        let body: NotificationsResponse = parse_json(response).await?;
+        Ok(body.notifications)
+    }
+
+    async fn mark_notification_read(&self, token: &str, id: &str) -> Result<(), SyncError> {
+        let response = self
+            .client
+            .post(self.url(&format!("/v1/notifications/{id}/read")))
+            .bearer_auth(token)
+            .send()
+            .await
+            .map_err(|e| Self::network_err("mark notification read request", e))?;
+        ensure_success(response).await.map(|_| ())
     }
 
     async fn health(&self) -> Result<HealthResponse, SyncError> {
@@ -850,5 +1064,110 @@ mod tests {
         assert_eq!(parsed.results.len(), 1);
         assert!(parsed.results[0].winner.is_none());
         assert_eq!(parsed.results[0].status, "applied");
+    }
+
+    #[test]
+    fn usage_response_parses_old_server_without_notification_fields() {
+        // Backward compat: an older server that only sends the original fields must
+        // still deserialize, with the new fields defaulting (None / 0).
+        let body = r#"{
+            "rows":7,"blobs_count":2,"blobs_bytes":1024,"quota_bytes":104857600,
+            "plan_name":"Free"
+        }"#;
+        let parsed: UsageResponse = serde_json::from_str(body).expect("parse old usage");
+        assert_eq!(parsed.rows, 7);
+        assert_eq!(parsed.plan_name.as_deref(), Some("Free"));
+        assert_eq!(parsed.expires_at, None);
+        assert_eq!(parsed.unread_notifications, 0);
+        assert_eq!(parsed.pending_plan_request, None);
+    }
+
+    #[test]
+    fn usage_response_parses_new_server_with_all_fields() {
+        let body = r#"{
+            "rows":7,"blobs_count":2,"blobs_bytes":1024,"quota_bytes":10737418240,
+            "plan_name":"10 GB","expires_at":1760000000000,"unread_notifications":3,
+            "pending_plan_request":"50 GB","future_field":"ignored"
+        }"#;
+        let parsed: UsageResponse = serde_json::from_str(body).expect("parse new usage");
+        assert_eq!(parsed.expires_at, Some(1760000000000));
+        assert_eq!(parsed.unread_notifications, 3);
+        assert_eq!(parsed.pending_plan_request.as_deref(), Some("50 GB"));
+        assert_eq!(parsed.plan_name.as_deref(), Some("10 GB"));
+    }
+
+    #[test]
+    fn usage_response_handles_explicit_null_optionals() {
+        // The server serializes None as `null` (not omitted) — must parse to None.
+        let body = r#"{
+            "rows":0,"blobs_count":0,"blobs_bytes":0,"quota_bytes":0,
+            "plan_name":null,"expires_at":null,"unread_notifications":0,
+            "pending_plan_request":null
+        }"#;
+        let parsed: UsageResponse = serde_json::from_str(body).expect("parse null usage");
+        assert_eq!(parsed.plan_name, None);
+        assert_eq!(parsed.expires_at, None);
+        assert_eq!(parsed.pending_plan_request, None);
+    }
+
+    #[test]
+    fn plans_response_parses_catalog_with_null_description() {
+        let body = r#"{"plans":[
+            {"id":"p0","name":"Free","quota_bytes":104857600,"price_cents":0,
+             "currency":"USD","period":"none","description":"Plan gratuito","is_current":true},
+            {"id":"p1","name":"5 GB","quota_bytes":5368709120,"price_cents":1000,
+             "currency":"USD","period":"monthly","description":null,"is_current":false,
+             "future_field":1}
+        ]}"#;
+        let parsed: PlansResponse = serde_json::from_str(body).expect("parse plans");
+        assert_eq!(parsed.plans.len(), 2);
+        assert!(parsed.plans[0].is_current);
+        assert_eq!(
+            parsed.plans[0].description.as_deref(),
+            Some("Plan gratuito")
+        );
+        assert_eq!(parsed.plans[1].description, None);
+        assert!(!parsed.plans[1].is_current);
+        assert_eq!(parsed.plans[1].price_cents, 1000);
+    }
+
+    #[test]
+    fn notification_item_parses_without_category_and_with_null_read_at() {
+        // The real server inbox shape: no `category`, `read_at` null when unread.
+        let body = r#"{
+            "id":"n1","kind":"subscription_reminder","severity":"warning",
+            "title":"Vence en 7 días","body":"Renová a tiempo","created_at":1760000000000,
+            "read_at":null,"unknown":true
+        }"#;
+        let parsed: NotificationItem = serde_json::from_str(body).expect("parse notif");
+        assert_eq!(parsed.kind, "subscription_reminder");
+        assert_eq!(parsed.severity, "warning");
+        assert_eq!(parsed.category, ""); // defaulted — server doesn't send it today
+        assert_eq!(parsed.read_at, None);
+    }
+
+    #[test]
+    fn plan_change_request_response_parses_with_null_current_plan() {
+        let body = r#"{
+            "id":"r1","current_plan_id":null,"requested_plan_id":"p2",
+            "note":"quiero más espacio","status":"pending","created_at":1760000000000
+        }"#;
+        let parsed: PlanChangeRequestResponse =
+            serde_json::from_str(body).expect("parse plan change");
+        assert_eq!(parsed.id, "r1");
+        assert_eq!(parsed.current_plan_id, None);
+        assert_eq!(parsed.requested_plan_id, "p2");
+        assert_eq!(parsed.status, "pending");
+    }
+
+    #[test]
+    fn plan_change_request_body_omits_note_when_absent() {
+        let body = PlanChangeRequestBody {
+            requested_plan_id: "p2".to_string(),
+            note: None,
+        };
+        let json = serde_json::to_value(&body).expect("serialize");
+        assert!(json.get("note").is_none(), "absent note must be omitted");
+        assert_eq!(json["requested_plan_id"], "p2");
     }
 }

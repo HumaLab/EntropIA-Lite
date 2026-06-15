@@ -502,6 +502,10 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             sync::commands::sync_list_conflicts,
             sync::commands::sync_ack_conflict,
             sync::commands::sync_get_usage,
+            sync::commands::sync_list_plans,
+            sync::commands::sync_request_plan_change,
+            sync::commands::sync_list_notifications,
+            sync::commands::sync_mark_notification_read,
             sync::commands::sync_delete_account,
         ])
         .build(tauri::generate_context!())

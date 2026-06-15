@@ -89,8 +89,9 @@ pub fn trg_sync_count(conn: &Connection) -> i64 {
 
 use crate::sync::http::{
     BlobExists, DeleteAccountRequest, DevicesResponse, HealthResponse, LoginRequest, LoginResponse,
-    PullResponse, PushChange, PushRequest, PushResponse, PushResult, RegisterRequest,
-    RegisterResponse, SyncApi, SyncError, UsageResponse,
+    NotificationItem, PlanCatalogItem, PlanChangeRequestResponse, PullResponse, PushChange,
+    PushRequest, PushResponse, PushResult, RegisterRequest, RegisterResponse, SyncApi, SyncError,
+    UsageResponse,
 };
 use std::sync::Mutex;
 
@@ -122,6 +123,18 @@ pub struct MockSyncApi {
     /// When `Some(n)`, the first `n` `pull` calls return `409 cursor_ahead`
     /// before serving normally (drives the reconciliation path). Decrements.
     pub cursor_ahead_remaining: Mutex<i64>,
+    /// Canned plan catalog served by `list_plans`.
+    pub plans: Mutex<Vec<PlanCatalogItem>>,
+    /// Canned notification inbox served by `list_notifications`.
+    pub notifications: Mutex<Vec<NotificationItem>>,
+    /// When `true`, `request_plan_change` returns `409 plan_request_pending`.
+    pub plan_request_pending: Mutex<bool>,
+    /// Records the `(requested_plan_id, note)` of the last `request_plan_change`.
+    pub plan_change_calls: Mutex<Vec<(String, Option<String>)>>,
+    /// Records the ids passed to `mark_notification_read`, in order.
+    pub marked_read: Mutex<Vec<String>>,
+    /// Canned usage snapshot served by `usage` (lets tests assert the extended fields).
+    pub usage: Mutex<UsageResponse>,
 }
 
 impl Default for MockSyncApi {
@@ -138,6 +151,21 @@ impl Default for MockSyncApi {
             pull_pages: Mutex::new(std::collections::VecDeque::new()),
             blob_bytes: Mutex::new(std::collections::HashMap::new()),
             cursor_ahead_remaining: Mutex::new(0),
+            plans: Mutex::new(Vec::new()),
+            notifications: Mutex::new(Vec::new()),
+            plan_request_pending: Mutex::new(false),
+            plan_change_calls: Mutex::new(Vec::new()),
+            marked_read: Mutex::new(Vec::new()),
+            usage: Mutex::new(UsageResponse {
+                rows: 0,
+                blobs_count: 0,
+                blobs_bytes: 0,
+                quota_bytes: 0,
+                plan_name: None,
+                expires_at: None,
+                unread_notifications: 0,
+                pending_plan_request: None,
+            }),
         }
     }
 }
@@ -212,13 +240,62 @@ impl SyncApi for MockSyncApi {
     }
 
     async fn usage(&self, _token: &str) -> Result<UsageResponse, SyncError> {
+        let u = self.usage.lock().unwrap();
         Ok(UsageResponse {
-            rows: 0,
-            blobs_count: 0,
-            blobs_bytes: 0,
-            quota_bytes: 0,
-            plan_name: None,
+            rows: u.rows,
+            blobs_count: u.blobs_count,
+            blobs_bytes: u.blobs_bytes,
+            quota_bytes: u.quota_bytes,
+            plan_name: u.plan_name.clone(),
+            expires_at: u.expires_at,
+            unread_notifications: u.unread_notifications,
+            pending_plan_request: u.pending_plan_request.clone(),
         })
+    }
+
+    async fn list_plans(&self, _token: &str) -> Result<Vec<PlanCatalogItem>, SyncError> {
+        Ok(self.plans.lock().unwrap().clone())
+    }
+
+    async fn request_plan_change(
+        &self,
+        _token: &str,
+        requested_plan_id: &str,
+        note: Option<&str>,
+    ) -> Result<PlanChangeRequestResponse, SyncError> {
+        self.plan_change_calls
+            .lock()
+            .unwrap()
+            .push((requested_plan_id.to_string(), note.map(str::to_string)));
+        if *self.plan_request_pending.lock().unwrap() {
+            return Err(SyncError::Api {
+                status: 409,
+                code: "plan_request_pending".to_string(),
+                message: "ya hay una solicitud pendiente".to_string(),
+            });
+        }
+        Ok(PlanChangeRequestResponse {
+            id: "mock-request".to_string(),
+            current_plan_id: None,
+            requested_plan_id: requested_plan_id.to_string(),
+            note: note.map(str::to_string),
+            status: "pending".to_string(),
+            created_at: self.server_now_ms,
+        })
+    }
+
+    async fn list_notifications(
+        &self,
+        _token: &str,
+        _since: Option<&str>,
+        _limit: Option<i64>,
+    ) -> Result<Vec<NotificationItem>, SyncError> {
+        Ok(self.notifications.lock().unwrap().clone())
+    }
+
+    async fn mark_notification_read(&self, _token: &str, id: &str) -> Result<(), SyncError> {
+        self.marked_read.lock().unwrap().push(id.to_string());
+        Ok(())
     }
 
     async fn health(&self) -> Result<HealthResponse, SyncError> {
@@ -341,6 +418,113 @@ impl SyncApi for MockSyncApi {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn plan(id: &str, name: &str, is_current: bool) -> PlanCatalogItem {
+        PlanCatalogItem {
+            id: id.to_string(),
+            name: name.to_string(),
+            quota_bytes: 0,
+            price_cents: 0,
+            currency: "USD".to_string(),
+            period: "none".to_string(),
+            description: None,
+            is_current,
+        }
+    }
+
+    fn notif(id: &str, kind: &str) -> NotificationItem {
+        NotificationItem {
+            id: id.to_string(),
+            kind: kind.to_string(),
+            category: String::new(),
+            severity: "info".to_string(),
+            title: "T".to_string(),
+            body: "B".to_string(),
+            created_at: 1,
+            read_at: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn list_plans_returns_canned_catalog() {
+        let api = MockSyncApi::default();
+        *api.plans.lock().unwrap() = vec![plan("p0", "Free", true), plan("p1", "5 GB", false)];
+        let plans = api.list_plans("tok").await.expect("plans");
+        assert_eq!(plans.len(), 2);
+        assert!(plans[0].is_current);
+        assert_eq!(plans[1].name, "5 GB");
+    }
+
+    #[tokio::test]
+    async fn request_plan_change_returns_pending_request_and_records_call() {
+        let api = MockSyncApi::default();
+        let resp = api
+            .request_plan_change("tok", "p2", Some("más espacio"))
+            .await
+            .expect("plan change");
+        assert_eq!(resp.requested_plan_id, "p2");
+        assert_eq!(resp.status, "pending");
+        assert_eq!(resp.note.as_deref(), Some("más espacio"));
+        let calls = api.plan_change_calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "p2");
+    }
+
+    #[tokio::test]
+    async fn request_plan_change_maps_409_to_pending_api_error() {
+        let api = MockSyncApi::default();
+        *api.plan_request_pending.lock().unwrap() = true;
+        let err = api
+            .request_plan_change("tok", "p2", None)
+            .await
+            .expect_err("must conflict");
+        assert_eq!(err.status(), Some(409));
+        assert_eq!(err.api_code(), Some("plan_request_pending"));
+    }
+
+    #[tokio::test]
+    async fn list_notifications_returns_canned_inbox() {
+        let api = MockSyncApi::default();
+        *api.notifications.lock().unwrap() = vec![
+            notif("n1", "subscription_reminder"),
+            notif("n2", "request_approved"),
+        ];
+        let inbox = api
+            .list_notifications("tok", None, Some(50))
+            .await
+            .expect("inbox");
+        assert_eq!(inbox.len(), 2);
+        assert_eq!(inbox[0].kind, "subscription_reminder");
+    }
+
+    #[tokio::test]
+    async fn mark_notification_read_records_id() {
+        let api = MockSyncApi::default();
+        api.mark_notification_read("tok", "n1").await.expect("mark");
+        assert_eq!(
+            api.marked_read.lock().unwrap().as_slice(),
+            &["n1".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn usage_returns_extended_canned_snapshot() {
+        let api = MockSyncApi::default();
+        *api.usage.lock().unwrap() = UsageResponse {
+            rows: 1,
+            blobs_count: 2,
+            blobs_bytes: 3,
+            quota_bytes: 100,
+            plan_name: Some("10 GB".to_string()),
+            expires_at: Some(1760000000000),
+            unread_notifications: 4,
+            pending_plan_request: Some("50 GB".to_string()),
+        };
+        let usage = api.usage("tok").await.expect("usage");
+        assert_eq!(usage.unread_notifications, 4);
+        assert_eq!(usage.expires_at, Some(1760000000000));
+        assert_eq!(usage.pending_plan_request.as_deref(), Some("50 GB"));
+    }
 
     #[test]
     fn fixture_creates_all_synced_base_tables() {

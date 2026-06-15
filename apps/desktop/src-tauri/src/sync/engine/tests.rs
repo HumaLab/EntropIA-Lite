@@ -503,6 +503,31 @@ async fn network_error_in_cycle_surfaces_as_offline() {
         async fn usage(&self, _t: &str) -> Result<crate::sync::http::UsageResponse, SyncError> {
             unreachable!()
         }
+        async fn list_plans(
+            &self,
+            _t: &str,
+        ) -> Result<Vec<crate::sync::http::PlanCatalogItem>, SyncError> {
+            unreachable!()
+        }
+        async fn request_plan_change(
+            &self,
+            _t: &str,
+            _requested_plan_id: &str,
+            _note: Option<&str>,
+        ) -> Result<crate::sync::http::PlanChangeRequestResponse, SyncError> {
+            unreachable!()
+        }
+        async fn list_notifications(
+            &self,
+            _t: &str,
+            _since: Option<&str>,
+            _limit: Option<i64>,
+        ) -> Result<Vec<crate::sync::http::NotificationItem>, SyncError> {
+            unreachable!()
+        }
+        async fn mark_notification_read(&self, _t: &str, _id: &str) -> Result<(), SyncError> {
+            unreachable!()
+        }
         async fn health(&self) -> Result<crate::sync::http::HealthResponse, SyncError> {
             Err(SyncError::Network("connection refused".into()))
         }

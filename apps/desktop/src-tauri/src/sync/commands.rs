@@ -14,7 +14,10 @@ use tauri::{AppHandle, Manager, State};
 
 use crate::db::state::AppDbState;
 use crate::sync::engine::{engine_snapshot, SyncEngine, SyncRequest, SyncStatus};
-use crate::sync::http::{DeleteAccountRequest, DeviceInfo, HttpSyncApi, SyncApi, UsageResponse};
+use crate::sync::http::{
+    DeleteAccountRequest, DeviceInfo, HttpSyncApi, NotificationItem, PlanCatalogItem,
+    PlanChangeRequestResponse, SyncApi, UsageResponse,
+};
 use crate::sync::open_sync_connection;
 use crate::sync::session::{clear_sync_state, delete_token, meta_get, meta_set, read_token};
 
@@ -236,6 +239,90 @@ pub async fn sync_get_usage(db: State<'_, AppDbState>) -> Result<UsageResponse, 
     let (url, token) = session_creds(db.db_path.clone()).await?;
     let api = HttpSyncApi::new(&url).map_err(String::from)?;
     api.usage(&token).await.map_err(String::from)
+}
+
+// ---------------------------------------------------------------------------
+// Plans + plan-change request + notifications (NOTIFICATIONS.md)
+// ---------------------------------------------------------------------------
+
+/// Lists the plan catalog (PROTOCOL `GET /v1/plans`). Powers the upgrade modal's
+/// `<select>`; ordered ascending by price/quota by the server. No subscription
+/// gating: an expired/suspended account still sees the catalog.
+#[tauri::command]
+pub async fn sync_list_plans(db: State<'_, AppDbState>) -> Result<Vec<PlanCatalogItem>, String> {
+    let (url, token) = session_creds(db.db_path.clone()).await?;
+    let api = HttpSyncApi::new(&url).map_err(String::from)?;
+    api.list_plans(&token).await.map_err(String::from)
+}
+
+/// Requests a plan change (PROTOCOL `POST /v1/plan-change-request`). Returns the
+/// created request. A `409 plan_request_pending` surfaces as a clear String error
+/// ("Ya tenés una solicitud de cambio de plan en revisión.") so the UI can guide
+/// the user instead of showing a raw API code; other API errors pass through.
+#[tauri::command]
+pub async fn sync_request_plan_change(
+    requested_plan_id: String,
+    note: Option<String>,
+    db: State<'_, AppDbState>,
+    app_handle: AppHandle,
+) -> Result<PlanChangeRequestResponse, String> {
+    let (url, token) = session_creds(db.db_path.clone()).await?;
+    let api = HttpSyncApi::new(&url).map_err(String::from)?;
+    let result = api
+        .request_plan_change(&token, &requested_plan_id, note.as_deref())
+        .await
+        .map_err(|error| {
+            // Translate the pending-request conflict to a user-facing message; other
+            // errors keep their uniform `String` rendering.
+            if error.api_code() == Some("plan_request_pending") {
+                "Ya tenés una solicitud de cambio de plan en revisión.".to_string()
+            } else {
+                String::from(error)
+            }
+        });
+    match &result {
+        Ok(_) => crate::app_logs::info(
+            &app_handle,
+            LOG_SOURCE,
+            "Solicitud de cambio de plan enviada",
+        ),
+        Err(error) => crate::app_logs::warn(
+            &app_handle,
+            LOG_SOURCE,
+            format!("Solicitud de cambio de plan falló: {error}"),
+        ),
+    }
+    result
+}
+
+/// Lists the user's in-app notifications (PROTOCOL `GET /v1/notifications`).
+/// `since` is an exclusive id cursor (empty/`"0"` ⇒ from the start); `limit` is
+/// capped at 100 server-side.
+#[tauri::command]
+pub async fn sync_list_notifications(
+    since: Option<String>,
+    limit: Option<i64>,
+    db: State<'_, AppDbState>,
+) -> Result<Vec<NotificationItem>, String> {
+    let (url, token) = session_creds(db.db_path.clone()).await?;
+    let api = HttpSyncApi::new(&url).map_err(String::from)?;
+    api.list_notifications(&token, since.as_deref(), limit)
+        .await
+        .map_err(String::from)
+}
+
+/// Marks a notification as read (PROTOCOL `POST /v1/notifications/{id}/read`).
+/// Idempotent; a 404 surfaces as a String error.
+#[tauri::command]
+pub async fn sync_mark_notification_read(
+    id: String,
+    db: State<'_, AppDbState>,
+) -> Result<(), String> {
+    let (url, token) = session_creds(db.db_path.clone()).await?;
+    let api = HttpSyncApi::new(&url).map_err(String::from)?;
+    api.mark_notification_read(&token, &id)
+        .await
+        .map_err(String::from)
 }
 
 /// Deletes the account's server-side data (PROTOCOL `DELETE /v1/account`,
