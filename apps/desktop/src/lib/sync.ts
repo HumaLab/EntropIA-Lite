@@ -66,6 +66,8 @@ export interface SyncUsage {
   blobs_count: number
   blobs_bytes: number
   quota_bytes: number
+  /** Plan / subscription type name (e.g. `Free`, `5 GB`); null if no plan assigned. */
+  plan_name: string | null
 }
 
 /** One conflict journal entry surfaced to the UI (DESIGN §6 schema). */

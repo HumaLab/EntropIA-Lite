@@ -217,6 +217,7 @@ impl SyncApi for MockSyncApi {
             blobs_count: 0,
             blobs_bytes: 0,
             quota_bytes: 0,
+            plan_name: None,
         })
     }
 

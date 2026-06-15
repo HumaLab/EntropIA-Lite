@@ -484,6 +484,9 @@
         </div>
         {#if usage}
           <ul class="sync-card__usage">
+            {#if usage.plan_name}
+              <li>{t('sync.card.usagePlan', { plan: usage.plan_name })}</li>
+            {/if}
             <li>{t('sync.card.usageRows', { count: usage.rows })}</li>
             <li>
               {t('sync.card.usageBlobs', {

@@ -253,6 +253,10 @@ pub struct UsageResponse {
     pub blobs_bytes: i64,
     #[serde(default)]
     pub quota_bytes: i64,
+    /// Nombre del plan / tipo de suscripción (`Free`, `5 GB`, …); `None` si la cuenta
+    /// no tiene plan asignado o el servidor no lo reporta.
+    #[serde(default)]
+    pub plan_name: Option<String>,
 }
 
 /// One outbound change in a push batch (PROTOCOL `POST /v1/sync/push`).
