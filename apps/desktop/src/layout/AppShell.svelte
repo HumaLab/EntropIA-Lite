@@ -8,6 +8,7 @@
   import TopBar from './TopBar.svelte'
   import EntropicConstellation from './EntropicConstellation.svelte'
   import SyncStatusIndicator from './SyncStatusIndicator.svelte'
+  import NotificationBell from './NotificationBell.svelte'
   import type { Snippet } from 'svelte'
 
   const HLAB_URL = 'https://hlab.com.ar/'
@@ -225,6 +226,10 @@
              with the existing `·` separator pattern. Renders nothing when sync is
              disabled, so the footer stays intact for opt-out users. -->
         <SyncStatusIndicator />
+        <!-- Notification center (NOTIFICATIONS.md §1): the bell + unread badge. Like
+             the sync indicator, it owns its leading `·` separator and renders NOTHING
+             when there is no active sync session. -->
+        <NotificationBell />
         <span>{t('appshell.developedBy')}
           <a class="statusbar__link" href={HLAB_URL} onclick={openHlabWebsite}><b>HLab</b></a>
         </span>

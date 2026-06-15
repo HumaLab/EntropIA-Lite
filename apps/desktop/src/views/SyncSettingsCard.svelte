@@ -21,13 +21,16 @@
     syncGetUsage,
     syncListConflicts,
     syncListDevices,
+    syncListPlans,
     syncLogin,
     syncLogout,
     syncNow,
     syncRegisterAccount,
+    syncRequestPlanChange,
     syncReverifyBlobs,
     syncRevokeDevice,
     syncSetAuto,
+    type PlanCatalogItem,
     type SyncConflict,
     type SyncDevice,
     type SyncStatus,
@@ -76,6 +79,24 @@
   let deletePassword = $state('')
   let deleting = $state(false)
   let pendingPreflightBytes = $state<number | null>(null)
+
+  // ── Plan change request (NOTIFICATIONS.md §1) ──
+  let showPlanModal = $state(false)
+  let plans = $state<PlanCatalogItem[]>([])
+  let plansLoading = $state(false)
+  let plansError = $state<string | null>(null)
+  let selectedPlanId = $state('')
+  let planNote = $state('')
+  let requestingPlan = $state(false)
+  let planRequestError = $state<string | null>(null)
+  // Locally-tracked pending request (seeds from usage, then updates on submit/409).
+  let pendingPlanRequest = $state<string | null>(null)
+
+  // Target plans = catalogue minus the current plan; server already sorts ASC.
+  const targetPlans = $derived(plans.filter((p) => !p.is_current))
+  const currentPlanName = $derived(
+    plans.find((p) => p.is_current)?.name ?? usage?.plan_name ?? '—'
+  )
 
   // ── Validation ──
   const serverUrlTrimmed = $derived(serverUrl.trim())
@@ -152,6 +173,8 @@
   async function refreshUsage() {
     try {
       usage = await syncGetUsage()
+      // Seed the persistent "request under review" banner from usage (§1).
+      pendingPlanRequest = usage.pending_plan_request ?? null
     } catch (error) {
       setError(error)
     }
@@ -327,6 +350,61 @@
   function cancelDeleteAccount() {
     showDeleteAccount = false
     deletePassword = ''
+  }
+
+  // ── Plan change request ──
+
+  /** Builds the human label for a target plan option: "5 GB · 5 GB" / "Free · sin límite". */
+  function planOptionLabel(plan: PlanCatalogItem): string {
+    const quota =
+      plan.quota_bytes > 0 ? formatBytes(plan.quota_bytes) : t('sync.upgrade.unlimitedQuota')
+    return t('sync.upgrade.planOption', { name: plan.name, quota })
+  }
+
+  async function openPlanModal() {
+    showPlanModal = true
+    planRequestError = null
+    plansError = null
+    selectedPlanId = ''
+    planNote = ''
+    plansLoading = true
+    try {
+      plans = await syncListPlans()
+    } catch {
+      plansError = t('sync.upgrade.loadPlansError')
+    } finally {
+      plansLoading = false
+    }
+  }
+
+  function closePlanModal() {
+    showPlanModal = false
+  }
+
+  async function submitPlanRequest() {
+    if (!selectedPlanId || requestingPlan) return
+    requestingPlan = true
+    planRequestError = null
+    const note = planNote.trim()
+    try {
+      await syncRequestPlanChange(selectedPlanId, note || undefined)
+      pendingPlanRequest = plans.find((p) => p.id === selectedPlanId)?.name ?? selectedPlanId
+      showPlanModal = false
+    } catch (error) {
+      // A 409 means a request is already in review: surface the message AND flip the
+      // persistent banner so the button is disabled (the request already exists).
+      const message = describeSyncError(error)
+      const raw = typeof error === 'string' ? error : error instanceof Error ? error.message : ''
+      if (raw.toLowerCase().includes('plan_request_pending') || raw.includes('409')) {
+        pendingPlanRequest =
+          plans.find((p) => p.id === selectedPlanId)?.name ?? pendingPlanRequest ?? selectedPlanId
+        showPlanModal = false
+      } else {
+        planRequestError = message
+      }
+    } finally {
+      requestingPlan = false
+    }
   }
 </script>
 
@@ -504,6 +582,22 @@
             </li>
           </ul>
         {/if}
+
+        <!-- Plan change: a REQUEST (reviewed by an operator), not a checkout (§1). -->
+        <div class="sync-card__plan-action">
+          {#if pendingPlanRequest}
+            <p class="surface-message sync-card__plan-pending" role="status">
+              {t('sync.upgrade.pendingPlan', { plan: pendingPlanRequest })}
+            </p>
+            <Button variant="secondary" size="sm" disabled>
+              {t('sync.upgrade.pending')}
+            </Button>
+          {:else}
+            <Button variant="secondary" size="sm" onclick={openPlanModal} disabled={busy !== null}>
+              {t('sync.upgrade.button')}
+            </Button>
+          {/if}
+        </div>
       </div>
 
       <!-- ── Conflicts ── -->
@@ -638,6 +732,55 @@
     oncancel={cancelPreflight}
     onconfirm={confirmPreflight}
   />
+{/if}
+
+{#if showPlanModal}
+  <ConfirmDialog
+    title={t('sync.upgrade.title')}
+    titleId="sync-plan-change-title"
+    message={t('sync.upgrade.currentPlanLabel') + ': ' + currentPlanName}
+    cancelLabel={t('sync.upgrade.cancel')}
+    confirmLabel={requestingPlan ? t('sync.upgrade.submitting') : t('sync.upgrade.submit')}
+    confirmDisabled={!selectedPlanId || plansLoading}
+    confirming={requestingPlan}
+    error={planRequestError ?? plansError}
+    oncancel={closePlanModal}
+    onconfirm={submitPlanRequest}
+  >
+    <div class="sync-plan-modal">
+      <div class="sync-plan-modal__field">
+        <label class="sync-card__label" for="sync-plan-target">
+          {t('sync.upgrade.targetPlanLabel')}
+        </label>
+        <select
+          id="sync-plan-target"
+          class="sync-card__number-input sync-plan-modal__select"
+          bind:value={selectedPlanId}
+          disabled={plansLoading || targetPlans.length === 0}
+        >
+          <option value="" disabled>{t('sync.upgrade.targetPlanPlaceholder')}</option>
+          {#each targetPlans as plan (plan.id)}
+            <option value={plan.id}>{planOptionLabel(plan)}</option>
+          {/each}
+        </select>
+      </div>
+
+      <div class="sync-plan-modal__field">
+        <label class="sync-card__label" for="sync-plan-note">
+          {t('sync.upgrade.noteLabel')}
+        </label>
+        <textarea
+          id="sync-plan-note"
+          class="sync-card__number-input sync-plan-modal__textarea"
+          bind:value={planNote}
+          placeholder={t('sync.upgrade.notePlaceholder')}
+          rows="3"
+        ></textarea>
+      </div>
+
+      <p class="sync-plan-modal__disclaimer">{t('sync.upgrade.disclaimer')}</p>
+    </div>
+  </ConfirmDialog>
 {/if}
 
 <style>
@@ -897,6 +1040,51 @@
     word-break: break-word;
     max-height: 220px;
     overflow: auto;
+  }
+
+  .sync-card__plan-action {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    align-items: flex-start;
+    margin-top: var(--space-2);
+  }
+
+  .sync-card__plan-pending {
+    margin: 0;
+  }
+
+  .sync-plan-modal {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  .sync-plan-modal__field {
+    display: flex;
+    flex-direction: column;
+  }
+
+  .sync-plan-modal__select {
+    appearance: auto;
+  }
+
+  .sync-plan-modal__textarea {
+    min-height: calc(var(--control-height-md) * 2);
+    padding-top: var(--space-2);
+    padding-bottom: var(--space-2);
+    line-height: 1.5;
+    resize: vertical;
+  }
+
+  .sync-plan-modal__disclaimer {
+    margin: 0;
+    padding: var(--space-2) var(--space-3);
+    border-radius: var(--radius-sm);
+    background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+    color: var(--color-text-secondary);
+    font-size: var(--font-size-xs);
+    line-height: 1.5;
   }
 
   .sync-card__block--danger {

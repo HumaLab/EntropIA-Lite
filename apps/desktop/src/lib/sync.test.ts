@@ -10,15 +10,21 @@ import {
   syncGetUsage,
   syncListConflicts,
   syncListDevices,
+  syncListNotifications,
+  syncListPlans,
   syncLogin,
   syncLogout,
+  syncMarkNotificationRead,
   syncNow,
   syncRegisterAccount,
+  syncRequestPlanChange,
   syncReverifyBlobs,
   syncRevokeDevice,
   syncSetAuto,
   syncStatus,
   SYNC_STATUS_EVENT,
+  type NotificationItem,
+  type PlanCatalogItem,
   type SyncStatus,
 } from './sync'
 
@@ -96,6 +102,76 @@ describe('sync.ts invoke wrappers', () => {
     expect(mockInvoke).toHaveBeenCalledWith('sync_reverify_blobs')
   })
 
+  it('maps the plan + notification commands (S2 contract)', async () => {
+    mockInvoke.mockResolvedValue([])
+    await syncListPlans()
+    expect(mockInvoke).toHaveBeenCalledWith('sync_list_plans')
+
+    mockInvoke.mockResolvedValue({
+      id: 'req-1',
+      current_plan_id: 'free',
+      requested_plan_id: 'gb5',
+      note: 'need space',
+      status: 'pending',
+      created_at: 1,
+    })
+    await syncRequestPlanChange('gb5', 'need space')
+    // The argument crosses the wire as camelCase `requestedPlanId`.
+    expect(mockInvoke).toHaveBeenCalledWith('sync_request_plan_change', {
+      requestedPlanId: 'gb5',
+      note: 'need space',
+    })
+
+    mockInvoke.mockResolvedValue([])
+    await syncListNotifications('cursor-9', 50)
+    expect(mockInvoke).toHaveBeenCalledWith('sync_list_notifications', {
+      since: 'cursor-9',
+      limit: 50,
+    })
+
+    mockInvoke.mockResolvedValue(undefined)
+    await syncMarkNotificationRead('ntf-7')
+    expect(mockInvoke).toHaveBeenCalledWith('sync_mark_notification_read', { id: 'ntf-7' })
+  })
+
+  it('coerces non-array list returns to []', async () => {
+    mockInvoke.mockResolvedValue(undefined)
+    await expect(syncListPlans()).resolves.toEqual([])
+    await expect(syncListNotifications()).resolves.toEqual([])
+  })
+
+  it('returns the plan catalogue and notification list verbatim', async () => {
+    const plans: PlanCatalogItem[] = [
+      {
+        id: 'free',
+        name: 'Free',
+        quota_bytes: 0,
+        price_cents: 0,
+        currency: 'ARS',
+        period: 'month',
+        description: null,
+        is_current: true,
+      },
+    ]
+    mockInvoke.mockResolvedValue(plans)
+    await expect(syncListPlans()).resolves.toEqual(plans)
+
+    const notifs: NotificationItem[] = [
+      {
+        id: 'ntf-1',
+        kind: 'plan',
+        category: '',
+        severity: 'info',
+        title: 'Plan actualizado',
+        body: 'Tu plan cambió.',
+        created_at: 1_700_000_000,
+        read_at: null,
+      },
+    ]
+    mockInvoke.mockResolvedValue(notifs)
+    await expect(syncListNotifications()).resolves.toEqual(notifs)
+  })
+
   it('returns the account id from registration', async () => {
     mockInvoke.mockResolvedValue('acc-42')
     await expect(syncRegisterAccount('https://x', 'a@x', 'passwordpass')).resolves.toBe('acc-42')
@@ -128,6 +204,9 @@ describe('describeSyncError', () => {
     )
     expect(describeSyncError('api error 409 (email_taken): taken')).toBe(
       'Ya existe una cuenta con ese email.'
+    )
+    expect(describeSyncError('api error 409 (plan_request_pending): in review')).toBe(
+      'Ya tenés una solicitud de cambio de plan en revisión.'
     )
     expect(describeSyncError('api error 401 (unauthorized): nope')).toBe(
       'Credenciales inválidas o sesión revocada.'

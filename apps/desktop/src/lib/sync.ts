@@ -68,6 +68,57 @@ export interface SyncUsage {
   quota_bytes: number
   /** Plan / subscription type name (e.g. `Free`, `5 GB`); null if no plan assigned. */
   plan_name: string | null
+  /** Subscription expiry, ms since epoch; `null` when the plan never expires. */
+  expires_at: number | null
+  /** Count of unread notifications — piggybacks on `/v1/usage` (NOTIFICATIONS.md §1). */
+  unread_notifications: number
+  /** Name of the plan with a pending change request, or `null` when none is in review. */
+  pending_plan_request: string | null
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Plans + notifications DTOs (NOTIFICATIONS.md §1, S2 contract — snake_case wire)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** One plan in the catalogue (`sync_list_plans`). Server returns price ASC, quota ASC. */
+export interface PlanCatalogItem {
+  id: string
+  name: string
+  /** Storage quota in bytes; `0` means unlimited. */
+  quota_bytes: number
+  /** Price in cents; `0` means free. */
+  price_cents: number
+  currency: string
+  period: string
+  description: string | null
+  /** True for the plan the account is currently on. */
+  is_current: boolean
+}
+
+/** One notification surfaced to the UI (`sync_list_notifications`). */
+export interface NotificationItem {
+  id: string
+  kind: string
+  /** May arrive as `""` from the current server. */
+  category: string
+  /** Maps to a colour: `info`/`warning`/`critical` (see notification panel). */
+  severity: string
+  /** Pre-rendered by the server — the client NEVER builds or translates copy. */
+  title: string
+  /** Pre-rendered by the server — the client NEVER builds or translates copy. */
+  body: string
+  created_at: number
+  read_at: number | null
+}
+
+/** The response of `sync_request_plan_change` (a request, not a checkout). */
+export interface PlanChangeRequestResponse {
+  id: string
+  current_plan_id: string | null
+  requested_plan_id: string
+  note: string | null
+  status: string
+  created_at: number
 }
 
 /** One conflict journal entry surfaced to the UI (DESIGN §6 schema). */
@@ -211,6 +262,50 @@ export function syncReverifyBlobs(): Promise<void> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Plans + notifications (NOTIFICATIONS.md §1, S2 contract)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Lists the plan catalogue (`sync_list_plans`). The server orders by price ASC then
+ * quota ASC and flags the current plan via `is_current`. Always resolves to an array.
+ */
+export function syncListPlans(): Promise<PlanCatalogItem[]> {
+  return invoke<PlanCatalogItem[]>('sync_list_plans').then((r) => (Array.isArray(r) ? r : []))
+}
+
+/**
+ * Requests a plan change (`sync_request_plan_change`). This is a REQUEST for an
+ * operator to review — NOT a checkout. The Rust side maps an in-flight request to a
+ * `409` whose message (`plan_request_pending`) already arrives translated.
+ * NB: the argument is camelCase on the wire (`requestedPlanId`).
+ */
+export function syncRequestPlanChange(
+  requestedPlanId: string,
+  note?: string
+): Promise<PlanChangeRequestResponse> {
+  return invoke<PlanChangeRequestResponse>('sync_request_plan_change', { requestedPlanId, note })
+}
+
+/**
+ * Lists notifications (`sync_list_notifications`). `since` is an EXCLUSIVE cursor by
+ * id (`""` / `"0"` / `undefined` = from the beginning); `limit` is capped server-side
+ * at 100. Always resolves to an array.
+ */
+export function syncListNotifications(since?: string, limit?: number): Promise<NotificationItem[]> {
+  return invoke<NotificationItem[]>('sync_list_notifications', { since, limit }).then((r) =>
+    Array.isArray(r) ? r : []
+  )
+}
+
+/**
+ * Marks a notification as read (`sync_mark_notification_read`). Idempotent; a `404`
+ * means the id does not exist or belongs to another account.
+ */
+export function syncMarkNotificationRead(id: string): Promise<void> {
+  return invoke<void>('sync_mark_notification_read', { id })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Error mapping (DESIGN §11 / PROTOCOL "Errores")
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -237,6 +332,7 @@ export function describeSyncError(error: unknown): string {
   if (lower.includes('account_suspended')) return t('sync.error.accountSuspended')
   if (lower.includes('subscription_expired')) return t('sync.error.subscriptionExpired')
   if (lower.includes('registration_closed')) return t('sync.error.registrationClosed')
+  if (lower.includes('plan_request_pending')) return t('sync.error.planRequestPending')
   if (lower.includes('email_taken')) return t('sync.error.emailTaken')
   if (lower.includes('401') || lower.includes('unauthorized')) return t('sync.error.unauthorized')
 
