@@ -1,22 +1,8 @@
-import type { DbClient } from './types'
+-- AUTO-GENERATED schema fixture for the Rust sync tests. DO NOT EDIT BY HAND.
+-- Regenerate with: pnpm --filter @entropia/store export-schema
+-- Source of truth: packages/store/src/runner.ts (MIGRATIONS + LAYOUTS_DDL).
 
-// ---------------------------------------------------------------------------
-// Migration registry — SQL inlined as strings for Tauri bundling.
-// Cannot use dynamic fs reads at runtime in a Tauri webview.
-//
-// Sync authoring convention (DESIGN §6.4): any migration that does a rebuild
-// (DROP+RENAME) of a SYNCED table (collections, items, assets, notes,
-// annotations, extractions, transcriptions, layouts, entities, triples, topics,
-// item_topics, llm_results, rag_conversations, rag_messages) MUST, in the same
-// flow: (a) let the Rust `sync_ensure_capture` re-create that table's 3 capture
-// triggers, and (b) when a sync session exists, re-seed that table's oplog.
-// Prefer additive `ALTER TABLE … DEFAULT` over rebuilds for synced tables.
-// `sync_ensure_capture` runs after migrations finish and self-heals triggers,
-// but a rebuild still loses any oplog entries for in-flight writes — the re-seed
-// covers that residual window.
-// ---------------------------------------------------------------------------
-export const MIGRATIONS: Record<string, string> = {
-  '0001_initial': `
+-- 0001_initial
 -- Migration tracking table
 CREATE TABLE IF NOT EXISTS _migrations (
   id    INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -57,9 +43,8 @@ CREATE TABLE IF NOT EXISTS notes (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL
 );
-  `.trim(),
 
-  '0002_metadata_search': `
+-- 0002_metadata_search
 -- Add search_text generated column for LIKE queries
 ALTER TABLE items ADD COLUMN search_text TEXT GENERATED ALWAYS AS (
   COALESCE(title, '') || ' ' || COALESCE(json(metadata), '')
@@ -70,9 +55,8 @@ CREATE INDEX IF NOT EXISTS idx_items_search ON items(search_text);
 CREATE INDEX IF NOT EXISTS idx_items_collection ON items(collection_id);
 CREATE INDEX IF NOT EXISTS idx_assets_item ON assets(item_id);
 CREATE INDEX IF NOT EXISTS idx_notes_item ON notes(item_id);
-  `.trim(),
 
-  '0003_extractions': `
+-- 0003_extractions
 CREATE TABLE IF NOT EXISTS extractions (
   id TEXT PRIMARY KEY,
   asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
@@ -82,9 +66,8 @@ CREATE TABLE IF NOT EXISTS extractions (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_extractions_asset_id ON extractions(asset_id);
-  `.trim(),
 
-  '0004_fts5': `
+-- 0004_fts5
 CREATE VIRTUAL TABLE IF NOT EXISTS fts_items
 USING fts5(
   item_id UNINDEXED,
@@ -99,10 +82,9 @@ INSERT INTO fts_items(rowid, item_id, title, metadata, extracted_text)
 SELECT i.rowid, i.id, i.title, COALESCE(i.metadata,''),
        COALESCE((SELECT GROUP_CONCAT(e.text_content,' ') FROM extractions e
                  JOIN assets a ON e.asset_id=a.id WHERE a.item_id=i.id), '')
-FROM items i
-  `.trim(),
+FROM items i;
 
-  '0005_nlp_tables': `
+-- 0005_nlp_tables
 CREATE TABLE IF NOT EXISTS entities (
   id TEXT PRIMARY KEY NOT NULL,
   item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -115,10 +97,9 @@ CREATE TABLE IF NOT EXISTS entities (
 );
 
 CREATE INDEX IF NOT EXISTS idx_entities_item_id ON entities(item_id);
-CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type)
-  `.trim(),
+CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
 
-  '0006_triples': `
+-- 0006_triples
 CREATE TABLE IF NOT EXISTS triples (
   id TEXT PRIMARY KEY NOT NULL,
   item_id TEXT NOT NULL REFERENCES items(id) ON DELETE CASCADE,
@@ -128,10 +109,9 @@ CREATE TABLE IF NOT EXISTS triples (
   created_at INTEGER NOT NULL DEFAULT (strftime('%s', 'now'))
 );
 
-CREATE INDEX IF NOT EXISTS triples_item_id_idx ON triples(item_id)
-  `.trim(),
+CREATE INDEX IF NOT EXISTS triples_item_id_idx ON triples(item_id);
 
-  '0007_annotations': `
+-- 0007_annotations
 CREATE TABLE IF NOT EXISTS annotations (
   id TEXT PRIMARY KEY NOT NULL,
   asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
@@ -147,10 +127,9 @@ CREATE TABLE IF NOT EXISTS annotations (
 );
 
 CREATE INDEX IF NOT EXISTS annotations_asset_id_idx ON annotations(asset_id);
-CREATE INDEX IF NOT EXISTS annotations_asset_page_idx ON annotations(asset_id, page)
-  `.trim(),
+CREATE INDEX IF NOT EXISTS annotations_asset_page_idx ON annotations(asset_id, page);
 
-  '0008_transcriptions': `
+-- 0008_transcriptions
 CREATE TABLE IF NOT EXISTS transcriptions (
   id TEXT PRIMARY KEY,
   asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
@@ -162,16 +141,13 @@ CREATE TABLE IF NOT EXISTS transcriptions (
   confidence REAL,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_transcriptions_asset_id ON transcriptions(asset_id)
-  `.trim(),
+CREATE INDEX IF NOT EXISTS idx_transcriptions_asset_id ON transcriptions(asset_id);
 
-  '0009_entities_provenance': `
+-- 0009_entities_provenance
 CREATE TEMP TABLE IF NOT EXISTS __entropia_migration_0009_noop (id INTEGER);
-DROP TABLE IF EXISTS __entropia_migration_0009_noop
-  `.trim(),
+DROP TABLE IF EXISTS __entropia_migration_0009_noop;
 
-  '0010_entities_type_expansion': `
-
+-- 0010_entities_type_expansion
 DROP TABLE IF EXISTS entities_v2;
 
 CREATE TABLE entities_v2 (
@@ -200,17 +176,15 @@ DROP TABLE entities;
 ALTER TABLE entities_v2 RENAME TO entities;
 
 CREATE INDEX IF NOT EXISTS idx_entities_item_id ON entities(item_id);
-CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type)
-  `.trim(),
+CREATE INDEX IF NOT EXISTS idx_entities_type ON entities(entity_type);
 
-  '0011_entities_geocoding': `
+-- 0011_entities_geocoding
 ALTER TABLE entities ADD COLUMN latitude REAL;
 ALTER TABLE entities ADD COLUMN longitude REAL;
 ALTER TABLE entities ADD COLUMN geo_status TEXT NOT NULL DEFAULT 'pending';
-CREATE INDEX IF NOT EXISTS idx_entities_geo_status ON entities(geo_status)
-  `.trim(),
+CREATE INDEX IF NOT EXISTS idx_entities_geo_status ON entities(geo_status);
 
-  '0012_llm_results': `
+-- 0012_llm_results
 CREATE TABLE IF NOT EXISTS llm_results (
   id TEXT PRIMARY KEY,
   target_id TEXT NOT NULL,
@@ -218,16 +192,14 @@ CREATE TABLE IF NOT EXISTS llm_results (
   result TEXT NOT NULL,
   created_at INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_llm_results_target ON llm_results(target_id)
-  `.trim(),
+CREATE INDEX IF NOT EXISTS idx_llm_results_target ON llm_results(target_id);
 
-  '0013_assets_sort_index': `
+-- 0013_assets_sort_index
 -- Add sort_index to assets for stable page ordering (e.g. scanned PDF pages)
 ALTER TABLE assets ADD COLUMN sort_index INTEGER NOT NULL DEFAULT 0;
 CREATE INDEX IF NOT EXISTS idx_assets_item_sort ON assets(item_id, sort_index);
-  `.trim(),
 
-  '0014_asset_scoping': `
+-- 0014_asset_scoping
 -- Add asset_id to notes, entities, and triples for per-page scoping.
 -- Nullable: legacy rows without asset_id are considered "item-level" (shown on all pages).
 ALTER TABLE notes ADD COLUMN asset_id TEXT;
@@ -236,9 +208,8 @@ ALTER TABLE triples ADD COLUMN asset_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_notes_asset_id ON notes(asset_id);
 CREATE INDEX IF NOT EXISTS idx_entities_asset_id ON entities(asset_id);
 CREATE INDEX IF NOT EXISTS idx_triples_asset_id ON triples(asset_id);
-  `.trim(),
 
-  '0015_topics': `
+-- 0015_topics
 -- Create topics table and item_topics junction table for reusable topic tagging
 CREATE TABLE IF NOT EXISTS topics (
   id TEXT PRIMARY KEY,
@@ -255,9 +226,8 @@ CREATE TABLE IF NOT EXISTS item_topics (
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_item_topics_item_topic ON item_topics(item_id, topic_id);
 CREATE INDEX IF NOT EXISTS idx_item_topics_topic_id ON item_topics(topic_id);
-  `.trim(),
 
-  '0016_asset_unique_ocr_transcription': `
+-- 0016_asset_unique_ocr_transcription
 -- Enforce one extraction/transcription row per asset to enable true UPSERT.
 -- Keep the most recent row (largest rowid) if any legacy duplicates exist.
 DELETE FROM extractions
@@ -275,9 +245,8 @@ ON extractions(asset_id);
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_transcriptions_asset_id_unique
 ON transcriptions(asset_id);
-  `.trim(),
 
-  '0017_vec_assets': `
+-- 0017_vec_assets
 CREATE TABLE IF NOT EXISTS vec_assets(
   asset_id TEXT PRIMARY KEY,
   item_id TEXT NOT NULL,
@@ -285,9 +254,8 @@ CREATE TABLE IF NOT EXISTS vec_assets(
 );
 
 CREATE INDEX IF NOT EXISTS idx_vec_assets_item_id ON vec_assets(item_id);
-  `.trim(),
 
-  '0018_fts_rowid_canonical': `
+-- 0018_fts_rowid_canonical
 -- Rebuild FTS rows so fts_items.rowid always matches items.rowid.
 INSERT INTO fts_items(fts_items) VALUES('delete-all');
 
@@ -323,10 +291,9 @@ SELECT
       ORDER BY source_order ASC, sort_index ASC, created_at ASC
     )
   ), '')
-FROM items i
-  `.trim(),
+FROM items i;
 
-  '0019_llm_results_target_type': `
+-- 0019_llm_results_target_type
 CREATE TABLE llm_results_v2 (
   id TEXT PRIMARY KEY,
   target_id TEXT NOT NULL,
@@ -359,21 +326,26 @@ ALTER TABLE llm_results_v2 RENAME TO llm_results;
 
 CREATE INDEX IF NOT EXISTS idx_llm_results_target ON llm_results(target_id);
 CREATE INDEX IF NOT EXISTS idx_llm_results_target_typed
-ON llm_results(target_type, target_id, job_type)
-  `.trim(),
+ON llm_results(target_type, target_id, job_type);
 
-  '0020_layouts': `
--- Handled programmatically in runMigrations() because existing desktop databases
--- may already contain a legacy layouts table without the blocks column.
-CREATE TEMP TABLE IF NOT EXISTS __entropia_migration_0020_noop (id INTEGER);
-DROP TABLE IF EXISTS __entropia_migration_0020_noop
-  `.trim(),
+-- 0020_layouts
+CREATE TABLE IF NOT EXISTS layouts (
+  id TEXT PRIMARY KEY,
+  asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
+  regions TEXT NOT NULL,
+  blocks TEXT NOT NULL DEFAULT '[]',
+  model TEXT NOT NULL,
+  image_width INTEGER NOT NULL,
+  image_height INTEGER NOT NULL,
+  created_at INTEGER NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_layouts_asset_id_unique ON layouts(asset_id);
+CREATE INDEX IF NOT EXISTS idx_layouts_asset_id ON layouts(asset_id);
 
-  '0021_drop_unused_processing_table': `
-DROP TABLE IF EXISTS jobs
-  `.trim(),
+-- 0021_drop_unused_processing_table
+DROP TABLE IF EXISTS jobs;
 
-  '0022_rag_conversations': `
+-- 0022_rag_conversations
 CREATE TABLE IF NOT EXISTS rag_conversations (
   id TEXT PRIMARY KEY,
   title TEXT NOT NULL,
@@ -391,9 +363,8 @@ CREATE TABLE IF NOT EXISTS rag_messages (
   created_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_rag_messages_conversation ON rag_messages(conversation_id, sort_index);
-  `.trim(),
 
-  '0023_sync_ids': `
+-- 0023_sync_ids
 -- Deterministic ids for one-per-asset tables (DESIGN §4.6). Rewrites existing
 -- rows so two devices that OCR/transcribe the same asset converge on a single
 -- server row. Nothing references these ids by FK (verified), so the rewrite is
@@ -401,187 +372,3 @@ CREATE INDEX IF NOT EXISTS idx_rag_messages_conversation ON rag_messages(convers
 UPDATE extractions SET id = 'ext-' || asset_id;
 UPDATE transcriptions SET id = 'trx-' || asset_id;
 UPDATE layouts SET id = 'lay-' || asset_id;
-  `.trim(),
-}
-
-/**
- * Programmatic DDL for the `layouts` table and its indexes (migration 0020 runs
- * imperatively in {@link applyLayoutsMigration} because legacy desktop DBs may
- * already have a column-less layouts table). Exported so the schema-fixture
- * export script can reproduce the canonical final shape of a fresh install
- * without replaying the legacy-migration branches.
- */
-export const LAYOUTS_DDL: string = `
-CREATE TABLE IF NOT EXISTS layouts (
-  id TEXT PRIMARY KEY,
-  asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
-  regions TEXT NOT NULL,
-  blocks TEXT NOT NULL DEFAULT '[]',
-  model TEXT NOT NULL,
-  image_width INTEGER NOT NULL,
-  image_height INTEGER NOT NULL,
-  created_at INTEGER NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_layouts_asset_id_unique ON layouts(asset_id);
-CREATE INDEX IF NOT EXISTS idx_layouts_asset_id ON layouts(asset_id);
-`.trim()
-
-async function applyLayoutsMigration(client: DbClient): Promise<void> {
-  const now = Date.now()
-  await client.execute(`
-    CREATE TABLE IF NOT EXISTS layouts (
-      id TEXT PRIMARY KEY,
-      asset_id TEXT NOT NULL REFERENCES assets(id) ON DELETE CASCADE,
-      regions TEXT NOT NULL,
-      blocks TEXT NOT NULL DEFAULT '[]',
-      model TEXT NOT NULL,
-      image_width INTEGER NOT NULL,
-      image_height INTEGER NOT NULL,
-      created_at INTEGER NOT NULL
-    )
-  `)
-
-  try {
-    await client.execute("ALTER TABLE layouts ADD COLUMN blocks TEXT NOT NULL DEFAULT '[]'")
-  } catch (error) {
-    const message = String(error).toLowerCase()
-    if (!message.includes('duplicate column name')) {
-      throw error
-    }
-  }
-
-  await client.execute(`
-    DELETE FROM layouts
-    WHERE rowid NOT IN (
-      SELECT MAX(rowid) FROM layouts GROUP BY asset_id
-    )
-  `)
-  await client.execute(
-    'CREATE UNIQUE INDEX IF NOT EXISTS idx_layouts_asset_id_unique ON layouts(asset_id)'
-  )
-  await client.execute('CREATE INDEX IF NOT EXISTS idx_layouts_asset_id ON layouts(asset_id)')
-  await client.execute(`
-    UPDATE layouts
-    SET created_at = ${now}
-    WHERE created_at IS NULL OR created_at = 0
-  `)
-}
-
-/**
- * Builds the full application schema as a single SQL string, in migration
- * order, for use as a fixture by the Rust sync tests. This reproduces what a
- * FRESH install ends up with after `runMigrations`:
- *
- * - every registry migration's SQL, applied in sorted (lexicographic) order;
- * - the `0020_layouts` registry entry (a no-op marker) is replaced by the
- *   canonical programmatic {@link LAYOUTS_DDL}, mirroring how
- *   {@link applyLayoutsMigration} runs imperatively at runtime.
- *
- * The output is deterministic so a checked-in artifact can be diffed against it
- * (see `scripts/export-schema.mjs` and the matching vitest freshness test).
- */
-export function buildSchemaFixture(): string {
-  const header = [
-    '-- AUTO-GENERATED schema fixture for the Rust sync tests. DO NOT EDIT BY HAND.',
-    '-- Regenerate with: pnpm --filter @entropia/store export-schema',
-    '-- Source of truth: packages/store/src/runner.ts (MIGRATIONS + LAYOUTS_DDL).',
-    '',
-  ].join('\n')
-
-  const sections = Object.keys(MIGRATIONS)
-    .sort()
-    .map((name) => {
-      const sql = (name === '0020_layouts' ? LAYOUTS_DDL : MIGRATIONS[name]!).trim()
-      // Several registry entries omit the trailing semicolon on their last
-      // statement (harmless at runtime — the runner splits per migration on
-      // ';'). The fixture is fed to one execute_batch, so each section must be
-      // self-terminated or the next migration's CREATE runs into it.
-      const terminated = sql.endsWith(';') ? sql : `${sql};`
-      return `-- ${name}\n${terminated}`
-    })
-
-  return `${header}\n${sections.join('\n\n')}\n`
-}
-
-/**
- * Split a multi-statement SQL string into individual statements.
- * Strips comments and empty lines, splits on semicolons.
- */
-function splitStatements(sql: string): string[] {
-  return sql
-    .split(';')
-    .map((s) => s.trim())
-    .filter((s) => s.length > 0)
-}
-
-/**
- * Runs all pending migrations in filename order.
- *
- * - Ensures the `_migrations` tracking table exists
- * - Fetches already-applied migration names
- * - Applies each pending migration inside a BEGIN/COMMIT transaction
- * - Inserts a record into `_migrations` on success
- * - On error: rolls back the transaction and rethrows with the migration name
- */
-export async function runMigrations(client: DbClient): Promise<void> {
-  // Ensure tracking table exists (idempotent)
-  await client.execute(`
-    CREATE TABLE IF NOT EXISTS _migrations (
-      id    INTEGER PRIMARY KEY AUTOINCREMENT,
-      name  TEXT    NOT NULL UNIQUE,
-      applied_at INTEGER NOT NULL
-    )
-  `)
-
-  // Fetch already-applied migrations
-  const applied = await client.select<{ name: string }>('SELECT name FROM _migrations ORDER BY id')
-  const appliedSet = new Set(applied.map((row) => row.name))
-
-  // Sort migration keys by filename order (lexicographic)
-  const pending = Object.keys(MIGRATIONS)
-    .sort()
-    .filter((name) => !appliedSet.has(name))
-
-  for (const name of pending) {
-    try {
-      await client.execute('BEGIN')
-
-      if (name === '0020_layouts') {
-        await applyLayoutsMigration(client)
-      } else {
-        const sql = MIGRATIONS[name]!
-        const statements = splitStatements(sql)
-
-        for (const stmt of statements) {
-          try {
-            await client.execute(stmt)
-          } catch (stmtErr) {
-            const msg = stmtErr instanceof Error ? stmtErr.message : String(stmtErr)
-            if (/duplicate column name/i.test(msg)) {
-              continue
-            }
-            throw stmtErr
-          }
-        }
-      }
-
-      await client.execute('INSERT INTO _migrations (name, applied_at) VALUES (?, ?)', [
-        name,
-        Math.floor(Date.now() / 1000),
-      ])
-
-      await client.execute('COMMIT')
-    } catch (error) {
-      // Best-effort rollback — if BEGIN didn't succeed, ROLLBACK may also fail
-      try {
-        await client.execute('ROLLBACK')
-      } catch {
-        // Swallow rollback errors — the original error is more important
-      }
-
-      throw new Error(
-        `Migration "${name}" failed: ${error instanceof Error ? error.message : String(error)}`
-      )
-    }
-  }
-}

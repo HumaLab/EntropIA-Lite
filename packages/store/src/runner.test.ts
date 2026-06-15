@@ -1,6 +1,11 @@
+import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
+import { dirname, resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
-import { runMigrations } from './runner'
+import { runMigrations, MIGRATIONS } from './runner'
 import { createMockDbClient } from './__mocks__/db.mock'
+
+const here = dirname(fileURLToPath(import.meta.url))
 
 describe('runMigrations — migrations 0004, 0005 and 0006', () => {
   it('executes 0004_fts5 migration SQL (FTS5 virtual table creation)', async () => {
@@ -142,6 +147,25 @@ describe('runMigrations — migrations 0004, 0005 and 0006', () => {
     expect(hasConversationIndex).toBe(true)
   })
 
+  it('executes 0023_sync_ids migration rewriting one-per-asset ids deterministically', async () => {
+    const client = createMockDbClient()
+    await runMigrations(client)
+
+    const hasExtractionRewrite = client._executedSql.some((sql) =>
+      sql.includes("UPDATE extractions SET id = 'ext-' || asset_id")
+    )
+    const hasTranscriptionRewrite = client._executedSql.some((sql) =>
+      sql.includes("UPDATE transcriptions SET id = 'trx-' || asset_id")
+    )
+    const hasLayoutRewrite = client._executedSql.some((sql) =>
+      sql.includes("UPDATE layouts SET id = 'lay-' || asset_id")
+    )
+
+    expect(hasExtractionRewrite).toBe(true)
+    expect(hasTranscriptionRewrite).toBe(true)
+    expect(hasLayoutRewrite).toBe(true)
+  })
+
   it('executes layouts migration with blocks column and unique asset index', async () => {
     const client = createMockDbClient()
     await runMigrations(client)
@@ -158,5 +182,23 @@ describe('runMigrations — migrations 0004, 0005 and 0006', () => {
 
     expect(hasLayoutsTable).toBe(true)
     expect(hasUniqueIndex).toBe(true)
+  })
+
+  it('0023_sync_ids is the migration head and its .sql mirror matches the registry', () => {
+    const head = Object.keys(MIGRATIONS).sort().at(-1)
+    expect(head).toBe('0023_sync_ids')
+
+    // The checked-in .sql mirror must contain the same three rewrites as the
+    // inline registry entry (the registry is the runtime source of truth; the
+    // file is the human-readable mirror per the migrations/ convention).
+    const mirror = readFileSync(resolve(here, 'migrations/0023_sync_ids.sql'), 'utf8')
+    for (const stmt of [
+      "UPDATE extractions SET id = 'ext-' || asset_id",
+      "UPDATE transcriptions SET id = 'trx-' || asset_id",
+      "UPDATE layouts SET id = 'lay-' || asset_id",
+    ]) {
+      expect(MIGRATIONS['0023_sync_ids']).toContain(stmt)
+      expect(mirror).toContain(stmt)
+    }
   })
 })

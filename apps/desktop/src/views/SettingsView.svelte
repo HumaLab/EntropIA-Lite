@@ -55,6 +55,7 @@
   } from '$lib/settings'
   import { ActionIcon, Button, Card, ConfirmDialog, Input, TabButton, TabList } from '@entropia/ui'
   import LogsTab from './LogsTab.svelte'
+  import SyncSettingsCard from './SyncSettingsCard.svelte'
 
   let activeTab = $state<'api' | 'prompts' | 'modelParams' | 'ragParams' | 'logs'>('api')
 
@@ -989,6 +990,8 @@
         </div>
       </section>
     </Card>
+
+    <SyncSettingsCard />
 
     {:else if activeTab === 'prompts'}
       {#if saveFeedback}

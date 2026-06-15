@@ -6,6 +6,7 @@ use std::collections::HashSet;
 use tauri::State;
 
 use crate::db::state::AppDbState;
+use crate::db::util::{is_safe_identifier, json_to_sql_param, quote_identifier};
 
 const DB_BROWSER_HIDDEN_TABLES: &[&str] = &["app_settings", "_migrations", "fts_items"];
 const DB_BROWSER_CANDIDATE_TABLES: &[&str] = &[
@@ -410,20 +411,6 @@ fn ensure_db_browser_table_allowed(conn: &Connection, table: &str) -> Result<(),
     }
 }
 
-fn is_safe_identifier(value: &str) -> bool {
-    let mut chars = value.chars();
-    match chars.next() {
-        Some(first) if first.is_ascii_alphabetic() || first == '_' => {}
-        _ => return false,
-    }
-
-    chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
-}
-
-fn quote_identifier(value: &str) -> String {
-    format!("\"{value}\"")
-}
-
 /// Escape LIKE wildcards (`%`, `_`) and the escape character itself so user
 /// searches match those characters literally. Pairs with `ESCAPE '\'` in the
 /// LIKE clauses built above.
@@ -438,24 +425,6 @@ fn parse_sort_direction(value: Option<&str>) -> &'static str {
     match value.unwrap_or("asc").to_ascii_lowercase().as_str() {
         "desc" => "DESC",
         _ => "ASC",
-    }
-}
-
-fn json_to_sql_param(val: &serde_json::Value) -> Box<dyn rusqlite::ToSql> {
-    match val {
-        serde_json::Value::Null => Box::new(rusqlite::types::Null),
-        serde_json::Value::Bool(b) => Box::new(*b as i64),
-        serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() {
-                Box::new(i)
-            } else if let Some(f) = n.as_f64() {
-                Box::new(f)
-            } else {
-                Box::new(rusqlite::types::Null)
-            }
-        }
-        serde_json::Value::String(s) => Box::new(s.clone()),
-        other => Box::new(other.to_string()),
     }
 }
 
@@ -498,6 +467,9 @@ fn validate_sql_row_query(sql: &str) -> Result<(), String> {
         || normalized.starts_with("delete ");
 
     if is_dml && normalized.contains(" returning ") {
+        if statement_writes_sync_objects(&normalized) {
+            return Err(SYNC_PROTECTION_ERROR.to_string());
+        }
         return Ok(());
     }
 
@@ -519,7 +491,74 @@ fn validate_sql_execute(sql: &str) -> Result<(), String> {
     {
         return Err("Restricted SQL statement for db_execute".to_string());
     }
+    if statement_writes_sync_objects(&normalized) {
+        return Err(SYNC_PROTECTION_ERROR.to_string());
+    }
     Ok(())
+}
+
+/// Error returned when the renderer tries to write the sync state (DESIGN §6.2).
+const SYNC_PROTECTION_ERROR: &str =
+    "Restricted SQL statement: sync_* tables and trg_sync_* triggers are managed by the sync engine";
+
+/// Detects whether a single normalized statement would WRITE the sync state:
+/// any DML/DDL targeting a `sync_*` table, or any CREATE/DROP of a
+/// `trg_sync_*` trigger (DESIGN §6.2). Reads (`SELECT … FROM sync_*`) are NOT
+/// blocked — the renderer may inspect sync status, it just must never mutate
+/// it, even by accident.
+///
+/// Matching is verb-anchored against the leading keyword so that a literal like
+/// `'sync_oplog'` inside a write to a NON-sync table is not falsely rejected.
+/// `normalized` is the lowercased, whitespace-collapsed statement produced by
+/// [`normalize_sql`].
+fn statement_writes_sync_objects(normalized: &str) -> bool {
+    let leading = normalized.split(' ').next().unwrap_or("");
+    match leading {
+        // `INSERT INTO sync_x`, `INSERT OR REPLACE INTO sync_x`, `REPLACE INTO sync_x`.
+        "insert" | "replace" => {
+            statement_target_after("into", normalized).is_some_and(target_is_sync_table)
+        }
+        "update" => normalized
+            .split(' ')
+            .nth(1)
+            .is_some_and(target_is_sync_table),
+        // `DELETE FROM sync_x`.
+        "delete" => statement_target_after("from", normalized).is_some_and(target_is_sync_table),
+        // `ALTER TABLE sync_x`, `CREATE TABLE … sync_x`, `DROP TABLE … sync_x`,
+        // `CREATE/DROP TRIGGER … trg_sync_x` (and their INDEX variants on sync_*).
+        "alter" | "create" | "drop" => statement_touches_sync_ddl(normalized),
+        _ => false,
+    }
+}
+
+/// Returns the token immediately following `keyword` in the normalized
+/// statement (the conventional position of the target object name).
+fn statement_target_after<'a>(keyword: &str, normalized: &'a str) -> Option<&'a str> {
+    let mut tokens = normalized.split(' ');
+    while let Some(token) = tokens.next() {
+        if token == keyword {
+            return tokens.next();
+        }
+    }
+    None
+}
+
+/// True when a CREATE/DROP/ALTER statement targets a sync object: a `sync_*`
+/// table/index or a `trg_sync_*` trigger. DDL syntax varies (`IF NOT EXISTS`,
+/// schema qualifiers, `ON table`), so this scans the statement's tokens for the
+/// managed prefixes rather than anchoring on a fixed position — failing CLOSED.
+fn statement_touches_sync_ddl(normalized: &str) -> bool {
+    normalized
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
+        .any(|token| target_is_sync_table(token) || token.starts_with("trg_sync_"))
+}
+
+/// True when a bare object name refers to a sync-managed table. Strips an
+/// optional double-quote wrap and a `main.`/`temp.` schema qualifier.
+fn target_is_sync_table(token: &str) -> bool {
+    let token = token.trim_matches('"');
+    let bare = token.rsplit('.').next().unwrap_or(token);
+    bare.starts_with("sync_")
 }
 
 /// Validate a multi-statement batch per statement: split on `;`, normalize
@@ -548,6 +587,9 @@ fn validate_sql_batch(sql: &str) -> Result<(), String> {
         let leading_keyword = normalized.split(' ').next().unwrap_or("");
         if matches!(leading_keyword, "attach" | "detach" | "vacuum" | "pragma") {
             return Err("Restricted SQL statement in db_execute_batch".to_string());
+        }
+        if statement_writes_sync_objects(&normalized) {
+            return Err(SYNC_PROTECTION_ERROR.to_string());
         }
     }
     Ok(())
@@ -705,6 +747,62 @@ mod tests {
         .is_ok());
         assert!(validate_sql_batch("").is_ok());
         assert!(validate_sql_batch(";;").is_ok());
+    }
+
+    #[test]
+    fn sync_protection_blocks_writes_to_sync_tables() {
+        // DML against sync_* tables is rejected on every renderer entry point.
+        assert!(
+            validate_sql_execute("INSERT INTO sync_meta (key, value) VALUES ('x', '1')").is_err()
+        );
+        assert!(validate_sql_execute("UPDATE sync_meta SET value = '1' WHERE key = 'x'").is_err());
+        assert!(validate_sql_execute("DELETE FROM sync_oplog WHERE seq = 1").is_err());
+        assert!(validate_sql_execute(
+            "INSERT OR REPLACE INTO sync_row_versions VALUES ('t','r',1)"
+        )
+        .is_err());
+        assert!(validate_sql_batch("DELETE FROM sync_oplog; DELETE FROM sync_conflicts;").is_err());
+        assert!(validate_sql_row_query(
+            "DELETE FROM sync_pending_blobs WHERE asset_id = 'a' RETURNING asset_id"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn sync_protection_blocks_sync_trigger_and_table_ddl() {
+        assert!(validate_sql_batch(
+            "CREATE TRIGGER trg_sync_items_u AFTER UPDATE ON items BEGIN SELECT 1; END;"
+        )
+        .is_err());
+        assert!(validate_sql_batch("DROP TRIGGER IF EXISTS trg_sync_items_d;").is_err());
+        assert!(validate_sql_batch("DROP TABLE sync_oplog;").is_err());
+        assert!(validate_sql_batch("ALTER TABLE sync_meta ADD COLUMN x TEXT;").is_err());
+        assert!(validate_sql_batch(
+            "CREATE TABLE IF NOT EXISTS sync_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn sync_protection_allows_reads_and_unrelated_writes() {
+        // Reading sync status is permitted — only mutations are blocked.
+        assert!(
+            validate_sql_row_query("SELECT value FROM sync_meta WHERE key = 'pending'").is_ok()
+        );
+        // A literal mentioning sync_ inside a write to a NON-sync table must pass.
+        assert!(validate_sql_execute(
+            "INSERT INTO notes (id, content) VALUES ('n-1', 'remember to sync_oplog later')"
+        )
+        .is_ok());
+        assert!(validate_sql_batch(
+            "UPDATE items SET title = 'about sync_meta keys' WHERE id = 'item-1';"
+        )
+        .is_ok());
+        // Legitimate writes to real tables stay green.
+        assert!(validate_sql_execute("DELETE FROM items WHERE id = 'item-1'").is_ok());
+        assert!(
+            validate_sql_batch("BEGIN; DELETE FROM assets WHERE item_id = 'i'; COMMIT;").is_ok()
+        );
     }
 
     #[test]

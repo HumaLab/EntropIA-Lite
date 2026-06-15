@@ -1,0 +1,8 @@
+{
+  "productName": "EntropIA Lite Dev2",
+  "identifier": "com.entropia.lite.dev2",
+  "build": {
+    "beforeDevCommand": "pnpm exec vite --port 1421 --strictPort",
+    "devUrl": "http://localhost:1421"
+  }
+}

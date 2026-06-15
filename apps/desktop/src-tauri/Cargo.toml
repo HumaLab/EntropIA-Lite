@@ -36,6 +36,11 @@ hound = "3"
 # Lite forbids local model inference/runtime dependencies. ML features use
 # remote providers only: OpenRouter, GLM-OCR, and AssemblyAI.
 
+[dev-dependencies]
+# Test-only: lets the sync MockSyncApi build a `reqwest::Response` from raw bytes
+# for blob-download tests. Already in the tree transitively via reqwest 0.12.
+http = "1"
+
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.59", features = ["Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }
 keyring = { version = "3", default-features = false, features = ["windows-native"] }

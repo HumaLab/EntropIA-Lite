@@ -13,6 +13,11 @@ mod rag;
 // Runtime structs remain for Tauri contracts; Lite commands return no-op status.
 mod runtime;
 mod settings;
+// `pub` so the multi-device E2E integration test (`tests/sync_e2e.rs`, DESIGN
+// §13.4) can drive the engine's internal API (run_cycle / ensure_capture /
+// session helpers) directly against a real server. Nothing else in the binary
+// depends on this visibility; the Tauri command surface is unchanged.
+pub mod sync;
 mod transcription;
 
 use db::state::AppDbState;
@@ -263,6 +268,33 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
 
             app.manage(AppDbState::new(ui_conn, worker_conn, db_path.clone()));
 
+            // Sync capture bootstrap (DESIGN §6.1): ensure the sync schema and the
+            // 45 capture triggers AFTER every ensure_*/migrate_* patch above. On a
+            // fresh install the JS migrations haven't run yet, so this only covers
+            // tables that already exist; the frontend re-invokes sync_ensure_capture
+            // after initStore() to cover the rest. Non-fatal — never block startup.
+            match sync::ensure_capture_on_path(&db_path) {
+                Ok(()) => eprintln!("[sync] capture triggers ensured at setup"),
+                Err(error) => eprintln!("[sync] capture bootstrap failed (will retry from UI): {error}"),
+            }
+
+            // Sync blob cleanup (DESIGN §7): remove orphaned `*.part` temp files
+            // under assets/ left by a download interrupted before the atomic
+            // rename. Best-effort — never blocks startup.
+            match sync::blobs::cleanup_orphan_parts(&app_dir) {
+                Ok(0) => {}
+                Ok(removed) => eprintln!("[sync] cleaned {removed} orphan .part file(s)"),
+                Err(error) => eprintln!("[sync] orphan .part cleanup failed: {error}"),
+            }
+
+            // Sync engine (DESIGN §3.1): single long-lived task owning its own
+            // connection. Spawned PAUSED — it runs no cycle until the gate opens
+            // (capture ensured + a session exists). Held in managed state so the
+            // sync_now / sync_status commands can reach it.
+            let sync_engine = sync::engine::start_engine(app.handle().clone(), db_path.clone());
+            app.manage(sync_engine);
+            eprintln!("[sync] engine spawned (gated until capture + session)");
+
             // Dependency manager: kept for source UI contracts; Lite reports no-op dependency state.
             app.manage(deps::DepsState::new());
 
@@ -457,9 +489,32 @@ migrate_legacy_asset_paths(&db_path, &app_dir)
             app_logs::logs_clear,
             app_logs::logs_open_dir,
             open_external_url,
+            sync::sync_ensure_capture,
+            sync::sync_reverify_blobs,
+            sync::session::sync_register_account,
+            sync::session::sync_login,
+            sync::session::sync_logout,
+            sync::commands::sync_status,
+            sync::commands::sync_now,
+            sync::commands::sync_set_auto,
+            sync::commands::sync_list_devices,
+            sync::commands::sync_revoke_device,
+            sync::commands::sync_list_conflicts,
+            sync::commands::sync_ack_conflict,
+            sync::commands::sync_get_usage,
+            sync::commands::sync_delete_account,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application")
+        .run(|app_handle, event| {
+            // Signal the sync engine to tear down cleanly on app exit (DESIGN
+            // §3.1) instead of being killed mid-cycle.
+            if let tauri::RunEvent::Exit = event {
+                if let Some(engine) = app_handle.try_state::<sync::engine::SyncEngine>() {
+                    engine.shutdown();
+                }
+            }
+        });
 }
 
 fn migrate_legacy_app_dir(app_dir: &Path) -> Result<(), String> {
