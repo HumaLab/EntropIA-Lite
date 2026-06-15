@@ -34,7 +34,7 @@
     type SyncUsage,
   } from '$lib/sync'
   import { syncStore } from '$lib/sync-store'
-  import { Button, Card, ConfirmDialog, Input } from '@entropia/ui'
+  import { ActionIcon, Button, Card, ConfirmDialog, Input } from '@entropia/ui'
 
   // First-sync preflight threshold (DESIGN §11): 500 MB of pending blob bytes.
   const PREFLIGHT_THRESHOLD_BYTES = 500 * 1024 * 1024
@@ -350,51 +350,39 @@
 
     {#if !loggedIn}
       <!-- ── Session form (logged out) ── -->
-      <div class="settings__field settings__field--stacked">
-        <label class="settings__label" for="sync-server-url">{t('sync.card.serverUrlLabel')}</label>
-        <input
-          id="sync-server-url"
-          type="url"
-          class="settings__input"
+      <div class="sync-card__form">
+        <Input
+          label={t('sync.card.serverUrlLabel')}
+          type="text"
           bind:value={serverUrl}
           placeholder={t('sync.card.serverUrlPlaceholder')}
+          error={serverUrlTrimmed && !serverUrlValid
+            ? t('sync.card.serverUrlInvalid')
+            : undefined}
         />
-        {#if serverUrlTrimmed && !serverUrlValid}
-          <p class="settings__validation settings__validation--error">
-            {t('sync.card.serverUrlInvalid')}
-          </p>
-        {/if}
-      </div>
 
-      <div class="settings__field settings__field--stacked">
-        <label class="settings__label" for="sync-email">{t('sync.card.emailLabel')}</label>
-        <input
-          id="sync-email"
+        <Input
+          label={t('sync.card.emailLabel')}
           type="email"
-          class="settings__input"
           bind:value={email}
           placeholder={t('sync.card.emailPlaceholder')}
         />
-      </div>
 
-      <div class="settings__field settings__field--stacked">
-        <label class="settings__label" for="sync-password">{t('sync.card.passwordLabel')}</label>
-        <div class="settings__input-row">
-          <input
-            id="sync-password"
+        <div class="sync-card__password">
+          <Input
+            label={t('sync.card.passwordLabel')}
             type={showPassword ? 'text' : 'password'}
-            class="settings__input"
             bind:value={password}
             placeholder={t('sync.card.passwordPlaceholder')}
           />
           <button
-            class="settings__icon-btn"
+            class="sync-card__password-toggle"
             type="button"
             onclick={() => (showPassword = !showPassword)}
             aria-label={showPassword ? t('settings.hideApiKey') : t('settings.showApiKey')}
             title={showPassword ? t('settings.hideApiKey') : t('settings.showApiKey')}
           >
-            {showPassword ? '🙈' : '👁'}
+            <ActionIcon name={showPassword ? 'eye-off' : 'eye'} size={15} />
           </button>
         </div>
       </div>
@@ -430,15 +418,15 @@
           <input type="checkbox" bind:checked={autoEnabled} onchange={handleAutoSyncChange} />
           <span>{t('sync.card.autoSyncToggle')}</span>
         </label>
-        <div class="settings__field settings__field--stacked sync-card__interval">
-          <label class="settings__label" for="sync-auto-interval">
+        <div class="sync-card__interval">
+          <label class="sync-card__label" for="sync-auto-interval">
             {t('sync.card.autoSyncInterval')}
           </label>
           <input
             id="sync-auto-interval"
             type="number"
             min="1"
-            class="settings__input settings__input--select"
+            class="sync-card__number-input"
             bind:value={autoInterval}
             onchange={handleAutoSyncChange}
           />
@@ -650,6 +638,139 @@
 {/if}
 
 <style>
+  /* Self-sufficient layout: SyncSettingsCard is a separate component, so the
+     `settings-*` classes scoped to SettingsView do NOT reach it. Re-declare the
+     layout/typography it relies on here, using the shared design tokens, so the
+     card matches the rest of the Settings surface regardless of where it mounts.
+     Form fields use the @entropia/ui <Input>, which also inherits SettingsView's
+     `:global(.input-field__input)` theming when rendered inside the api tab. */
+  .sync-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+  }
+
+  .settings-card-section__copy {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .settings-card-section__copy h2 {
+    margin: 0;
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: -0.01em;
+  }
+
+  .settings-card-section__copy p {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+  }
+
+  .settings__feedback {
+    margin: 0;
+  }
+
+  .settings__hint {
+    margin: 0;
+    font-size: var(--font-size-sm);
+    color: var(--color-text-secondary);
+    line-height: 1.6;
+  }
+
+  .settings__button-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+  }
+
+  .settings__field--stacked {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+  }
+
+  .sync-card__form {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+  }
+
+  /* Password field: the shared <Input> has no trailing slot, so overlay the
+     show/hide toggle and reserve room for it on the right of the input box. */
+  .sync-card__password {
+    position: relative;
+  }
+
+  .sync-card__password :global(.input-field__input) {
+    padding-right: calc(var(--control-height-md) + var(--space-2));
+  }
+
+  .sync-card__password-toggle {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--control-height-md);
+    height: var(--control-height-md);
+    border: none;
+    background: transparent;
+    color: var(--color-text-secondary);
+    cursor: pointer;
+    border-radius: var(--radius-control);
+    transition: color var(--transition-base);
+  }
+
+  .sync-card__password-toggle:hover {
+    color: var(--color-text-primary);
+  }
+
+  .sync-card__password-toggle:focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  /* Numeric interval field: <Input> doesn't forward onchange, so keep a raw
+     input but mirror the component's token-based styling exactly. */
+  .sync-card__label {
+    display: block;
+    margin-bottom: var(--space-2);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-xs);
+    font-weight: var(--font-weight-medium);
+    color: var(--color-text-secondary);
+  }
+
+  .sync-card__number-input {
+    width: 100%;
+    min-height: var(--control-height-md);
+    padding: 0 var(--space-3);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-sm);
+    color: var(--color-text-primary);
+    background-color: color-mix(in srgb, var(--color-surface-glass) 78%, transparent);
+    border: 1px solid color-mix(in srgb, var(--color-hairline) 78%, transparent);
+    border-radius: var(--radius-input);
+    outline: none;
+    box-sizing: border-box;
+    transition:
+      border-color var(--transition-smooth),
+      box-shadow var(--transition-smooth),
+      background-color var(--transition-smooth);
+  }
+
+  .sync-card__number-input:focus,
+  .sync-card__number-input:focus-visible {
+    border-color: var(--color-accent);
+    box-shadow: var(--focus-ring);
+    background-color: color-mix(in srgb, var(--color-surface-glass) 88%, transparent);
+  }
+
   .sync-card__block {
     display: flex;
     flex-direction: column;
