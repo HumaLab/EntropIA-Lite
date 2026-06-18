@@ -163,7 +163,14 @@ export class AssetRepo {
         COMMIT;
       `)
     } catch (e) {
-      // Transaction failed — rethrow with context
+      // Transaction failed — ensure the explicit BEGIN does not leave the
+      // connection in an open transaction if the backend stops before COMMIT.
+      try {
+        await this.rawClient.execute('ROLLBACK;')
+      } catch {
+        /* rollback is best-effort; preserve the original failure */
+      }
+
       throw new Error(
         `Failed to delete asset cascade for ${id}: ${e instanceof Error ? e.message : String(e)}`
       )

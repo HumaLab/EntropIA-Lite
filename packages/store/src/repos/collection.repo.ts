@@ -133,6 +133,14 @@ export class CollectionRepo {
         COMMIT;
       `)
     } catch (e) {
+      // Transaction failed — ensure the explicit BEGIN does not leave the
+      // connection in an open transaction if the backend stops before COMMIT.
+      try {
+        await this.rawClient.execute('ROLLBACK;')
+      } catch {
+        /* rollback is best-effort; preserve the original failure */
+      }
+
       throw new Error(
         `Failed to delete collection ${id}: ${e instanceof Error ? e.message : String(e)}`
       )
