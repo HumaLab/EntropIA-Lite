@@ -134,7 +134,7 @@ describe('AppShell', () => {
 
     await fireEvent.click(screen.getByRole('link', { name: 'GitHub' }))
     expect(invokeMock).toHaveBeenCalledWith('open_external_url', {
-      url: 'https://github.com/hlabrepo/EntropIA-Lite',
+      url: 'https://github.com/HumaLab/EntropIA-Lite',
     })
 
     await fireEvent.click(screen.getByRole('link', { name: 'HLab' }))

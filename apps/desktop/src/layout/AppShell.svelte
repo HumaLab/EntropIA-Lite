@@ -12,7 +12,7 @@
   import type { Snippet } from 'svelte'
 
   const HLAB_URL = 'https://hlab.com.ar/'
-  const GITHUB_REPO_URL = 'https://github.com/hlabrepo/EntropIA-Lite'
+  const GITHUB_REPO_URL = 'https://github.com/HumaLab/EntropIA-Lite'
 
   let { children }: { children: Snippet } = $props()
   const currentLocale = locale
