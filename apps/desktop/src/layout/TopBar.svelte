@@ -1,15 +1,11 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte'
+  import { onMount } from 'svelte'
   import { getCurrentWindow } from '@tauri-apps/api/window'
   import { navigation } from '$lib/navigation'
   import { getStore } from '$lib/db'
   import { locale, t } from '$lib/i18n'
-  import { isCriticalMissing, onCriticalMissingChange } from '$lib/deps'
-  import { ActionIcon, Button, IconButton, StatusBadge } from '@entropia/ui'
+  import { ActionIcon, Button, IconButton } from '@entropia/ui'
   import type { Collection, Item } from '@entropia/store'
-
-  let hasDepsWarning = $state(isCriticalMissing())
-  const unsubDeps = onCriticalMissingChange((v) => { hasDepsWarning = v })
 
   type AppTheme = 'dark' | 'dim' | 'light'
 
@@ -57,16 +53,8 @@
   const dbBrowserAria = $derived($currentLocale ? translate('topbar.dbBrowserAria') : 'Abrir navegador de base de datos')
   const ragChatTitle = $derived($currentLocale ? translate('topbar.ragChatTitle') : 'Chat de investigación')
   const ragChatAria = $derived($currentLocale ? translate('topbar.ragChatAria') : 'Abrir chat de investigación')
-  const settingsTitle = $derived(
-    hasDepsWarning
-      ? 'Dependencias de IA pendientes - click para configurar'
-      : ($currentLocale ? t('topbar.settingsTitle') : 'Configuración'),
-  )
-  const settingsAria = $derived(
-    hasDepsWarning
-      ? 'Dependencias de IA pendientes'
-      : ($currentLocale ? t('topbar.settingsAria') : 'Abrir configuración'),
-  )
+  const settingsTitle = $derived($currentLocale ? t('topbar.settingsTitle') : 'Configuración')
+  const settingsAria = $derived($currentLocale ? t('topbar.settingsAria') : 'Abrir configuración')
   function minimizeWindow() {
     void getCurrentWindow().minimize()
   }
@@ -113,10 +101,6 @@
 
   onMount(() => {
     applyTheme(readPersistedTheme())
-  })
-
-  onDestroy(() => {
-    unsubDeps()
   })
 
   function buildItemView(item: Item) {
@@ -438,15 +422,6 @@
   </div>
 
   <div class="topbar__actions">
-    {#if hasDepsWarning}
-      <StatusBadge
-        variant="warning"
-        size="sm"
-        class="topbar__deps-badge"
-        title="Dependencias de IA pendientes"
-      >IA</StatusBadge>
-    {/if}
-
     <IconButton
       class="topbar__icon-btn"
       size="md"
@@ -490,9 +465,6 @@
       title={settingsTitle}
     >
       <ActionIcon name="settings" size={16} />
-      {#if hasDepsWarning}
-        <span class="topbar__badge" aria-label="Dependencias pendientes"></span>
-      {/if}
     </IconButton>
 
     <span class="topbar__window-controls" aria-label="Controles de ventana">
@@ -703,24 +675,6 @@
 
   :global(.topbar__icon-btn--settings) {
     position: relative;
-  }
-
-  :global(.topbar__deps-badge) {
-    min-height: 24px;
-    font-size: var(--font-size-2xs);
-  }
-
-  .topbar__badge {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    width: 7px;
-    height: 7px;
-    border-radius: 50%;
-    background: var(--color-warning);
-    border: 1.5px solid var(--surface-toolbar);
-    pointer-events: none;
-    animation: none;
   }
 
   .global-search {
