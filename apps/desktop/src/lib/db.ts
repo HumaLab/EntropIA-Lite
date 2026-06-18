@@ -1,10 +1,11 @@
 import { initStore, type StoreApi } from '@entropia/store'
+import { createTauriDbClient } from './tauri-db-client'
 import { ensureSyncCapture } from '$lib/sync'
 
 let _store: StoreApi | null = null
 
 export async function initDb(): Promise<void> {
-  _store = await initStore()
+  _store = await initStore(createTauriDbClient())
   // JS migrations have finished — install/self-heal the sync capture triggers
   // against the final schema (DESIGN §6.1). Best-effort: a sync bootstrap
   // failure must not block app startup.
