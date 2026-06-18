@@ -57,7 +57,7 @@
   import LogsTab from './LogsTab.svelte'
   import SyncSettingsCard from './SyncSettingsCard.svelte'
 
-  let activeTab = $state<'api' | 'prompts' | 'modelParams' | 'ragParams' | 'logs'>('api')
+  let activeTab = $state<'api' | 'prompts' | 'modelParams' | 'ragParams' | 'sync' | 'logs'>('api')
 
   // State
   let apiKey = $state('')
@@ -715,6 +715,9 @@
       <TabButton active={activeTab === 'ragParams'} onclick={() => (activeTab = 'ragParams')}>
         {t('settings.ragParamsTab')}
       </TabButton>
+      <TabButton active={activeTab === 'sync'} onclick={() => (activeTab = 'sync')}>
+        {t('settings.syncTab')}
+      </TabButton>
       <TabButton active={activeTab === 'logs'} onclick={() => (activeTab = 'logs')}>
         {t('settings.logsTab')}
       </TabButton>
@@ -991,8 +994,6 @@
       </section>
     </Card>
 
-    <SyncSettingsCard />
-
     {:else if activeTab === 'prompts'}
       {#if saveFeedback}
         <p
@@ -1146,6 +1147,9 @@
           </div>
         </section>
       </Card>
+
+    {:else if activeTab === 'sync'}
+    <SyncSettingsCard />
 
     {:else if activeTab === 'logs'}
     <LogsTab />
