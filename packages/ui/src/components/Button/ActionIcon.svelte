@@ -1,7 +1,5 @@
 <script lang="ts">
   import {
-    Bell,
-    Check,
     ChevronDown,
     ChevronLeft,
     ChevronRight,
@@ -51,11 +49,7 @@
   let { name, size = 16 }: { name: ActionIconName; size?: number } = $props()
 </script>
 
-{#if name === 'bell'}
-  <Bell {size} aria-hidden="true" />
-{:else if name === 'check'}
-  <Check {size} aria-hidden="true" />
-{:else if name === 'chevron-left'}
+{#if name === 'chevron-left'}
   <ChevronLeft {size} aria-hidden="true" />
 {:else if name === 'chevron-right'}
   <ChevronRight {size} aria-hidden="true" />

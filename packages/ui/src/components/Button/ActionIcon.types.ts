@@ -1,6 +1,4 @@
 export type ActionIconName =
-  | 'bell'
-  | 'check'
   | 'chevron-left'
   | 'chevron-right'
   | 'chevron-up'
