@@ -603,7 +603,10 @@ mod tests {
             )
             .expect("count updates");
 
-        assert_eq!(deletes, 0, "re-embedding must not emit a tombstone (op 'D')");
+        assert_eq!(
+            deletes, 0,
+            "re-embedding must not emit a tombstone (op 'D')"
+        );
         assert!(updates >= 1, "re-embedding must emit an UPDATE (op 'U')");
     }
 }
