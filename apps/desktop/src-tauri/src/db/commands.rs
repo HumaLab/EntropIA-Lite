@@ -599,6 +599,15 @@ fn validate_sql_batch(sql: &str) -> Result<(), String> {
 mod tests {
     use super::*;
 
+    #[test]
+    fn validate_sql_execute_accepts_rollback_but_rejects_trailing_semicolon() {
+        // #23: the cascade-delete repos must send 'ROLLBACK' (no ';'). 'ROLLBACK;'
+        // is rejected by the real validator, so the repo's catch silently swallows
+        // it and the transaction stays open — the bug this test guards against.
+        assert!(validate_sql_execute("ROLLBACK").is_ok());
+        assert!(validate_sql_execute("ROLLBACK;").is_err());
+    }
+
     fn setup_db_browser_test_db() -> Connection {
         let conn = Connection::open_in_memory().expect("in-memory db should open");
         conn.execute_batch(

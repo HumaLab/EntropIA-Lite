@@ -136,7 +136,7 @@ export class CollectionRepo {
       // Transaction failed — ensure the explicit BEGIN does not leave the
       // connection in an open transaction if the backend stops before COMMIT.
       try {
-        await this.rawClient.execute('ROLLBACK;')
+        await this.rawClient.execute('ROLLBACK')
       } catch {
         /* rollback is best-effort; preserve the original failure */
       }
