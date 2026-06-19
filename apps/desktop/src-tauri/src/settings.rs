@@ -281,7 +281,20 @@ pub fn get_setting(conn: &rusqlite::Connection, key: &str) -> Option<String> {
             |row| row.get::<_, String>(0),
         )
         .ok()?;
-    resolve_secret_ref(key, &value).or(Some(value))
+    let resolved = resolve_secret_ref(key, &value);
+    secret_ref_fallback(key, value, resolved)
+}
+
+/// Decide the effective setting value after attempting to resolve a secret ref.
+/// A secret key whose keyring entry can't be resolved must NOT fall back to the raw
+/// `secret_ref:` placeholder — it would be sent as a Bearer token and 401. Returns
+/// `None` so callers treat the credential as missing (#25).
+fn secret_ref_fallback(key: &str, value: String, resolved: Option<String>) -> Option<String> {
+    match resolved {
+        Some(resolved) => Some(resolved),
+        None if is_secret_key(key) && value.starts_with(SECRET_REF_PREFIX) => None,
+        None => Some(value),
+    }
 }
 
 pub fn migrate_legacy_default_openrouter_model(conn: &rusqlite::Connection) -> Result<(), String> {
@@ -317,6 +330,34 @@ mod tests {
         )
         .expect("settings table");
         conn
+    }
+
+    #[test]
+    fn secret_ref_fallback_drops_unresolved_secret_ref_but_keeps_real_values() {
+        // #25: the post-resolve decision, tested without the OS keyring. An
+        // unresolved secret ref must yield None — never the raw placeholder, which
+        // would be sent verbatim as a Bearer token and 401.
+        let ref_val = || "secret_ref:openrouter_api_key".to_string();
+        // Unresolved secret ref → None (the bug was returning the raw placeholder).
+        assert_eq!(
+            secret_ref_fallback("openrouter_api_key", ref_val(), None),
+            None
+        );
+        // Resolved from the keyring → the real key.
+        assert_eq!(
+            secret_ref_fallback("openrouter_api_key", ref_val(), Some("sk-real".to_string())),
+            Some("sk-real".to_string())
+        );
+        // Non-secret key → value passes through unchanged.
+        assert_eq!(
+            secret_ref_fallback("openrouter_model", "anthropic/claude".to_string(), None),
+            Some("anthropic/claude".to_string())
+        );
+        // Secret key holding a real key stored directly (not a ref) → kept.
+        assert_eq!(
+            secret_ref_fallback("openrouter_api_key", "sk-stored".to_string(), None),
+            Some("sk-stored".to_string())
+        );
     }
 
     #[test]
