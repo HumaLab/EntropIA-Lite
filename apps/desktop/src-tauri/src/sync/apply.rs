@@ -879,19 +879,26 @@ pub fn apply_page(
 ) -> Result<PageOutcome, String> {
     let ordered = order_page(rows);
 
-    // First attempt: park nothing up front (empty violator set).
-    let violators: HashSet<(String, String)> = HashSet::new();
-    match try_apply_page(conn, ctx, &ordered, next_since, &violators) {
-        Ok(outcome) => Ok(outcome),
-        Err(PageError::Sql(msg)) => Err(msg),
-        Err(PageError::CommitFkViolation { offending }) => {
-            // Re-apply the page minus the FK violators, parking them.
-            try_apply_page(conn, ctx, &ordered, next_since, &offending).map_err(|e| match e {
-                PageError::Sql(msg) => msg,
-                PageError::CommitFkViolation { .. } => {
-                    "[sync] page still violates FK after parking violators".to_string()
+    // Iteratively park FK violators until the page commits or a round finds no
+    // NEW violator. A single round is insufficient for a multi-level FK chain: on
+    // a bulk first pull a child and its grandchild can both land in one page while
+    // their common ancestor arrives in a later page — parking the child surfaces
+    // the grandchild as a fresh violator on re-apply. Each round is a
+    // self-contained BEGIN/COMMIT, so accumulating the park set and retrying is
+    // safe (parked rows are persisted into sync_pending_rows for a later page).
+    let mut violators: HashSet<(String, String)> = HashSet::new();
+    loop {
+        match try_apply_page(conn, ctx, &ordered, next_since, &violators) {
+            Ok(outcome) => return Ok(outcome),
+            Err(PageError::Sql(msg)) => return Err(msg),
+            Err(PageError::CommitFkViolation { offending }) => {
+                let before = violators.len();
+                violators.extend(offending);
+                if violators.len() == before {
+                    // No new violator parked this round → genuinely unresolvable.
+                    return Err("[sync] page still violates FK after parking violators".to_string());
                 }
-            })
+            }
         }
     }
 }

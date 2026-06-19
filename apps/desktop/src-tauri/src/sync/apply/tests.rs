@@ -478,6 +478,70 @@ fn child_parked_until_parent_arrives_then_drained() {
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM sync_pending_rows"), 0);
 }
 
+// Multi-level FK chain (collections←items←entities): a child and its grandchild
+// land in one page while their common ancestor arrives later. Parking the child
+// surfaces the grandchild as a fresh violator → only the iterative park loop (#FK)
+// drains the whole subtree in one page instead of erroring the page.
+#[test]
+fn multi_level_fk_chain_parks_whole_subtree_in_one_page() {
+    let conn = capturing_db();
+    conn.execute_batch("DELETE FROM sync_oplog;").unwrap();
+    let dir = tmp_app_dir();
+    let mut ctx = ApplyContext::new(dir.path());
+
+    let page = vec![
+        upsert_row(
+            "items",
+            "i1",
+            60,
+            json!({"id":"i1","title":"Orphan","collection_id":"c1","created_at":1,"updated_at":1}),
+        ),
+        upsert_row(
+            "entities",
+            "en1",
+            61,
+            json!({"id":"en1","item_id":"i1","entity_type":"person","value":"Belgrano","created_at":1}),
+        ),
+    ];
+    let out =
+        apply_page(&conn, &mut ctx, &page, 61).expect("multi-level FK chain must park, not error");
+    assert_eq!(
+        out.applied, 0,
+        "nothing applies while the ancestor is missing"
+    );
+    assert_eq!(
+        out.parked, 2,
+        "the whole subtree (item + entity) parks in one page"
+    );
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM sync_pending_rows"), 2);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM items"), 0);
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM entities"), 0);
+
+    // The ancestor lands; the parked subtree drains over successive passes.
+    let page2 = vec![upsert_row(
+        "collections",
+        "c1",
+        62,
+        json!({"id":"c1","name":"C","created_at":1,"updated_at":1}),
+    )];
+    apply_page(&conn, &mut ctx, &page2, 62).expect("apply ancestor page");
+    for _ in 0..5 {
+        if retry_pending_rows(&conn, &mut ctx, false).expect("retry") == 0 {
+            break;
+        }
+    }
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM sync_pending_rows"),
+        0,
+        "subtree fully drains once the ancestor exists"
+    );
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM items WHERE id='i1'"), 1);
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM entities WHERE id='en1'"),
+        1
+    );
+}
+
 #[test]
 fn parked_child_journals_parent_deleted_only_when_parent_confirmed_tombstoned() {
     let conn = capturing_db();
