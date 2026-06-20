@@ -646,7 +646,8 @@ mod tests {
         // El catch del repo (Lite) manda 'ROLLBACK' por db_execute.
         validate_sql_execute("ROLLBACK")
             .expect("Lite manda 'ROLLBACK' sin ';': el validador de db_execute lo acepta");
-        conn.execute("ROLLBACK", []).expect("el ROLLBACK se ejecuta");
+        conn.execute("ROLLBACK", [])
+            .expect("el ROLLBACK se ejecuta");
 
         assert!(
             conn.is_autocommit(),
