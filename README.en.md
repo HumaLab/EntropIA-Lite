@@ -20,7 +20,7 @@ EntropIA Lite is available as a `.deb` package for Linux, in addition to the `.m
 
 ## Quick Path
 
-1. Install the app from the internal installer you received.
+1. Download the installer (`.msi` or `.exe`) from the [Releases page](https://github.com/HumaLab/EntropIA-Lite/releases), or use the internal installer you received.
 2. Open Settings and add the API keys for the providers you want to use.
 3. Import images, PDFs, or audio.
 4. Run OCR, transcription, embeddings, NER, summaries, or triples depending on the configured keys.
