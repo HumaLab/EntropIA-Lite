@@ -4,11 +4,19 @@
 
 EntropIA Lite is a desktop app for organizing corpora, processing documents, and enriching sources with AI through remote providers. It keeps the EntropIA experience where it makes sense, but removes the heavy local stack: it does not download or run local models for LLMs, embeddings, NER, OCR, or transcription.
 
-Current version: `1.0.3`.
+Current version: `1.0.5`.
 
 ## What's New
 
-This release introduces a conversational chat over your collections: you can now ask EntropIA Lite about the content of your transcriptions and documents and get answers drawn from a hybrid semantic-and-keyword search across your knowledge base. Conversations are saved and can be resumed from a history sidebar. The chat now also draws on text extracted from your documents via OCR, and a new settings tab lets you fine-tune the retrieval parameters. This version further adds a per-collection text analysis panel with a word cloud, and improves how long texts are processed so that embedding generation, entity recognition, and relation extraction are more stable and reliable. Rounding out the release is a set of visual refinements across the interface along with usability fixes, including correct handling of input-method (IME) composition while typing. EntropIA Lite is now also available as a `.deb` package for Linux, in addition to the `.msi` and `.exe` installers for Windows.
+The most important additions since the README was last updated:
+
+- **Multi-device cloud sync:** sync your collections across devices, with a Sync card in Settings (preflight and conflict resolution) and a status indicator in the bottom bar.
+- **Notification center:** a bell in the top bar gathers alerts, including plan or subscription changes.
+- **Map of geographic entities:** place entities are geocoded via Nominatim/OpenStreetMap and shown on a map within the item.
+
+Version `1.0.5` focuses on stabilizing and hardening all of the above: sync robustness and security fixes (among them, no longer leaking unresolved secret references), a global 1 request/s limit against Nominatim when geocoding, and improved color contrast (WCAG AA) in the light theme.
+
+EntropIA Lite is available as a `.deb` package for Linux, in addition to the `.msi` and `.exe` installers for Windows.
 
 ## Quick Path
 
@@ -60,6 +68,8 @@ Works today for:
 - searching through FTS and similarity when embeddings have been generated;
 - chatting with your collections through a RAG chat with persistent history;
 - analyzing a collection's text with a metrics panel and word cloud;
+- syncing your collections across devices with conflict resolution (cloud sync);
+- placing detected geographic entities on a map, geocoded via Nominatim/OpenStreetMap;
 - reviewing results, metadata, notes, and annotations in the UI.
 
 Out of scope for Lite:
@@ -126,4 +136,4 @@ Do not run `tauri build` unless you actually want to generate a local package.
 
 ## Status
 
-EntropIA Lite is at version `1.0.3`. It is usable for API-only document workflows, but should still be treated as beta: UX, data, and provider details may change.
+EntropIA Lite is at version `1.0.5`. It is usable for API-only document workflows, but should still be treated as beta: UX, data, and provider details may change.

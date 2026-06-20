@@ -4,11 +4,19 @@ Español | [English](README.en.md)
 
 EntropIA Lite es una app desktop para organizar corpus, procesar documentos y enriquecer fuentes con IA usando proveedores remotos. Conserva la experiencia de EntropIA donde tiene sentido, pero elimina el stack local pesado: no descarga ni ejecuta modelos locales de LLM, embeddings, NER, OCR o transcripción.
 
-Versión actual: `1.0.3`.
+Versión actual: `1.0.5`.
 
 ## Novedades de esta versión
 
-Esta versión incorpora un chat conversacional sobre tus colecciones: ahora podés preguntarle a EntropIA Lite acerca del contenido de tus transcripciones y documentos, con respuestas que combinan búsqueda semántica y por palabras clave sobre tu base de conocimiento. Las conversaciones quedan guardadas y se pueden retomar desde un historial lateral. El chat también considera el texto extraído por OCR de tus documentos, y se sumó una pestaña de ajustes para afinar los parámetros de recuperación. Estrenamos además un panel de análisis de texto por colección con nube de palabras, y mejoramos el procesamiento de textos largos para que la generación de embeddings, el reconocimiento de entidades y la extracción de relaciones resulten más estables y confiables. Completan la versión una serie de refinamientos visuales en la interfaz y correcciones de usabilidad, como el manejo correcto de la escritura con métodos de entrada (IME). EntropIA Lite ahora también está disponible como paquete `.deb` para Linux, además de los instaladores `.msi` y `.exe` para Windows.
+Lo más importante incorporado desde la última actualización del README:
+
+- **Sincronización cloud multi-dispositivo:** sincronizá tus colecciones entre equipos, con una card de Sincronización en Configuración (preflight y resolución de conflictos) y un indicador de estado en la barra inferior.
+- **Centro de notificaciones:** una campana en la barra superior concentra los avisos, incluido el cambio de plan o suscripción.
+- **Mapa de entidades geográficas:** las entidades de lugar se geocodifican vía Nominatim/OpenStreetMap y se muestran sobre un mapa dentro del ítem.
+
+La versión `1.0.5` se concentra en estabilizar y endurecer todo eso: robustez y seguridad en la sincronización (entre otras, dejar de filtrar referencias a secretos sin resolver), un límite global de 1 pedido/s contra Nominatim al geocodificar, y mejor contraste de color (WCAG AA) en el tema claro.
+
+EntropIA Lite está disponible como paquete `.deb` para Linux, además de los instaladores `.msi` y `.exe` para Windows.
 
 ## Ruta rápida
 
@@ -60,6 +68,8 @@ Funciona hoy para:
 - buscar por FTS y similitud cuando hay embeddings generados;
 - conversar con tus colecciones mediante un chat RAG con historial persistente;
 - analizar el texto de una colección con un panel de métricas y nube de palabras;
+- sincronizar tus colecciones entre dispositivos con resolución de conflictos (cloud sync);
+- ubicar en un mapa las entidades geográficas detectadas, geocodificadas vía Nominatim/OpenStreetMap;
 - revisar resultados, metadata, notas y anotaciones desde la UI.
 
 Fuera de alcance para Lite:
@@ -126,4 +136,4 @@ No ejecutes `tauri build` salvo que realmente quieras generar un paquete local.
 
 ## Estado
 
-EntropIA Lite está en la versión `1.0.3`. Es usable para flujo documental API-only, pero todavía conviene tratarlo como beta: pueden cambiar detalles de UX, datos y proveedores.
+EntropIA Lite está en la versión `1.0.5`. Es usable para flujo documental API-only, pero todavía conviene tratarlo como beta: pueden cambiar detalles de UX, datos y proveedores.
