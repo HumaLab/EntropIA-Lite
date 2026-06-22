@@ -1,5 +1,6 @@
 <script lang="ts">
   import { EntityViewer, MapViewer, StatusBadge, type MapMarker, type StatusBadgeVariant } from '@entropia/ui'
+  import GlossaryHelpBtn from '$lib/components/GlossaryHelpBtn.svelte'
   import type { Entity } from '@entropia/ui'
   import type { I18nKey, I18nParams } from '$lib/i18n'
   import type { ItemNlpState } from '$lib/nlp'
@@ -101,6 +102,7 @@
           {translate('item.indexAction')}
           <StatusBadge variant={getJobStatusBadgeVariant(nlpState.fts)} size="sm" class="nlp-badge">{nlpState.fts}</StatusBadge>
         </button>
+        <GlossaryHelpBtn id="indexacion-fts" />
 
         <button
           class="nlp-btn"
@@ -110,6 +112,7 @@
           {translate('item.embedAction')}
           <StatusBadge variant={getJobStatusBadgeVariant(nlpState.embed)} size="sm" class="nlp-badge">{nlpState.embed}</StatusBadge>
         </button>
+        <GlossaryHelpBtn id="embeddings" />
 
         <button
           class="nlp-btn"
@@ -119,6 +122,7 @@
           {translate('item.nerAction')}
           <StatusBadge variant={getJobStatusBadgeVariant(nlpState.ner)} size="sm" class="nlp-badge">{nlpState.ner === 'done' && nlpState.entityCount === 0 ? `${nlpState.ner} · 0` : nlpState.ner}</StatusBadge>
         </button>
+        <GlossaryHelpBtn id="entidades" />
 
         <button
           class="nlp-btn"
@@ -128,6 +132,7 @@
           {translate('item.triplesAction')}
           <StatusBadge variant={getJobStatusBadgeVariant(nlpState.triples)} size="sm" class="nlp-badge">{nlpState.triples}</StatusBadge>
         </button>
+        <GlossaryHelpBtn id="triples" />
       </div>
 
       {#if nlpState.errors?.embed}
